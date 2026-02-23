@@ -7,6 +7,15 @@ description: Read-only Azure DevOps and GitHub investigation skill for code sear
 
 Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow workflow and evidence-first outputs.
 
+## CLI Invocation
+
+- Use `smith` from `PATH` as the default command entrypoint.
+- Treat every command in this file as arguments to `smith`.
+  - Example: `smith code search "grafana"`
+- Only if `smith` is unavailable in the shell, fallback to:
+  - `python3 /Users/fsuarezrosario/.codex/skills/smith/scripts/smith_cli.py ...`
+- Do not use script-path invocation when `smith` is available.
+
 ## Trigger Decision
 
 ### Use smith when
@@ -58,29 +67,22 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 
 ## Investigation Algorithm
 
-1. Preflight.
-- Ensure `AZURE_DEVOPS_ORG_URL` is set.
-- Ensure `GITHUB_ORG` is set when provider includes GitHub.
-- Ensure `az login` is valid for the target org.
-- Ensure `gh auth status` is valid when provider includes GitHub and `GITHUB_TOKEN` is not set.
-- Capture initial scope (project or repo if provided).
+1. Discovery.
+- Run `smith code search "..."` to find candidate repos and paths.
 
-2. Discovery.
-- Run `code search "..."` to find candidate repos and paths.
+2. Structure map.
+- Run `smith code grep ... --output-mode files_with_matches` to map repository layout for the relevant path.
 
-3. Structure map.
-- Run `code grep --output-mode files_with_matches` to map repository layout for the relevant path.
-
-4. Focused extraction.
-- Run `code grep --output-mode content` with `--path`, `--glob`, and regex refinement.
+3. Focused extraction.
+- Run `smith code grep ... --output-mode content` with `--path`, `--glob`, and regex refinement.
 - Use `--from-line` and `--to-line` for targeted pagination.
 
-5. Corroboration (optional).
+4. Corroboration (optional).
 - Use `pr list`, `pr get`, and `pr threads` when changes, ownership context, or review discussion context matters.
 - Use `build logs` and `build grep` when CI failure context matters.
 - Use `board search`, `board ticket`, or `board mine` when work-item linkage matters.
 
-6. Final answer.
+5. Final answer.
 - Provide concise conclusion plus evidence paths.
 - If unresolved, state "not enough evidence" and provide the next narrowing command.
 
