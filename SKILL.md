@@ -49,9 +49,17 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - If information remains unresolved after search and grep, say so explicitly.
 
 3. Use broad-to-narrow exploration.
-- Start broad with `code search`.
-- Map structure with `code grep --output-mode files_with_matches`.
-- Extract proof with focused `code grep --output-mode content`.
+- Start broad with an explicit query:
+  - `smith code search "<query>"`
+- Map structure with provider-positional grep (required args are mandatory):
+  - Azure DevOps: `smith code grep azdo <project> <repo> ".*" --output-mode files_with_matches`
+  - GitHub: `smith code grep github <repo> ".*" --output-mode files_with_matches`
+- Extract proof with focused provider-positional grep:
+  - Azure DevOps: `smith code grep azdo <project> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+  - GitHub: `smith code grep github <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+- Important:
+  - For `code grep`, provider is positional (`azdo|github`).
+  - For Azure DevOps grep, both `<project>` and `<repo>` are required.
 
 4. Prefer Git evidence over assumptions.
 - Treat repository files as source of truth.
@@ -137,6 +145,22 @@ Stop and report unresolved when all are true:
   - `board mine github <repo> [--include-closed] [--skip N] [--take N] [--format text|json]`
   - `stories ticket azdo <project> <id> [--format text|json]`
 
+## Defaults and Tunables
+
+Command defaults:
+- `code search`: default `--provider all`, `--skip 0`, `--take 20`, `--format text`.
+- `code grep`: default pattern `.*`, default path `/`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
+- `pr list`: default statuses `active,completed,abandoned`, default `--skip 0`, default `--take 100`, drafts included unless `--exclude-drafts`.
+- `build grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
+- `board search`: default `--skip 0`, default `--take 20`.
+- `board mine`: default `--skip 0`, default `--take 20`, closed items excluded unless `--include-closed`.
+- `projects list`, `repos list`, `pr get`, `pr threads`, `build logs`, `board ticket`, `board list`: default `--format text`.
+
+Behavior defaults:
+- If `--branch` is omitted, provider default branch is used.
+- If `from_line` and `to_line` are omitted, full content range is used.
+- Single-provider commands are provider-positional; only `code search` supports fanout (`--provider all`).
+
 ## Auth and Config
 
 - Required env var:
@@ -164,22 +188,6 @@ Auth model is single-user only:
 - Retry once on 401/403 with a fresh token.
 - If auth still fails, run `az login` and retry.
 - For GitHub, use `GITHUB_TOKEN` first and fallback to `gh auth token`.
-
-## Defaults and Tunables
-
-Command defaults:
-- `code search`: default `--provider all`, `--skip 0`, `--take 20`, `--format text`.
-- `code grep`: default pattern `.*`, default path `/`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
-- `pr list`: default statuses `active,completed,abandoned`, default `--skip 0`, default `--take 100`, drafts included unless `--exclude-drafts`.
-- `build grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
-- `board search`: default `--skip 0`, default `--take 20`.
-- `board mine`: default `--skip 0`, default `--take 20`, closed items excluded unless `--include-closed`.
-- `projects list`, `repos list`, `pr get`, `pr threads`, `build logs`, `board ticket`, `board list`: default `--format text`.
-
-Behavior defaults:
-- If `--branch` is omitted, provider default branch is used.
-- If `from_line` and `to_line` are omitted, full content range is used.
-- Single-provider commands are provider-positional; only `code search` supports fanout (`--provider all`).
 
 ## Integrations
 
