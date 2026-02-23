@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import os
 import re
+import subprocess
 from datetime import UTC, datetime
-from typing import Any, Literal
-from urllib.parse import urlparse
+from typing import Any, Callable, Literal
+from urllib.parse import quote, urlparse
 
 import requests
 from azure.identity import DefaultAzureCredential
@@ -18,6 +20,8 @@ from smith_format import (
 )
 
 ADO_SCOPE = "499b84ac-1321-427f-aa17-267ca6975798/.default"
+GITHUB_DEFAULT_API_URL = "https://api.github.com"
+GITHUB_DEFAULT_API_VERSION = "2022-11-28"
 
 
 class ThanosLocalError(Exception):
@@ -59,12 +63,19 @@ class ThanosLocalClient:
         self.max_output_chars = int(
             os.getenv("THANOS_LOCAL_MAX_OUTPUT_CHARS", max_output_chars or 10240)
         )
+        self.github_org = os.getenv("GITHUB_ORG", "").strip()
+        self.github_api_url = os.getenv("GITHUB_API_URL", GITHUB_DEFAULT_API_URL).rstrip("/")
+        self.github_api_version = os.getenv("GITHUB_API_VERSION", GITHUB_DEFAULT_API_VERSION)
+        self.github_timeout_seconds = int(
+            os.getenv("GITHUB_TIMEOUT_SECONDS", timeout_seconds or self.timeout_seconds)
+        )
 
         self._credential = credential or DefaultAzureCredential(
             exclude_interactive_browser_credential=True
         )
         self._session = session or requests.Session()
         self._access_token: str | None = None
+        self._github_token: str | None = None
 
         self.org_name = self._extract_org_name(self.org_url)
 
@@ -200,6 +211,282 @@ class ThanosLocalClient:
             expect_json=False,
         )
         return str(response)
+
+    @staticmethod
+    def _normalize_provider(provider: str | None) -> str:
+        normalized = (provider or "azdo").strip().lower()
+        if normalized not in {"azdo", "github", "all"}:
+            raise ValueError("provider must be one of: azdo, github, all")
+        return normalized
+
+    @classmethod
+    def _resolve_providers(cls, provider: str | None) -> list[str]:
+        normalized = cls._normalize_provider(provider)
+        if normalized == "all":
+            return ["github", "azdo"]
+        return [normalized]
+
+    @classmethod
+    def _normalize_single_provider(cls, provider: str | None, *, command: str) -> str:
+        normalized = cls._normalize_provider(provider)
+        if normalized == "all":
+            raise ValueError(f"{command} does not support provider 'all'. Use azdo or github.")
+        return normalized
+
+    def _provider_warnings_and_partial(self, payload: Any) -> tuple[list[str], bool]:
+        if not isinstance(payload, dict):
+            return [], False
+        warnings = payload.get("warnings")
+        if isinstance(warnings, list):
+            warning_list = [str(item) for item in warnings if str(item).strip()]
+        else:
+            warning_list = []
+        partial = bool(payload.get("partial", False))
+        return warning_list, partial
+
+    def _provider_entry_success(self, payload: Any) -> dict[str, Any]:
+        warnings, partial = self._provider_warnings_and_partial(payload)
+        return {
+            "ok": True,
+            "data": payload,
+            "warnings": warnings,
+            "partial": partial,
+            "error": None,
+        }
+
+    @staticmethod
+    def _provider_entry_error(code: str, message: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "data": None,
+            "warnings": [],
+            "partial": False,
+            "error": {"code": code, "message": message},
+        }
+
+    def _fanout(
+        self,
+        *,
+        provider: str,
+        operations: dict[str, Callable[[], Any]],
+    ) -> dict[str, Any]:
+        requested_provider = self._normalize_provider(provider)
+        providers = self._resolve_providers(requested_provider)
+
+        provider_results: dict[str, dict[str, Any]] = {}
+        succeeded: list[str] = []
+        failed: list[str] = []
+
+        for provider_name in providers:
+            operation = operations.get(provider_name)
+            if operation is None:
+                provider_results[provider_name] = self._provider_entry_error(
+                    "unsupported_provider",
+                    f"Provider '{provider_name}' is not supported for this command.",
+                )
+                failed.append(provider_name)
+                continue
+
+            try:
+                payload = operation()
+                provider_results[provider_name] = self._provider_entry_success(payload)
+                succeeded.append(provider_name)
+            except ValueError as exc:
+                provider_results[provider_name] = self._provider_entry_error(
+                    "invalid_args",
+                    str(exc),
+                )
+                failed.append(provider_name)
+            except ThanosLocalAuthError as exc:
+                provider_results[provider_name] = self._provider_entry_error(
+                    "auth_failure",
+                    str(exc),
+                )
+                failed.append(provider_name)
+            except ThanosLocalApiError as exc:
+                provider_results[provider_name] = self._provider_entry_error(
+                    "api_error",
+                    str(exc),
+                )
+                failed.append(provider_name)
+
+        if not succeeded:
+            error_codes = [
+                provider_results[name]["error"]["code"]
+                for name in failed
+                if provider_results.get(name, {}).get("error")
+            ]
+            messages = [
+                f"{name}: {provider_results[name]['error']['message']}"
+                for name in failed
+                if provider_results.get(name, {}).get("error")
+            ]
+            combined = "; ".join(messages) if messages else "All provider requests failed."
+
+            if error_codes and all(code == "auth_failure" for code in error_codes):
+                raise ThanosLocalAuthError(combined)
+            if len(providers) == 1 and any(code == "invalid_args" for code in error_codes):
+                raise ValueError(combined)
+            raise ThanosLocalApiError(combined)
+
+        return {
+            "providers": provider_results,
+            "summary": {
+                "requested_provider": requested_provider,
+                "queried": providers,
+                "succeeded": succeeded,
+                "failed": failed,
+            },
+        }
+
+    def _require_github_org(self) -> str:
+        org = (self.github_org or "").strip()
+        if not org:
+            raise ValueError("Missing GITHUB_ORG. Example: export GITHUB_ORG=<org>")
+        return org
+
+    def _get_github_token(self, *, force_refresh: bool = False) -> str:
+        if self._github_token and not force_refresh:
+            return self._github_token
+
+        env_token = os.getenv("GITHUB_TOKEN", "").strip()
+        if env_token:
+            self._github_token = env_token
+            return self._github_token
+
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "token"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except Exception as exc:
+            raise ThanosLocalAuthError(
+                "Failed to acquire GitHub token. Set GITHUB_TOKEN or run `gh auth login`."
+            ) from exc
+
+        token = result.stdout.strip()
+        if not token:
+            raise ThanosLocalAuthError(
+                "GitHub token is empty. Set GITHUB_TOKEN or run `gh auth login`."
+            )
+
+        self._github_token = token
+        return self._github_token
+
+    def _github_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        expect_json: bool = True,
+    ) -> Any:
+        url = path if path.startswith("http") else f"{self.github_api_url}{path}"
+        request_headers = dict(headers or {})
+        request_headers.setdefault("Accept", "application/vnd.github+json")
+        request_headers.setdefault("X-GitHub-Api-Version", self.github_api_version)
+        request_headers["Authorization"] = f"Bearer {self._get_github_token()}"
+
+        response = self._session.request(
+            method,
+            url,
+            params=params,
+            json=json_body,
+            headers=request_headers,
+            timeout=self.github_timeout_seconds,
+        )
+
+        if response.status_code in (401, 403):
+            retry_headers = dict(request_headers)
+            retry_headers["Authorization"] = f"Bearer {self._get_github_token(force_refresh=True)}"
+            response = self._session.request(
+                method,
+                url,
+                params=params,
+                json=json_body,
+                headers=retry_headers,
+                timeout=self.github_timeout_seconds,
+            )
+
+        if response.status_code in (401, 403):
+            raise ThanosLocalAuthError(
+                f"GitHub authentication rejected with HTTP {response.status_code}. "
+                "Set GITHUB_TOKEN or run `gh auth login` and retry."
+            )
+
+        if response.status_code == 429:
+            raise ThanosLocalApiError(
+                "GitHub API rate limited (HTTP 429). Narrow scope and retry.",
+                status_code=response.status_code,
+            )
+
+        if not 200 <= response.status_code < 300:
+            text = (response.text or "").strip()
+            if len(text) > 500:
+                text = text[:500] + "..."
+            raise ThanosLocalApiError(
+                f"HTTP {response.status_code} for {url}: {text}",
+                status_code=response.status_code,
+            )
+
+        if not expect_json:
+            return response.text
+
+        if response.status_code == 204:
+            return {}
+
+        body = response.text or ""
+        if not body.strip():
+            return {}
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ThanosLocalApiError(
+                f"Expected JSON response from {url} but received invalid JSON"
+            ) from exc
+
+    def _github_request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        data = self._github_request(
+            method,
+            path,
+            params=params,
+            json_body=json_body,
+            headers=headers,
+            expect_json=True,
+        )
+        if isinstance(data, dict):
+            return data
+        raise ThanosLocalApiError(f"Expected dictionary response from {path}")
+
+    def _github_request_text(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> str:
+        data = self._github_request(
+            method,
+            path,
+            params=params,
+            headers=headers,
+            expect_json=False,
+        )
+        return str(data)
 
     def _almsearch_url(self, suffix: str) -> str:
         return f"https://almsearch.dev.azure.com/{self.org_name}{suffix}"
@@ -1194,3 +1481,1164 @@ class ThanosLocalClient:
             "results": aggregated,
             "warnings": warnings,
         }
+
+    def _github_repo_prefix(self, repo: str) -> str:
+        org = self._require_github_org()
+        return f"/repos/{quote(org, safe='')}/{quote(repo, safe='')}"
+
+    def _github_get_paginated_list(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        page = 1
+        per_page = 100
+        output: list[dict[str, Any]] = []
+        while True:
+            query = dict(params or {})
+            query["per_page"] = per_page
+            query["page"] = page
+            data = self._github_request("GET", path, params=query, expect_json=True)
+            if not isinstance(data, list):
+                break
+            page_items = [item for item in data if isinstance(item, dict)]
+            if not page_items:
+                break
+            output.extend(page_items)
+            if limit is not None and len(output) >= limit:
+                return output[:limit]
+            if len(page_items) < per_page:
+                break
+            page += 1
+        return output
+
+    def _github_get_repository_default_branch(self, repo: str) -> str:
+        data = self._github_request_json("GET", f"{self._github_repo_prefix(repo)}")
+        branch = str(data.get("default_branch") or "").strip()
+        return branch or "main"
+
+    def _github_list_projects(self) -> list[dict[str, Any]]:
+        org = self._require_github_org()
+        return [
+            {
+                "id": org,
+                "name": org,
+                "state": "active",
+                "url": f"https://github.com/{org}",
+            }
+        ]
+
+    def _github_list_repositories(self) -> list[dict[str, Any]]:
+        org = self._require_github_org()
+        repos = self._github_get_paginated_list(f"/orgs/{quote(org, safe='')}/repos")
+        return [
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "defaultBranch": item.get("default_branch"),
+                "webUrl": item.get("html_url"),
+            }
+            for item in repos
+            if isinstance(item, dict)
+        ]
+
+    def _github_search_code(
+        self,
+        *,
+        query: str,
+        project: str | None = None,
+        repos: list[str] | None = None,
+        skip: int = 0,
+        take: int = 20,
+    ) -> dict[str, Any]:
+        org = self._require_github_org()
+        effective_repos = [item for item in (repos or []) if item]
+        if project and not effective_repos:
+            effective_repos = [project]
+
+        search_targets = effective_repos or [None]
+        desired = max(1, skip + take)
+        all_items: list[dict[str, Any]] = []
+        total_count = 0
+
+        for target_repo in search_targets:
+            page = 1
+            per_page = 100
+            while len(all_items) < desired:
+                qualifiers = [query]
+                if target_repo:
+                    qualifiers.append(f"repo:{org}/{target_repo}")
+                else:
+                    qualifiers.append(f"org:{org}")
+                q = " ".join(part for part in qualifiers if part.strip())
+                data = self._github_request_json(
+                    "GET",
+                    "/search/code",
+                    params={"q": q, "per_page": per_page, "page": page},
+                )
+                if page == 1:
+                    total_count += int(data.get("total_count", 0))
+
+                items = data.get("items", [])
+                page_items = [entry for entry in items if isinstance(entry, dict)]
+                if not page_items:
+                    break
+                all_items.extend(page_items)
+                if len(page_items) < per_page:
+                    break
+                page += 1
+
+        sliced = all_items[max(0, skip) : max(0, skip) + max(1, take)]
+        results: list[str] = []
+        for item in sliced:
+            repository = item.get("repository") or {}
+            repo_name = str(repository.get("name") or "")
+            path = str(item.get("path") or "")
+            results.append(f"{org}/{repo_name}:/{path}")
+
+        if not total_count:
+            total_count = len(all_items)
+        return {"matchesCount": total_count, "results": results}
+
+    def _github_get_repository_files(
+        self,
+        *,
+        repo: str,
+        path: str | None,
+        branch: str | None,
+    ) -> list[dict[str, Any]]:
+        normalized_path = self._normalize_path(path)
+        ref = normalize_branch_name(branch) or self._github_get_repository_default_branch(repo)
+        encoded_ref = quote(ref, safe="")
+        data = self._github_request_json(
+            "GET",
+            f"{self._github_repo_prefix(repo)}/git/trees/{encoded_ref}",
+            params={"recursive": "1"},
+        )
+        tree = data.get("tree", [])
+        prefix = normalized_path.strip("/")
+        output: list[dict[str, Any]] = []
+        for item in tree:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "blob":
+                continue
+            entry_path = str(item.get("path") or "")
+            if prefix:
+                if entry_path != prefix and not entry_path.startswith(f"{prefix}/"):
+                    continue
+            output.append({"path": f"/{entry_path}", "is_binary": False})
+        return output
+
+    def _github_get_file_text(
+        self,
+        *,
+        repo: str,
+        file_path: str,
+        branch: str | None,
+    ) -> str:
+        ref = normalize_branch_name(branch) or self._github_get_repository_default_branch(repo)
+        encoded_path = quote(file_path.lstrip("/"), safe="/")
+        data = self._github_request_json(
+            "GET",
+            f"{self._github_repo_prefix(repo)}/contents/{encoded_path}",
+            params={"ref": ref},
+        )
+        content = data.get("content")
+        encoding = str(data.get("encoding") or "")
+        if isinstance(content, str) and encoding.lower() == "base64":
+            decoded = base64.b64decode(content.encode("utf-8"))
+            return decoded.decode("utf-8", errors="replace")
+        if isinstance(content, str):
+            return content
+        return self._github_request_text(
+            "GET",
+            f"{self._github_repo_prefix(repo)}/contents/{encoded_path}",
+            params={"ref": ref},
+        )
+
+    def _github_grep(
+        self,
+        *,
+        repo: str,
+        pattern: str | None = None,
+        path: str | None = None,
+        branch: str | None = None,
+        glob: str | None = None,
+        output_mode: Literal["content", "files_with_matches", "count"] = "content",
+        case_insensitive: bool = True,
+        context_lines: int | None = 3,
+        from_line: int | None = None,
+        to_line: int | None = None,
+    ) -> dict[str, Any]:
+        regex_pattern = pattern or ".*"
+        is_match_all = self._match_all_pattern(regex_pattern)
+        file_regex = glob_to_regex(glob) if glob else ".*"
+        filename_filter = re.compile(file_regex)
+        files = self._github_get_repository_files(repo=repo, path=path, branch=branch)
+        matching = [
+            item
+            for item in files
+            if filename_filter.search(os.path.basename(str(item.get("path", ""))))
+        ]
+
+        if output_mode == "files_with_matches" and is_match_all:
+            text = "\n".join(str(item.get("path", "")) for item in matching)
+            text = truncate_output(
+                text,
+                self.max_output_chars,
+                "Narrow results with a more specific path or glob filter.",
+            )
+            return {
+                "text": text,
+                "files_matched": len(matching),
+                "warnings": [],
+                "partial": False,
+            }
+
+        flags = re.IGNORECASE if case_insensitive else 0
+        try:
+            search_pattern = re.compile(regex_pattern, flags)
+        except re.error as exc:
+            return {
+                "text": f"Error: Invalid regex pattern - {exc}",
+                "files_matched": 0,
+                "warnings": [],
+                "partial": False,
+            }
+
+        output_lines: list[str] = []
+        warnings: list[str] = []
+        files_matched = 0
+
+        for file_item in matching:
+            file_path = str(file_item.get("path", ""))
+            try:
+                content = self._github_get_file_text(repo=repo, file_path=file_path, branch=branch)
+            except Exception as exc:
+                warnings.append(f"failed to read {file_path}: {exc}")
+                continue
+
+            lines = content.splitlines()
+            if from_line is not None or to_line is not None:
+                start_idx = (from_line - 1) if from_line and from_line > 0 else 0
+                end_idx = to_line if to_line and to_line > 0 else len(lines)
+                lines = lines[start_idx:end_idx]
+
+            match_line_nums = {idx for idx, line in enumerate(lines) if search_pattern.search(line)}
+            if not match_line_nums:
+                continue
+
+            files_matched += 1
+            if output_mode == "files_with_matches":
+                output_lines.append(file_path)
+                continue
+            if output_mode == "count":
+                output_lines.append(f"{file_path}:{len(match_line_nums)}")
+                continue
+
+            output_lines.extend(
+                format_grep_matches(
+                    file_path,
+                    lines,
+                    match_line_nums,
+                    context_lines or 0,
+                    include_line_numbers=True,
+                )
+            )
+
+        text = "\n".join(output_lines)
+        text = truncate_output(
+            text,
+            self.max_output_chars,
+            "Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
+        )
+        return {
+            "text": text,
+            "files_matched": files_matched,
+            "warnings": warnings,
+            "partial": bool(warnings),
+        }
+
+    @staticmethod
+    def _github_pr_status(pr: dict[str, Any]) -> str:
+        state = str(pr.get("state") or "").lower()
+        if state == "open":
+            return "active"
+        if pr.get("merged_at"):
+            return "completed"
+        return "abandoned"
+
+    def _github_list_pull_requests(
+        self,
+        *,
+        repos: list[str] | None = None,
+        statuses: list[str] | None = None,
+        creators: list[str] | None = None,
+        date_from: str | datetime | None = None,
+        date_to: str | datetime | None = None,
+        skip: int = 0,
+        take: int = 100,
+        exclude_drafts: bool = False,
+        include_labels: bool = False,
+    ) -> dict[str, Any]:
+        allowed_status = {"active", "completed", "abandoned"}
+        effective_status = statuses or ["active", "completed", "abandoned"]
+        normalized_status = []
+        for status in effective_status:
+            lowered = status.strip().lower()
+            if lowered not in allowed_status:
+                raise ValueError("status must be one of: active, completed, abandoned")
+            if lowered not in normalized_status:
+                normalized_status.append(lowered)
+
+        repo_names = [item for item in (repos or []) if item]
+        if not repo_names:
+            repo_names = [entry["name"] for entry in self._github_list_repositories() if entry.get("name")]
+
+        creator_filter = [item.lower() for item in creators or []]
+        from_dt = self._parse_iso_datetime(date_from)
+        to_dt = self._parse_iso_datetime(date_to)
+
+        output: list[dict[str, Any]] = []
+        for repo_name in repo_names:
+            pulls = self._github_get_paginated_list(
+                f"{self._github_repo_prefix(repo_name)}/pulls",
+                params={"state": "all"},
+                limit=300,
+            )
+            for item in pulls:
+                status = self._github_pr_status(item)
+                if status not in normalized_status:
+                    continue
+                if exclude_drafts and bool(item.get("draft")):
+                    continue
+
+                user = item.get("user") or {}
+                creator = str(user.get("login") or "")
+                if creator_filter and not any(token in creator.lower() for token in creator_filter):
+                    continue
+
+                created_dt = self._parse_iso_datetime(item.get("created_at"))
+                closed_dt = self._parse_iso_datetime(item.get("closed_at"))
+                reference_dt = closed_dt if status in {"completed", "abandoned"} else created_dt
+                if from_dt and reference_dt and reference_dt < from_dt:
+                    continue
+                if to_dt and reference_dt and reference_dt > to_dt:
+                    continue
+
+                labels: list[str] = []
+                if include_labels:
+                    for label in item.get("labels") or []:
+                        if isinstance(label, dict):
+                            name = str(label.get("name") or "").strip()
+                            if name:
+                                labels.append(name)
+
+                output.append(
+                    {
+                        "pr_id": item.get("number"),
+                        "title": item.get("title") or "",
+                        "created_by": creator,
+                        "status": status,
+                        "creation_date": item.get("created_at"),
+                        "project_name": self._require_github_org(),
+                        "repository_name": repo_name,
+                        "repository_id": item.get("id"),
+                        "closed_date": (
+                            closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
+                            if closed_dt
+                            else None
+                        ),
+                        "source_branch": item.get("head", {}).get("ref"),
+                        "target_branch": item.get("base", {}).get("ref"),
+                        "target_ref": item.get("base", {}).get("ref"),
+                        "labels": labels,
+                    }
+                )
+
+        output.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
+        paged = output[max(0, skip) : max(0, skip) + max(1, take)]
+        has_more = len(output) > max(0, skip) + len(paged)
+        return {
+            "returned_count": len(paged),
+            "has_more": has_more,
+            "results": paged,
+        }
+
+    def _github_get_pull_request(self, *, repo: str, pull_request_id: int) -> dict[str, Any]:
+        pr = self._github_request_json("GET", f"{self._github_repo_prefix(repo)}/pulls/{pull_request_id}")
+        files = self._github_get_paginated_list(
+            f"{self._github_repo_prefix(repo)}/pulls/{pull_request_id}/files",
+            limit=2000,
+        )
+        changed_files = [str(item.get("filename")) for item in files if item.get("filename")]
+        threads_data = self._github_get_pull_request_threads(repo=repo, pull_request_id=pull_request_id)
+        mapped_pr = {
+            "pullRequestId": pr.get("number"),
+            "title": pr.get("title"),
+            "status": self._github_pr_status(pr),
+            "createdBy": {"displayName": (pr.get("user") or {}).get("login", "")},
+            "sourceRefName": f"refs/heads/{(pr.get('head') or {}).get('ref', '')}",
+            "targetRefName": f"refs/heads/{(pr.get('base') or {}).get('ref', '')}",
+        }
+        return {
+            "pull_request": mapped_pr,
+            "threads": threads_data.get("threads", []),
+            "changed_files": changed_files,
+        }
+
+    def _github_get_pull_request_threads(
+        self,
+        *,
+        repo: str,
+        pull_request_id: int,
+        include_deleted: bool = False,
+    ) -> dict[str, Any]:
+        issue_comments = self._github_get_paginated_list(
+            f"{self._github_repo_prefix(repo)}/issues/{pull_request_id}/comments"
+        )
+        review_comments = self._github_get_paginated_list(
+            f"{self._github_repo_prefix(repo)}/pulls/{pull_request_id}/comments"
+        )
+
+        threads: list[dict[str, Any]] = []
+        total_comments = 0
+
+        for comment in issue_comments:
+            if not isinstance(comment, dict):
+                continue
+            deleted = bool(comment.get("isDeleted", False))
+            if deleted and not include_deleted:
+                continue
+            author = (comment.get("user") or {}).get("login", "")
+            comment_payload = {
+                "id": comment.get("id"),
+                "author": author,
+                "content": str(comment.get("body") or ""),
+                "comment_type": "text",
+                "is_deleted": deleted,
+                "published_date": comment.get("created_at"),
+                "last_updated_date": comment.get("updated_at"),
+            }
+            threads.append(
+                {
+                    "id": f"issue-{comment.get('id')}",
+                    "status": None,
+                    "is_deleted": deleted,
+                    "file_path": None,
+                    "line_start": None,
+                    "line_end": None,
+                    "comments": [comment_payload],
+                    "comment_count": 1,
+                    "published_date": comment.get("created_at"),
+                    "last_updated_date": comment.get("updated_at"),
+                }
+            )
+            total_comments += 1
+
+        for comment in review_comments:
+            if not isinstance(comment, dict):
+                continue
+            deleted = bool(comment.get("isDeleted", False))
+            if deleted and not include_deleted:
+                continue
+            author = (comment.get("user") or {}).get("login", "")
+            comment_payload = {
+                "id": comment.get("id"),
+                "author": author,
+                "content": str(comment.get("body") or ""),
+                "comment_type": "text",
+                "is_deleted": deleted,
+                "published_date": comment.get("created_at"),
+                "last_updated_date": comment.get("updated_at"),
+            }
+            line = comment.get("line") or comment.get("original_line")
+            threads.append(
+                {
+                    "id": f"review-{comment.get('id')}",
+                    "status": None,
+                    "is_deleted": deleted,
+                    "file_path": f"/{str(comment.get('path') or '').lstrip('/')}" if comment.get("path") else None,
+                    "line_start": line,
+                    "line_end": line,
+                    "comments": [comment_payload],
+                    "comment_count": 1,
+                    "published_date": comment.get("created_at"),
+                    "last_updated_date": comment.get("updated_at"),
+                }
+            )
+            total_comments += 1
+
+        return {
+            "pull_request_id": pull_request_id,
+            "project_name": self._require_github_org(),
+            "repository_name": repo,
+            "returned_count": len(threads),
+            "total_comments": total_comments,
+            "threads": threads,
+        }
+
+    def _github_get_build_log(self, *, repo: str, build_id: int) -> dict[str, Any]:
+        run = self._github_request_json("GET", f"{self._github_repo_prefix(repo)}/actions/runs/{build_id}")
+        jobs_data = self._github_request_json(
+            "GET",
+            f"{self._github_repo_prefix(repo)}/actions/runs/{build_id}/jobs",
+            params={"per_page": 100, "page": 1},
+        )
+        jobs = []
+        for item in jobs_data.get("jobs", []):
+            if not isinstance(item, dict):
+                continue
+            jobs.append(
+                {
+                    "id": item.get("id"),
+                    "type": "job",
+                    "created_on": item.get("started_at"),
+                    "line_count": None,
+                    "url": item.get("url"),
+                    "stage_name": item.get("name"),
+                    "job_name": item.get("name"),
+                    "step_name": None,
+                }
+            )
+
+        metadata = {
+            "project_name": self._require_github_org(),
+            "build_id": build_id,
+            "build_number": run.get("run_number"),
+            "status": run.get("status"),
+            "result": run.get("conclusion"),
+            "definition_name": run.get("name") or run.get("display_title"),
+            "repository_name": repo,
+            "branch": run.get("head_branch"),
+            "commit": run.get("head_sha"),
+        }
+        return {"metadata": metadata, "logs": jobs}
+
+    def _github_get_build_log_content(
+        self,
+        *,
+        repo: str,
+        log_id: int,
+    ) -> str:
+        return self._github_request_text(
+            "GET",
+            f"{self._github_repo_prefix(repo)}/actions/jobs/{log_id}/logs",
+            headers={"Accept": "application/vnd.github+json"},
+        )
+
+    def _github_grep_build_log(
+        self,
+        *,
+        repo: str,
+        build_id: int,
+        log_id: int | None = None,
+        pattern: str | None = None,
+        output_mode: Literal["content", "logs_with_matches", "count"] = "content",
+        case_insensitive: bool = True,
+        context_lines: int | None = 3,
+        from_line: int | None = None,
+        to_line: int | None = None,
+    ) -> dict[str, Any]:
+        regex_pattern = pattern or ".*"
+        is_match_all = self._match_all_pattern(regex_pattern)
+        if log_id is None and is_match_all:
+            return {
+                "text": (
+                    "Error: Specify a log_id to read full content, or provide a pattern to search across all logs."
+                ),
+                "logs_matched": 0,
+                "warnings": [],
+                "partial": False,
+            }
+
+        flags = re.IGNORECASE if case_insensitive else 0
+        try:
+            search_pattern = re.compile(regex_pattern, flags)
+        except re.error as exc:
+            return {
+                "text": f"Error: Invalid regex pattern - {exc}",
+                "logs_matched": 0,
+                "warnings": [],
+                "partial": False,
+            }
+
+        if log_id is not None and is_match_all:
+            content = self._github_get_build_log_content(repo=repo, log_id=log_id)
+            lines = content.splitlines()
+            if from_line is not None or to_line is not None:
+                start_idx = (from_line - 1) if from_line and from_line > 0 else 0
+                end_idx = to_line if to_line and to_line > 0 else len(lines)
+                lines = lines[start_idx:end_idx]
+
+            if output_mode == "logs_with_matches":
+                return {"text": f"Log {log_id}", "logs_matched": 1, "warnings": [], "partial": False}
+            if output_mode == "count":
+                return {
+                    "text": f"Log {log_id}:{len(lines)}",
+                    "logs_matched": 1,
+                    "warnings": [],
+                    "partial": False,
+                }
+            start = from_line or 1
+            text = "\n".join(f"{start + idx}:{line}" for idx, line in enumerate(lines))
+            text = truncate_output(
+                text,
+                self.max_output_chars,
+                "Use from_line/to_line to read specific ranges.",
+            )
+            return {"text": text, "logs_matched": 1, "warnings": [], "partial": False}
+
+        if log_id is not None:
+            log_ids = [log_id]
+        else:
+            build_logs = self._github_get_build_log(repo=repo, build_id=build_id)
+            log_ids = [
+                int(item["id"])
+                for item in build_logs.get("logs", [])
+                if isinstance(item, dict) and item.get("id") is not None
+            ]
+
+        output_lines: list[str] = []
+        warnings: list[str] = []
+        logs_matched = 0
+
+        for current_log_id in log_ids:
+            try:
+                content = self._github_get_build_log_content(repo=repo, log_id=current_log_id)
+            except Exception as exc:
+                warnings.append(f"failed to read Log {current_log_id}: {exc}")
+                continue
+
+            lines = content.splitlines()
+            if from_line is not None or to_line is not None:
+                start_idx = (from_line - 1) if from_line and from_line > 0 else 0
+                end_idx = to_line if to_line and to_line > 0 else len(lines)
+                lines = lines[start_idx:end_idx]
+
+            matches = {idx for idx, line in enumerate(lines) if search_pattern.search(line)}
+            if not matches:
+                continue
+            logs_matched += 1
+
+            if output_mode == "logs_with_matches":
+                output_lines.append(f"Log {current_log_id}")
+                continue
+            if output_mode == "count":
+                output_lines.append(f"Log {current_log_id}:{len(matches)}")
+                continue
+
+            output_lines.extend(
+                format_grep_matches(
+                    f"Log {current_log_id}",
+                    lines,
+                    matches,
+                    context_lines or 0,
+                    include_line_numbers=True,
+                )
+            )
+
+        text = "\n".join(output_lines)
+        text = truncate_output(
+            text,
+            self.max_output_chars,
+            "Use from_line/to_line to read specific ranges, or narrow with pattern/log-id.",
+        )
+        return {
+            "text": text,
+            "logs_matched": logs_matched,
+            "warnings": warnings,
+            "partial": bool(warnings),
+        }
+
+    def _github_issue_to_work_item(self, issue: dict[str, Any], repo: str) -> dict[str, Any]:
+        labels = issue.get("labels") or []
+        tag_names = [
+            str(label.get("name"))
+            for label in labels
+            if isinstance(label, dict) and label.get("name")
+        ]
+        state = "Closed" if str(issue.get("state") or "").lower() == "closed" else "Open"
+        return {
+            "id": issue.get("number"),
+            "title": issue.get("title"),
+            "state": state,
+            "type": "Issue",
+            "project": self._require_github_org(),
+            "assigned_to": ((issue.get("assignee") or {}).get("login") if issue.get("assignee") else None),
+            "tags": tag_names,
+            "created_date": issue.get("created_at"),
+            "changed_date": issue.get("updated_at"),
+            "url": issue.get("html_url"),
+            "repository": repo,
+            "highlights": [],
+        }
+
+    def _github_get_ticket_by_id(self, *, repo: str, work_item_id: int) -> dict[str, Any]:
+        issue = self._github_request_json("GET", f"{self._github_repo_prefix(repo)}/issues/{work_item_id}")
+        state = "Closed" if str(issue.get("state") or "").lower() == "closed" else "Open"
+        return {
+            "id": issue.get("number"),
+            "url": issue.get("html_url"),
+            "fields": {
+                "System.WorkItemType": "Issue",
+                "System.State": state,
+                "System.Title": issue.get("title") or "",
+            },
+        }
+
+    def _github_search_work_items(
+        self,
+        *,
+        query: str,
+        project: str | None = None,
+        repo: str | None = None,
+        state: str | None = None,
+        assigned_to: str | None = None,
+        skip: int = 0,
+        take: int = 20,
+        include_closed: bool = True,
+    ) -> dict[str, Any]:
+        org = self._require_github_org()
+        repo_name = (repo or project or "").strip()
+
+        qualifiers: list[str] = [query or "", f"org:{org}", "is:issue"]
+        if repo_name:
+            qualifiers.append(f"repo:{org}/{repo_name}")
+        if not include_closed:
+            qualifiers.append("is:open")
+        elif state:
+            lowered = state.strip().lower()
+            if lowered in {"active", "open", "todo"}:
+                qualifiers.append("is:open")
+            elif lowered in {"closed", "done", "resolved"}:
+                qualifiers.append("is:closed")
+        if assigned_to:
+            qualifiers.append(f"assignee:{assigned_to}")
+
+        q = " ".join(item for item in qualifiers if item.strip())
+        per_page = min(max(1, take), 100)
+        page = (max(0, skip) // per_page) + 1
+        data = self._github_request_json(
+            "GET",
+            "/search/issues",
+            params={"q": q, "per_page": per_page, "page": page},
+        )
+        items = [item for item in data.get("items", []) if isinstance(item, dict)]
+        offset = max(0, skip) % per_page
+        paged = items[offset : offset + max(1, take)]
+
+        results = []
+        for issue in paged:
+            repository_url = str(issue.get("repository_url") or "")
+            repo_from_url = repository_url.rstrip("/").split("/")[-1] if repository_url else repo_name
+            results.append(self._github_issue_to_work_item(issue, repo_from_url))
+
+        total = int(data.get("total_count", len(results)))
+        return {
+            "matchesCount": total,
+            "returned_count": len(results),
+            "has_more": total > max(0, skip) + len(results),
+            "results": results,
+        }
+
+    def _github_get_my_work_items(
+        self,
+        *,
+        project: str | None = None,
+        repo: str | None = None,
+        include_closed: bool = False,
+        skip: int = 0,
+        take: int = 20,
+    ) -> dict[str, Any]:
+        result = self._github_search_work_items(
+            query="",
+            project=project,
+            repo=repo,
+            assigned_to="@me",
+            skip=skip,
+            take=take,
+            include_closed=include_closed,
+        )
+        return {
+            "returned_count": result.get("returned_count", 0),
+            "has_more": result.get("has_more", False),
+            "results": result.get("results", []),
+            "warnings": [],
+        }
+
+    def execute_projects_list(self, *, provider: str) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="projects.list")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.list_projects(),
+                "github": lambda: self._github_list_projects(),
+            },
+        )
+
+    def execute_repos_list(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="repos.list")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.list_repositories(project=str(project)),
+                "github": self._github_list_repositories,
+            },
+        )
+
+    def execute_code_search(
+        self,
+        *,
+        provider: str,
+        query: str,
+        project: str | None,
+        repos: list[str] | None,
+        skip: int,
+        take: int,
+    ) -> dict[str, Any]:
+        return self._fanout(
+            provider=provider,
+            operations={
+                "azdo": lambda: self.search_code(
+                    query=query,
+                    project=project,
+                    repos=repos,
+                    skip=skip,
+                    take=take,
+                ),
+                "github": lambda: self._github_search_code(
+                    query=query,
+                    project=project,
+                    repos=repos,
+                    skip=skip,
+                    take=take,
+                ),
+            },
+        )
+
+    def execute_code_grep(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str,
+        pattern: str | None,
+        path: str | None,
+        branch: str | None,
+        glob: str | None,
+        output_mode: Literal["content", "files_with_matches", "count"],
+        case_insensitive: bool,
+        context_lines: int | None,
+        from_line: int | None,
+        to_line: int | None,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="code.grep")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.grep(
+                    project=str(project),
+                    repo=repo,
+                    pattern=pattern,
+                    path=path,
+                    branch=branch,
+                    glob=glob,
+                    output_mode=output_mode,
+                    case_insensitive=case_insensitive,
+                    context_lines=context_lines,
+                    from_line=from_line,
+                    to_line=to_line,
+                ),
+                "github": lambda: self._github_grep(
+                    repo=repo,
+                    pattern=pattern,
+                    path=path,
+                    branch=branch,
+                    glob=glob,
+                    output_mode=output_mode,
+                    case_insensitive=case_insensitive,
+                    context_lines=context_lines,
+                    from_line=from_line,
+                    to_line=to_line,
+                ),
+            },
+        )
+
+    def execute_pr_list(
+        self,
+        *,
+        provider: str,
+        projects: list[str] | None,
+        repos: list[str] | None,
+        statuses: list[str] | None,
+        creators: list[str] | None,
+        date_from: str | datetime | None,
+        date_to: str | datetime | None,
+        skip: int,
+        take: int,
+        exclude_drafts: bool,
+        include_labels: bool,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="pr.list")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.list_pull_requests(
+                    projects=projects,
+                    repos=repos,
+                    statuses=statuses,
+                    creators=creators,
+                    date_from=date_from,
+                    date_to=date_to,
+                    skip=skip,
+                    take=take,
+                    exclude_drafts=exclude_drafts,
+                    include_labels=include_labels,
+                ),
+                "github": lambda: self._github_list_pull_requests(
+                    repos=repos or projects,
+                    statuses=statuses,
+                    creators=creators,
+                    date_from=date_from,
+                    date_to=date_to,
+                    skip=skip,
+                    take=take,
+                    exclude_drafts=exclude_drafts,
+                    include_labels=include_labels,
+                ),
+            },
+        )
+
+    def execute_pr_get(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str,
+        pull_request_id: int,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="pr.get")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.get_pull_request(
+                    project=str(project),
+                    repo=repo,
+                    pull_request_id=pull_request_id,
+                ),
+                "github": lambda: self._github_get_pull_request(
+                    repo=repo,
+                    pull_request_id=pull_request_id,
+                ),
+            },
+        )
+
+    def execute_pr_threads(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str,
+        pull_request_id: int,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="pr.threads")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.get_pull_request_threads(
+                    project=str(project),
+                    repo=repo,
+                    pull_request_id=pull_request_id,
+                ),
+                "github": lambda: self._github_get_pull_request_threads(
+                    repo=repo,
+                    pull_request_id=pull_request_id,
+                ),
+            },
+        )
+
+    def execute_build_logs(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str | None,
+        build_id: int,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="build.logs")
+        effective_repo = repo or project
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.get_build_log(project=str(project), build_id=build_id),
+                "github": lambda: self._github_get_build_log(repo=str(effective_repo), build_id=build_id),
+            },
+        )
+
+    def execute_build_grep(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str | None,
+        build_id: int,
+        log_id: int | None,
+        pattern: str | None,
+        output_mode: Literal["content", "logs_with_matches", "count"],
+        case_insensitive: bool,
+        context_lines: int | None,
+        from_line: int | None,
+        to_line: int | None,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="build.grep")
+        effective_repo = repo or project
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.grep_build_log(
+                    project=str(project),
+                    build_id=build_id,
+                    log_id=log_id,
+                    pattern=pattern,
+                    output_mode=output_mode,
+                    case_insensitive=case_insensitive,
+                    context_lines=context_lines,
+                    from_line=from_line,
+                    to_line=to_line,
+                ),
+                "github": lambda: self._github_grep_build_log(
+                    repo=str(effective_repo),
+                    build_id=build_id,
+                    log_id=log_id,
+                    pattern=pattern,
+                    output_mode=output_mode,
+                    case_insensitive=case_insensitive,
+                    context_lines=context_lines,
+                    from_line=from_line,
+                    to_line=to_line,
+                ),
+            },
+        )
+
+    def execute_board_ticket(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str | None,
+        work_item_id: int,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="board.ticket")
+        effective_repo = repo or project
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.get_ticket_by_id(project=str(project), work_item_id=work_item_id),
+                "github": lambda: self._github_get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
+            },
+        )
+
+    def execute_board_list(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        wiql: str,
+        skip: int,
+        take: int,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="board.list")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.list_work_items(
+                    project=str(project),
+                    wiql=wiql,
+                    skip=skip,
+                    take=take,
+                ),
+                "github": lambda: (_ for _ in ()).throw(
+                    ValueError("GitHub does not support `board list`. Use `board search` instead.")
+                ),
+            },
+        )
+
+    def execute_board_search(
+        self,
+        *,
+        provider: str,
+        query: str,
+        project: str | None,
+        repo: str | None,
+        area: str | None,
+        work_item_type: str | None,
+        state: str | None,
+        assigned_to: str | None,
+        skip: int,
+        take: int,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="board.search")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.search_work_items(
+                    query=query,
+                    project=project,
+                    area=area,
+                    work_item_type=work_item_type,
+                    state=state,
+                    assigned_to=assigned_to,
+                    skip=skip,
+                    take=take,
+                ),
+                "github": lambda: self._github_search_work_items(
+                    query=query,
+                    project=project,
+                    repo=repo,
+                    state=state,
+                    assigned_to=assigned_to,
+                    skip=skip,
+                    take=take,
+                    include_closed=True,
+                ),
+            },
+        )
+
+    def execute_board_mine(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str | None,
+        include_closed: bool,
+        skip: int,
+        take: int,
+    ) -> dict[str, Any]:
+        single_provider = self._normalize_single_provider(provider, command="board.mine")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self.get_my_work_items(
+                    project=project,
+                    include_closed=include_closed,
+                    skip=skip,
+                    take=take,
+                ),
+                "github": lambda: self._github_get_my_work_items(
+                    project=project,
+                    repo=repo,
+                    include_closed=include_closed,
+                    skip=skip,
+                    take=take,
+                ),
+            },
+        )

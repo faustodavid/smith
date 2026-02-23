@@ -1,26 +1,29 @@
----
-description: Read Azure DevOps pull requests via smith CLI (read-only)
+description: Read Azure DevOps/GitHub pull requests via smith CLI (read-only)
 ---
 
-Scope: read-only PR investigation only.
+Scope: read-only provider-specific PR investigation only.
 
 Preflight:
 ```bash
-: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first}"
+: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first (for azdo)}"
+: "${GITHUB_ORG:?Set GITHUB_ORG first (for github)}"
 az account show >/dev/null
 ```
 
 Required arguments:
-- For list: `list [filters]`
-- For get: `get --project <project> --repo <repo> --id <pr_id>`
-- For threads: `threads --project <project> --repo <repo> --id <pr_id>`
+- List AZDO: `list azdo <project> <repo> [filters]`
+- List GitHub: `list github <repo> [filters]`
+- Get AZDO: `get azdo <project> <repo> <id>`
+- Get GitHub: `get github <repo> <id>`
+- Threads AZDO: `threads azdo <project> <repo> <id>`
+- Threads GitHub: `threads github <repo> <id>`
 
 First command to run:
 - If PR id is known:
 ```bash
 python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" pr get $ARGUMENTS
 ```
-- If PR discussion context is needed:
+- If discussion context is needed:
 ```bash
 python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" pr threads $ARGUMENTS
 ```
@@ -31,7 +34,7 @@ python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" pr list $ARGUMENTS
 
 If no results:
 1. Widen date and status filters.
-2. Remove restrictive repo or creator filters.
+2. Remove restrictive creator filters.
 3. Fall back to `code search` to locate related repository paths.
 
 Output contract:

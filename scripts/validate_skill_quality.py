@@ -114,6 +114,7 @@ def classify_trigger(prompt: str) -> str:
 
     positive_terms = [
         "loki",
+        "github",
         "build logs",
         "pr ",
         "pull request",
@@ -156,7 +157,14 @@ def run_trigger_checks() -> list[str]:
         if section not in skill_text:
             errors.append(f"SKILL.md missing section: {section}")
 
-    explicit_invocation_markers = ["code search --query", "code grep --project", "pr list", "build logs", "board search"]
+    explicit_invocation_markers = [
+        "code search --query",
+        "code grep github <repo>",
+        "code grep azdo <project> <repo>",
+        "pr list github <repo>",
+        "build logs github <repo> <id>",
+        "board search azdo <project> --query",
+    ]
     for marker in explicit_invocation_markers:
         if marker not in skill_text:
             errors.append(f"SKILL.md missing explicit invocation marker: {marker}")
@@ -216,18 +224,23 @@ def run_behavior_checks() -> list[str]:
             errors.append(f"Recovery flow missing term: {term}")
 
     command_markers = [
-        "projects list",
-        "repos list",
+        "projects list azdo",
+        "projects list github",
+        "repos list azdo <project>",
+        "repos list github",
         "code search",
-        "code grep",
-        "pr list",
-        "pr get",
-        "build logs",
-        "build grep",
-        "board ticket",
-        "board list",
-        "board search",
-        "board mine",
+        "code grep azdo <project> <repo>",
+        "code grep github <repo>",
+        "pr list azdo <project> <repo>",
+        "pr get github <repo> <id>",
+        "pr threads azdo <project> <repo> <id>",
+        "build logs azdo <project> <id>",
+        "build grep github <repo> <id>",
+        "board ticket azdo <project> <id>",
+        "board list azdo <project>",
+        "board search github <repo> --query",
+        "board mine azdo <project>",
+        "stories ticket azdo <project> <id>",
     ]
     for marker in command_markers:
         if marker not in recipes_text and marker not in skill_text:

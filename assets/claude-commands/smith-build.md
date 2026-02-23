@@ -1,18 +1,20 @@
----
-description: Read and grep Azure DevOps build logs via smith CLI (read-only)
+description: Read and grep Azure DevOps/GitHub build logs via smith CLI (read-only)
 ---
 
-Scope: read-only build-log investigation only.
+Scope: read-only provider-specific build-log investigation only.
 
 Preflight:
 ```bash
-: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first}"
+: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first (for azdo)}"
+: "${GITHUB_ORG:?Set GITHUB_ORG first (for github)}"
 az account show >/dev/null
 ```
 
 Required arguments:
-- Build metadata: `logs --project <project> --id <build_id>`
-- Log grep: `grep --project <project> --id <build_id> [--log-id <n>] --pattern <regex>`
+- Metadata AZDO: `logs azdo <project> <id>`
+- Metadata GitHub: `logs github <repo> <id>`
+- Grep AZDO: `grep azdo <project> <id> [--log-id <n>] --pattern <regex>`
+- Grep GitHub: `grep github <repo> <id> [--log-id <n>] --pattern <regex>`
 
 First command to run:
 - Start with metadata:

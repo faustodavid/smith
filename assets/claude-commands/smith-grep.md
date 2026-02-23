@@ -1,18 +1,19 @@
----
-description: Thanos-style targeted grep for Azure DevOps repos via smith CLI (read-only)
+description: Thanos-style targeted grep for Azure DevOps/GitHub repos via smith CLI (read-only)
 ---
 
-Scope: read-only Azure DevOps investigation only.
+Scope: read-only provider-specific investigation only.
 
 Preflight:
 ```bash
-: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first}"
+: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first (for azdo)}"
+: "${GITHUB_ORG:?Set GITHUB_ORG first (for github)}"
 az account show >/dev/null
 ```
 
 Required arguments:
-- Preferred shape:
-`--project <project> --repo <repo> --pattern <regex> [--path <path>] [--glob <glob>] [extra flags]`
+- Azure DevOps: `azdo <project> <repo> [grep flags]`
+- GitHub: `github <repo> [grep flags]`
+- Pattern/path flags: `--pattern`, `--path`, `--glob`, `--from-line`, `--to-line`, `--output-mode`
 
 First command to run:
 ```bash
@@ -20,7 +21,7 @@ python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code grep $ARGUMENTS
 ```
 
 If no results:
-1. If project or repo is unknown, run discovery first:
+1. If scope is unknown, run discovery first:
 ```bash
 python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search --query "$ARGUMENTS" --take 30
 ```

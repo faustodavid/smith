@@ -133,7 +133,7 @@ def _fmt_table_line(columns: list[str]) -> str:
     return " | ".join(columns)
 
 
-def render_text(command: str, data: Any) -> str:
+def _render_single(command: str, data: Any) -> str:
     if command == "projects.list":
         rows = data if isinstance(data, list) else []
         lines = [
@@ -296,3 +296,91 @@ def render_text(command: str, data: Any) -> str:
         return "\n".join(lines)
 
     return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=True)
+
+
+def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
+    providers = payload.get("providers", {})
+    if not isinstance(providers, dict):
+        return _render_single(command, payload)
+
+    summary = payload.get("summary", {})
+    queried = summary.get("queried") if isinstance(summary, dict) else []
+    ordered = queried if isinstance(queried, list) and queried else list(providers.keys())
+
+    # Flatten single-provider results for cleaner developer UX.
+    if len(ordered) == 1:
+        provider = ordered[0]
+        entry = providers.get(provider, {})
+        if not isinstance(entry, dict):
+            return ""
+
+        if not bool(entry.get("ok", False)):
+            error = entry.get("error") or {}
+            message = error.get("message") if isinstance(error, dict) else error
+            return f"error: {message}".rstrip()
+
+        provider_data = entry.get("data")
+        lines: list[str] = []
+        rendered = _render_single(command, provider_data)
+        if rendered.strip():
+            lines.append(rendered)
+
+        warnings = entry.get("warnings") or []
+        if command not in {"code.grep", "build.grep"}:
+            for warning in warnings if isinstance(warnings, list) else []:
+                lines.append(f"warning: {warning}")
+        if bool(entry.get("partial", False)):
+            lines.append("partial: true")
+        return "\n".join(lines).rstrip()
+
+    lines: list[str] = []
+
+    for provider in ordered:
+        entry = providers.get(provider, {})
+        if not isinstance(entry, dict):
+            continue
+
+        if not bool(entry.get("ok", False)):
+            lines.append(f"[{provider}]")
+            error = entry.get("error") or {}
+            message = error.get("message") if isinstance(error, dict) else error
+            lines.append(f"error: {message}")
+            lines.append("")
+            continue
+
+        provider_data = entry.get("data")
+        if command == "code.search":
+            matches_count = 0
+            result_lines: list[Any] = []
+            if isinstance(provider_data, dict):
+                raw_matches = provider_data.get("matchesCount", 0)
+                try:
+                    matches_count = int(raw_matches)
+                except (TypeError, ValueError):
+                    matches_count = 0
+                raw_results = provider_data.get("results", [])
+                if isinstance(raw_results, list):
+                    result_lines = raw_results
+            lines.append(f"[{provider}] matches: {matches_count}")
+            lines.extend(str(entry_line) for entry_line in result_lines)
+        else:
+            lines.append(f"[{provider}]")
+            rendered = _render_single(command, provider_data)
+            if rendered.strip():
+                lines.append(rendered)
+
+        warnings = entry.get("warnings") or []
+        if command not in {"code.grep", "build.grep"}:
+            for warning in warnings if isinstance(warnings, list) else []:
+                lines.append(f"warning: {warning}")
+        if bool(entry.get("partial", False)):
+            lines.append("partial: true")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+def render_text(command: str, data: Any) -> str:
+    if isinstance(data, dict) and "providers" in data and "summary" in data:
+        return _render_provider_grouped(command, data)
+    return _render_single(command, data)

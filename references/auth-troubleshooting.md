@@ -25,6 +25,29 @@ az account set --subscription "<name-or-id>"
 
 3. Retry command.
 
+## Symptom: Missing `GITHUB_ORG`
+
+Set org scope for GitHub provider:
+
+```bash
+export GITHUB_ORG="<org>"
+```
+
+## Symptom: GitHub auth failure
+
+Preferred:
+
+```bash
+export GITHUB_TOKEN="<token>"
+```
+
+Or fallback:
+
+```bash
+gh auth login
+gh auth status
+```
+
 ## Symptom: HTTP 401/403 after login
 
 - Confirm your account has Azure DevOps access for the target project/org.

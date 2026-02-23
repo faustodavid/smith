@@ -1,12 +1,12 @@
----
-description: Thanos-style Azure DevOps discovery search via smith CLI (read-only)
+description: Thanos-style Azure DevOps + GitHub discovery search via smith CLI (read-only)
 ---
 
-Scope: read-only Azure DevOps investigation only.
+Scope: read-only provider-aware investigation only.
 
 Preflight:
 ```bash
-: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first}"
+: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first (for azdo)}"
+: "${GITHUB_ORG:?Set GITHUB_ORG first (for github/all)}"
 az account show >/dev/null
 ```
 
@@ -24,7 +24,11 @@ If no results:
 ```bash
 python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search --query "$ARGUMENTS" --take 50
 ```
-3. If still empty, report "not enough evidence" and suggest the next narrower domain keyword.
+3. Optionally scope provider:
+```bash
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search --query "$ARGUMENTS" --provider github
+```
+4. If still empty, report "not enough evidence" and suggest the next narrower domain keyword.
 
 Output contract:
 - Return a concise answer plus source paths in `project/repository:path` format.

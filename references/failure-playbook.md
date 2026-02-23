@@ -13,6 +13,12 @@ echo "$AZURE_DEVOPS_ORG_URL"
 az login
 ```
 3. Retry the exact same command once.
+4. For GitHub provider, ensure one of:
+```bash
+export GITHUB_TOKEN="<token>"
+# or
+gh auth login
+```
 
 ## 429 rate limited
 
@@ -40,3 +46,31 @@ python3 skills/smith/scripts/smith_cli.py code search --query "<broader query>"
 ```
 2. Re-map candidate repo and path.
 3. Continue with focused grep.
+
+## Unsupported provider flow
+
+If a command is unsupported for a selected provider, use the explicit fallback:
+
+- GitHub `board list` => run `board search` with equivalent query terms.
+
+## Deprecated CLI syntax (hard cutover)
+
+If you used old flag-style provider/scope arguments, migrate to positional provider syntax:
+
+- Old:
+```bash
+python3 skills/smith/scripts/smith_cli.py code grep --provider github --repo rtl-devops-gitops --pattern "grafana.*"
+```
+- New:
+```bash
+python3 skills/smith/scripts/smith_cli.py code grep github rtl-devops-gitops --pattern "grafana.*"
+```
+
+- Old:
+```bash
+python3 skills/smith/scripts/smith_cli.py build logs --provider azdo --project SRE --id 942510
+```
+- New:
+```bash
+python3 skills/smith/scripts/smith_cli.py build logs azdo SRE 942510
+```
