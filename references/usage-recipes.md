@@ -15,6 +15,29 @@ export GITHUB_ORG="<org>"
 az login
 ```
 
+## GitHub grep performance tuning
+
+For large repos, keep grep exact but reduce wall time with bounded parallel fetch:
+
+```bash
+export GITHUB_GREP_ENABLE_PARALLEL=true
+export GITHUB_GREP_MAX_WORKERS=8
+```
+
+Narrow first to reduce API volume:
+
+```bash
+python3 skills/smith/scripts/smith_cli.py code grep github <repo> "<regex>" --path <path> --glob "<glob>" --branch <branch>
+```
+
+If your network or org rate-limits aggressively, lower workers or force sequential:
+
+```bash
+export GITHUB_GREP_MAX_WORKERS=1
+# or
+export GITHUB_GREP_ENABLE_PARALLEL=false
+```
+
 ## Investigation pattern (QueryAgent-inspired)
 
 1. Broad discovery:

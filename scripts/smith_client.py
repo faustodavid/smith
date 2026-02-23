@@ -5,6 +5,8 @@ import base64
 import os
 import re
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any, Callable, Literal
 from urllib.parse import quote, urlparse
@@ -76,6 +78,8 @@ class ThanosLocalClient:
         self._session = session or requests.Session()
         self._access_token: str | None = None
         self._github_token: str | None = None
+        self._github_default_branch_cache: dict[str, str] = {}
+        self._github_thread_local = threading.local()
 
         self.org_name = self._extract_org_name(self.org_url)
 
@@ -384,14 +388,16 @@ class ThanosLocalClient:
         json_body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         expect_json: bool = True,
+        session: requests.Session | None = None,
     ) -> Any:
         url = path if path.startswith("http") else f"{self.github_api_url}{path}"
         request_headers = dict(headers or {})
         request_headers.setdefault("Accept", "application/vnd.github+json")
         request_headers.setdefault("X-GitHub-Api-Version", self.github_api_version)
         request_headers["Authorization"] = f"Bearer {self._get_github_token()}"
+        http_session = session or self._session
 
-        response = self._session.request(
+        response = http_session.request(
             method,
             url,
             params=params,
@@ -403,7 +409,7 @@ class ThanosLocalClient:
         if response.status_code in (401, 403):
             retry_headers = dict(request_headers)
             retry_headers["Authorization"] = f"Bearer {self._get_github_token(force_refresh=True)}"
-            response = self._session.request(
+            response = http_session.request(
                 method,
                 url,
                 params=params,
@@ -458,6 +464,7 @@ class ThanosLocalClient:
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        session: requests.Session | None = None,
     ) -> dict[str, Any]:
         data = self._github_request(
             method,
@@ -466,6 +473,7 @@ class ThanosLocalClient:
             json_body=json_body,
             headers=headers,
             expect_json=True,
+            session=session,
         )
         if isinstance(data, dict):
             return data
@@ -478,6 +486,7 @@ class ThanosLocalClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        session: requests.Session | None = None,
     ) -> str:
         data = self._github_request(
             method,
@@ -485,6 +494,7 @@ class ThanosLocalClient:
             params=params,
             headers=headers,
             expect_json=False,
+            session=session,
         )
         return str(data)
 
@@ -514,6 +524,45 @@ class ThanosLocalClient:
     @staticmethod
     def _match_all_pattern(pattern: str) -> bool:
         return pattern in (".*", "^.*$", ".*$", "^.*")
+
+    @staticmethod
+    def _parse_bool_env(name: str, *, default: bool) -> bool:
+        value = os.getenv(name)
+        if value is None:
+            return default
+        normalized = value.strip().lower()
+        if not normalized:
+            return default
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return default
+
+    @staticmethod
+    def _parse_int_env(
+        name: str,
+        *,
+        default: int,
+        min_value: int,
+        max_value: int,
+    ) -> int:
+        value = os.getenv(name)
+        if value is None:
+            return default
+        try:
+            parsed = int(value.strip())
+        except (TypeError, ValueError):
+            return default
+        return max(min_value, min(max_value, parsed))
+
+    def _github_get_thread_session(self) -> requests.Session:
+        session = getattr(self._github_thread_local, "session", None)
+        if isinstance(session, requests.Session):
+            return session
+        session = requests.Session()
+        self._github_thread_local.session = session
+        return session
 
     def list_projects(self) -> list[dict[str, Any]]:
         url = f"{self.org_url}/_apis/projects"
@@ -1515,9 +1564,15 @@ class ThanosLocalClient:
         return output
 
     def _github_get_repository_default_branch(self, repo: str) -> str:
+        cache_key = repo.strip().lower()
+        cached = self._github_default_branch_cache.get(cache_key)
+        if cached:
+            return cached
+
         data = self._github_request_json("GET", f"{self._github_repo_prefix(repo)}")
-        branch = str(data.get("default_branch") or "").strip()
-        return branch or "main"
+        branch = str(data.get("default_branch") or "").strip() or "main"
+        self._github_default_branch_cache[cache_key] = branch
+        return branch
 
     def _github_list_projects(self) -> list[dict[str, Any]]:
         org = self._require_github_org()
@@ -1638,6 +1693,7 @@ class ThanosLocalClient:
         repo: str,
         file_path: str,
         branch: str | None,
+        session: requests.Session | None = None,
     ) -> str:
         ref = normalize_branch_name(branch) or self._github_get_repository_default_branch(repo)
         encoded_path = quote(file_path.lstrip("/"), safe="/")
@@ -1645,6 +1701,7 @@ class ThanosLocalClient:
             "GET",
             f"{self._github_repo_prefix(repo)}/contents/{encoded_path}",
             params={"ref": ref},
+            session=session,
         )
         content = data.get("content")
         encoding = str(data.get("encoding") or "")
@@ -1657,6 +1714,7 @@ class ThanosLocalClient:
             "GET",
             f"{self._github_repo_prefix(repo)}/contents/{encoded_path}",
             params={"ref": ref},
+            session=session,
         )
 
     def _github_grep(
@@ -1677,7 +1735,8 @@ class ThanosLocalClient:
         is_match_all = self._match_all_pattern(regex_pattern)
         file_regex = glob_to_regex(glob) if glob else ".*"
         filename_filter = re.compile(file_regex)
-        files = self._github_get_repository_files(repo=repo, path=path, branch=branch)
+        resolved_branch = normalize_branch_name(branch) or self._github_get_repository_default_branch(repo)
+        files = self._github_get_repository_files(repo=repo, path=path, branch=resolved_branch)
         matching = [
             item
             for item in files
@@ -1713,13 +1772,32 @@ class ThanosLocalClient:
         warnings: list[str] = []
         files_matched = 0
 
-        for file_item in matching:
-            file_path = str(file_item.get("path", ""))
+        grep_parallel_enabled = self._parse_bool_env(
+            "GITHUB_GREP_ENABLE_PARALLEL",
+            default=True,
+        )
+        grep_max_workers = self._parse_int_env(
+            "GITHUB_GREP_MAX_WORKERS",
+            default=8,
+            min_value=1,
+            max_value=32,
+        )
+        use_parallel = grep_parallel_enabled and grep_max_workers > 1 and len(matching) > 1
+
+        def _process_file(
+            file_path: str,
+            *,
+            session: requests.Session | None = None,
+        ) -> tuple[list[str], int, str | None]:
             try:
-                content = self._github_get_file_text(repo=repo, file_path=file_path, branch=branch)
+                content = self._github_get_file_text(
+                    repo=repo,
+                    file_path=file_path,
+                    branch=resolved_branch,
+                    session=session,
+                )
             except Exception as exc:
-                warnings.append(f"failed to read {file_path}: {exc}")
-                continue
+                return [], 0, f"failed to read {file_path}: {exc}"
 
             lines = content.splitlines()
             if from_line is not None or to_line is not None:
@@ -1729,25 +1807,54 @@ class ThanosLocalClient:
 
             match_line_nums = {idx for idx, line in enumerate(lines) if search_pattern.search(line)}
             if not match_line_nums:
-                continue
+                return [], 0, None
 
-            files_matched += 1
             if output_mode == "files_with_matches":
-                output_lines.append(file_path)
-                continue
+                return [file_path], 1, None
             if output_mode == "count":
-                output_lines.append(f"{file_path}:{len(match_line_nums)}")
-                continue
-
-            output_lines.extend(
+                return [f"{file_path}:{len(match_line_nums)}"], 1, None
+            return (
                 format_grep_matches(
                     file_path,
                     lines,
                     match_line_nums,
                     context_lines or 0,
                     include_line_numbers=True,
-                )
+                ),
+                1,
+                None,
             )
+
+        def _process_file_in_worker(file_path: str) -> tuple[list[str], int, str | None]:
+            return _process_file(file_path, session=self._github_get_thread_session())
+
+        file_paths = [str(item.get("path", "")) for item in matching]
+        if use_parallel:
+            max_workers = min(grep_max_workers, len(file_paths))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(_process_file_in_worker, file_path)
+                    for file_path in file_paths
+                ]
+                for file_path, future in zip(file_paths, futures):
+                    try:
+                        lines_out, matched_count, warning = future.result()
+                    except Exception as exc:  # pragma: no cover - safety net
+                        warnings.append(f"failed to read {file_path}: {exc}")
+                        continue
+                    if warning:
+                        warnings.append(warning)
+                        continue
+                    files_matched += matched_count
+                    output_lines.extend(lines_out)
+        else:
+            for file_path in file_paths:
+                lines_out, matched_count, warning = _process_file(file_path)
+                if warning:
+                    warnings.append(warning)
+                    continue
+                files_matched += matched_count
+                output_lines.extend(lines_out)
 
         text = "\n".join(output_lines)
         text = truncate_output(

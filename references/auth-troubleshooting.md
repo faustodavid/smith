@@ -65,3 +65,13 @@ gh auth status
 - Narrow `--path` and `--glob`.
 - Use `--from-line`/`--to-line`.
 - Increase `THANOS_LOCAL_MAX_OUTPUT_CHARS` only if needed.
+
+## Symptom: GitHub grep is slow
+
+- Prefer targeted scope: pass `--path`, `--glob`, and explicit `--branch`.
+- Keep parallel fetch enabled:
+  - `export GITHUB_GREP_ENABLE_PARALLEL=true`
+  - `export GITHUB_GREP_MAX_WORKERS=8` (tune between `1` and `32`)
+- If hitting rate limits, lower workers or disable parallel temporarily:
+  - `export GITHUB_GREP_MAX_WORKERS=1`
+  - `export GITHUB_GREP_ENABLE_PARALLEL=false`
