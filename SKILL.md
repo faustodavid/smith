@@ -176,6 +176,12 @@ Stop and report unresolved when all are true:
   - `GITHUB_API_URL` (default `https://api.github.com`)
   - `GITHUB_API_VERSION` (default `2022-11-28`)
   - `GITHUB_TIMEOUT_SECONDS` (default follows runtime timeout)
+  - `SMITH_HTTP_POOL_MAXSIZE` (default `32`)
+  - `SMITH_HTTP_POOL_CONNECTIONS` (default `16`)
+  - `SMITH_HTTP_RETRY_MAX_ATTEMPTS` (default `2`; GET-only retry path)
+  - `SMITH_HTTP_RETRY_BACKOFF_SECONDS` (default `0.4`)
+  - `GITHUB_GREP_ENABLE_PARALLEL` (default `true`)
+  - `GITHUB_GREP_MAX_WORKERS` (default adaptive by candidate file count; clamped `1..32`)
 
 Auth model is single-user only:
 - Acquire token with `DefaultAzureCredential(exclude_interactive_browser_credential=True)`.
@@ -183,6 +189,22 @@ Auth model is single-user only:
 - Retry once on 401/403 with a fresh token.
 - If auth still fails, run `az login` and retry.
 - For GitHub, use `GITHUB_TOKEN` first and fallback to `gh auth token`.
+
+## Defaults and Tunables
+
+Command defaults:
+- `code search`: default `--provider all`, `--skip 0`, `--take 20`, `--format text`.
+- `code grep`: default pattern `.*`, default path `/`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
+- `pr list`: default statuses `active,completed,abandoned`, default `--skip 0`, default `--take 100`, drafts included unless `--exclude-drafts`.
+- `build grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
+- `board search`: default `--skip 0`, default `--take 20`.
+- `board mine`: default `--skip 0`, default `--take 20`, closed items excluded unless `--include-closed`.
+- `projects list`, `repos list`, `pr get`, `pr threads`, `build logs`, `board ticket`, `board list`: default `--format text`.
+
+Behavior defaults:
+- If `--branch` is omitted, provider default branch is used.
+- If `from_line` and `to_line` are omitted, full content range is used.
+- Single-provider commands are provider-positional; only `code search` supports fanout (`--provider all`).
 
 ## Integrations
 
