@@ -11,9 +11,10 @@ az account show >/dev/null
 ```
 
 Required arguments:
-- Azure DevOps: `azdo <project> <repo> [grep flags]`
-- GitHub: `github <repo> [grep flags]`
-- Pattern/path flags: `--pattern`, `--path`, `--glob`, `--from-line`, `--to-line`, `--output-mode`
+- Azure DevOps: `azdo <project> <repo> [pattern] [grep flags]`
+- GitHub: `github <repo> [pattern] [grep flags]`
+- Pattern is positional (`"some regex"`).
+- Path flags: `--path`, `--glob`, `--from-line`, `--to-line`, `--output-mode`
 
 First command to run:
 ```bash
@@ -23,7 +24,7 @@ python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code grep $ARGUMENTS
 If no results:
 1. If scope is unknown, run discovery first:
 ```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search --query "$ARGUMENTS" --take 30
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search "$ARGUMENTS" --take 30
 ```
 2. Narrow or broaden regex/path/glob as needed.
 3. If output is truncated, page using `--from-line` and `--to-line`.

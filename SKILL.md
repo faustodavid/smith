@@ -66,7 +66,7 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - Capture initial scope (project or repo if provided).
 
 2. Discovery.
-- Run `code search --query "..."` to find candidate repos and paths.
+- Run `code search "..."` to find candidate repos and paths.
 
 3. Structure map.
 - Run `code grep --output-mode files_with_matches` to map repository layout for the relevant path.
@@ -129,15 +129,15 @@ Stop and report unresolved when all are true:
 ## Commands (Read-Only)
 
 - `code search` is the only fanout command:
-  - `code search --query <text> [--project <name>] [--repos r1,r2] [--skip N] [--take N] [--provider azdo|github|all] [--format text|json]`
+  - `code search <text> [--project <name>] [--repos r1,r2] [--skip N] [--take N] [--provider azdo|github|all] [--format text|json]`
 - Discovery:
   - `projects list azdo [--format text|json]`
   - `projects list github [--format text|json]`
   - `repos list azdo <project> [--format text|json]`
   - `repos list github [--format text|json]`
 - Code:
-  - `code grep azdo <project> <repo> [--pattern <regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
-  - `code grep github <repo> [--pattern <regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
+  - `code grep azdo <project> <repo> [<regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
+  - `code grep github <repo> [<regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
 - Pull requests:
   - `pr list azdo <project> <repo> [--status active,completed,abandoned] [--creator user1,user2] [--date-from ISO] [--date-to ISO] [--skip N] [--take N] [--exclude-drafts] [--include-labels] [--format text|json]`
   - `pr list github <repo> [--status active,completed,abandoned] [--creator user1,user2] [--date-from ISO] [--date-to ISO] [--skip N] [--take N] [--exclude-drafts] [--include-labels] [--format text|json]`

@@ -42,7 +42,7 @@ gh auth login
 
 1. Return to discovery:
 ```bash
-python3 skills/smith/scripts/smith_cli.py code search --query "<broader query>"
+python3 skills/smith/scripts/smith_cli.py code search "<broader query>"
 ```
 2. Re-map candidate repo and path.
 3. Continue with focused grep.
@@ -63,7 +63,7 @@ python3 skills/smith/scripts/smith_cli.py code grep --provider github --repo rtl
 ```
 - New:
 ```bash
-python3 skills/smith/scripts/smith_cli.py code grep github rtl-devops-gitops --pattern "grafana.*"
+python3 skills/smith/scripts/smith_cli.py code grep github rtl-devops-gitops "grafana.*"
 ```
 
 - Old:

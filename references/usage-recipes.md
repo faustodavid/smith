@@ -19,18 +19,18 @@ az login
 
 1. Broad discovery:
 ```bash
-python3 skills/smith/scripts/smith_cli.py code search --query "<topic keywords>" --take 30
+python3 skills/smith/scripts/smith_cli.py code search "<topic keywords>" --take 30
 ```
 
 2. Structure mapping:
 ```bash
-python3 skills/smith/scripts/smith_cli.py code grep azdo <project> <repo> --path / --output-mode files_with_matches --pattern ".*"
+python3 skills/smith/scripts/smith_cli.py code grep azdo <project> <repo> ".*" --path / --output-mode files_with_matches
 ```
 
 3. Focused extraction:
 ```bash
-python3 skills/smith/scripts/smith_cli.py code grep azdo <project> <repo> --path <path> --glob "<glob>" --pattern "<regex>" --context-lines 2
-python3 skills/smith/scripts/smith_cli.py code grep github <repo> --path <path> --glob "<glob>" --pattern "<regex>" --context-lines 2
+python3 skills/smith/scripts/smith_cli.py code grep azdo <project> <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
+python3 skills/smith/scripts/smith_cli.py code grep github <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
 ```
 
 4. Report with evidence:
@@ -49,10 +49,10 @@ python3 skills/smith/scripts/smith_cli.py repos list github
 ## Broad search, then targeted grep
 
 ```bash
-python3 skills/smith/scripts/smith_cli.py code search --query "grafana AND path:*alerts*"
-python3 skills/smith/scripts/smith_cli.py code search --query "grafana" --provider github
-python3 skills/smith/scripts/smith_cli.py code grep azdo SRE rtl-devops-gitops --path /alerts --glob "*.yaml" --pattern "severity" --context-lines 2
-python3 skills/smith/scripts/smith_cli.py code grep github rtl-devops-gitops --glob "*.yaml" --pattern "severity" --context-lines 2
+python3 skills/smith/scripts/smith_cli.py code search "grafana AND path:*alerts*"
+python3 skills/smith/scripts/smith_cli.py code search "grafana" --provider github
+python3 skills/smith/scripts/smith_cli.py code grep azdo SRE rtl-devops-gitops "severity" --path /alerts --glob "*.yaml" --context-lines 2
+python3 skills/smith/scripts/smith_cli.py code grep github rtl-devops-gitops "severity" --glob "*.yaml" --context-lines 2
 ```
 
 ## Pull request investigation
@@ -93,8 +93,8 @@ python3 skills/smith/scripts/smith_cli.py stories ticket azdo SRE 123456
 ## JSON output for automation
 
 ```bash
-python3 skills/smith/scripts/smith_cli.py code search --query "terraform" --format json
-python3 skills/smith/scripts/smith_cli.py code grep github rtl-devops-gitops --pattern "grafana.*" --format json
+python3 skills/smith/scripts/smith_cli.py code search "terraform" --format json
+python3 skills/smith/scripts/smith_cli.py code grep github rtl-devops-gitops "grafana.*" --format json
 ```
 
 ## Re-sync Claude commands after template updates

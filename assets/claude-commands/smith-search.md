@@ -15,18 +15,18 @@ Required arguments:
 
 First command to run:
 ```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search --query "$ARGUMENTS"
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search "$ARGUMENTS"
 ```
 
 If no results:
 1. Broaden query terms and remove strict operators.
 2. Re-run `code search` with a larger take:
 ```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search --query "$ARGUMENTS" --take 50
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search "$ARGUMENTS" --take 50
 ```
 3. Optionally scope provider:
 ```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search --query "$ARGUMENTS" --provider github
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search "$ARGUMENTS" --provider github
 ```
 4. If still empty, report "not enough evidence" and suggest the next narrower domain keyword.
 

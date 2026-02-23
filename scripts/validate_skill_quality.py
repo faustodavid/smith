@@ -158,7 +158,7 @@ def run_trigger_checks() -> list[str]:
             errors.append(f"SKILL.md missing section: {section}")
 
     explicit_invocation_markers = [
-        "code search --query",
+        "code search <text>",
         "code grep github <repo>",
         "code grep azdo <project> <repo>",
         "pr list github <repo>",

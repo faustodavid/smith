@@ -67,8 +67,8 @@ def _command_key_from_argv(argv: list[str]) -> str | None:
     group = argv[0]
     action = argv[1]
 
-    if group == "code" and action == "grep":
-        return "code.grep"
+    if group == "code" and action in {"search", "grep"}:
+        return f"code.{action}"
     if group == "pr" and action in {"list", "get", "threads"}:
         return f"pr.{action}"
     if group == "build" and action in {"logs", "grep"}:
@@ -87,7 +87,21 @@ def _deprecated_syntax_message(argv: list[str]) -> str | None:
     if command is None:
         return None
 
+    if command == "code.search" and "--query" in argv:
+        return (
+            "Deprecated syntax detected for code.search. "
+            "Use positional query: 'smith code search \"grafana.*\"'."
+        )
+    if command == "code.search":
+        return None
+
     legacy_flags = {"--provider", "--project", "--repo"}
+    if command == "code.grep" and "--pattern" in argv:
+        return (
+            "Deprecated syntax detected for code.grep. "
+            "Use positional pattern: 'smith code grep github <repo> \"some regex\"' "
+            "or 'smith code grep azdo <project> <repo> \"some regex\"'."
+        )
     if not any(flag in argv for flag in legacy_flags):
         return None
 
@@ -138,12 +152,33 @@ def validate_args_for_provider(args: argparse.Namespace) -> None:
     if command != "code.search" and provider == "all":
         raise ValueError(f"{command} does not support provider 'all'. Use azdo or github.")
 
+    if command == "code.search" and not str(getattr(args, "query", "") or "").strip():
+        raise ValueError("code search requires a query. Example: smith code search \"grafana.*\"")
+
     if _requires_github_org(provider):
         if not os.getenv("GITHUB_ORG", "").strip():
             raise ValueError("Missing GITHUB_ORG. Example: export GITHUB_ORG=<org>")
 
     if command == "board.list" and provider == "github":
         raise ValueError("GitHub does not support `board list`. Use `board search` instead.")
+
+
+def _normalize_legacy_text_args(args: argparse.Namespace) -> None:
+    command = str(getattr(args, "command_id", ""))
+
+    if command == "code.search":
+        query_positional = str(getattr(args, "query", "") or "").strip()
+        query_flag = str(getattr(args, "query_flag", "") or "").strip()
+        if query_positional and query_flag and query_positional != query_flag:
+            raise ValueError("Provide query once: either positional query or --query, not both.")
+        args.query = query_positional or query_flag
+
+    if command == "code.grep":
+        pattern_positional = str(getattr(args, "pattern", "") or "").strip()
+        pattern_flag = str(getattr(args, "pattern_flag", "") or "").strip()
+        if pattern_positional and pattern_flag and pattern_positional != pattern_flag:
+            raise ValueError("Provide pattern once: either positional pattern or --pattern, not both.")
+        args.pattern = pattern_positional or pattern_flag or None
 
 
 def _emit_success(
@@ -444,7 +479,11 @@ def _set_handler(
 
 
 def _add_grep_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--pattern", help="Regex pattern (default: match all)")
+    parser.add_argument(
+        "pattern",
+        nargs="?",
+        help="Regex pattern (default: match all). Preferred positional form: smith code grep <provider> <scope> \"<regex>\"",
+    )
     parser.add_argument("--path", help="Path scope (default: /)")
     parser.add_argument("--branch", help="Branch name")
     parser.add_argument("--glob", help="Filename glob filter (e.g. *.tf)")
@@ -624,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
     code_sub = code.add_subparsers(dest="action", required=True)
 
     code_search = code_sub.add_parser("search", help="Broad code search across configured providers")
-    code_search.add_argument("--query", required=True, help="Search query text")
+    code_search.add_argument("query", nargs="?", help="Search query text")
     code_search.add_argument("--project", help="Project filter")
     code_search.add_argument("--repos", type=_csv_list, help="Comma-separated repository names")
     code_search.add_argument("--skip", type=int, default=0, help="Results offset")
@@ -770,6 +809,7 @@ def main(argv: list[str] | None = None) -> int:
     command = getattr(args, "command_id", "unknown")
 
     try:
+        _normalize_legacy_text_args(args)
         validate_args_for_provider(args)
         client = _client_from_args(args)
         return handler(client, args)
