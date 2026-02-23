@@ -54,37 +54,12 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - Extract proof with focused `code grep --output-mode content`.
 
 4. Prefer Git evidence over assumptions.
-- Treat repository config and Terraform/GitOps definitions as source of truth.
+- Treat repository files as source of truth.
 - Corroborate with PR/build/board data only when needed.
 
 5. Cite concrete source paths.
-- Include `project/repository:path` evidence in conclusions.
+- Always include `project/repository:path` (or equivalent) evidence as source at the end of the answer.
 - For requested changes, identify exact files and keys.
-
-6. Keep output practical.
-- Default to `--format text` for investigation loops.
-- Use `--format json` for deterministic parsing only.
-
-## Investigation Algorithm
-
-1. Discovery.
-- Run `smith code search "..."` to find candidate repos and paths.
-
-2. Structure map.
-- Run `smith code grep ... --output-mode files_with_matches` to map repository layout for the relevant path.
-
-3. Focused extraction.
-- Run `smith code grep ... --output-mode content` with `--path`, `--glob`, and regex refinement.
-- Use `--from-line` and `--to-line` for targeted pagination.
-
-4. Corroboration (optional).
-- Use `pr list`, `pr get`, and `pr threads` when changes, ownership context, or review discussion context matters.
-- Use `build logs` and `build grep` when CI failure context matters.
-- Use `board search`, `board ticket`, or `board mine` when work-item linkage matters.
-
-5. Final answer.
-- Provide concise conclusion plus evidence paths.
-- If unresolved, state "not enough evidence" and provide the next narrowing command.
 
 ## Stop Conditions
 
