@@ -6,12 +6,15 @@ import os
 import re
 import subprocess
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Literal
 from urllib.parse import quote, urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
 from azure.identity import DefaultAzureCredential
 
 from smith_format import (
@@ -71,6 +74,30 @@ class ThanosLocalClient:
         self.github_timeout_seconds = int(
             os.getenv("GITHUB_TIMEOUT_SECONDS", timeout_seconds or self.timeout_seconds)
         )
+        self._http_pool_maxsize = self._parse_int_env(
+            "SMITH_HTTP_POOL_MAXSIZE",
+            default=32,
+            min_value=1,
+            max_value=256,
+        )
+        self._http_pool_connections = self._parse_int_env(
+            "SMITH_HTTP_POOL_CONNECTIONS",
+            default=16,
+            min_value=1,
+            max_value=256,
+        )
+        self._http_retry_max_attempts = self._parse_int_env(
+            "SMITH_HTTP_RETRY_MAX_ATTEMPTS",
+            default=2,
+            min_value=1,
+            max_value=6,
+        )
+        retry_backoff_env = os.getenv("SMITH_HTTP_RETRY_BACKOFF_SECONDS")
+        try:
+            parsed_backoff = float((retry_backoff_env or "").strip() or "0.4")
+        except ValueError:
+            parsed_backoff = 0.4
+        self._http_retry_backoff_seconds = max(0.0, min(10.0, parsed_backoff))
 
         self._credential = credential or DefaultAzureCredential(
             exclude_interactive_browser_credential=True
@@ -79,7 +106,8 @@ class ThanosLocalClient:
         self._access_token: str | None = None
         self._github_token: str | None = None
         self._github_default_branch_cache: dict[str, str] = {}
-        self._github_thread_local = threading.local()
+        self._http_thread_local = threading.local()
+        self._configure_http_session(self._session)
 
         self.org_name = self._extract_org_name(self.org_url)
 
@@ -121,31 +149,53 @@ class ThanosLocalClient:
         headers: dict[str, str] | None = None,
         expect_json: bool = True,
     ) -> Any:
+        method_upper = method.upper()
+        is_retryable_get = method_upper == "GET" and self._http_retry_max_attempts > 1
+        http_session = self._get_http_session()
         request_headers = dict(headers or {})
         request_headers.setdefault("Accept", "application/json")
-        request_headers["Authorization"] = f"Bearer {self._get_token()}"
+        response: Any = None
+        for retry_index in range(self._http_retry_max_attempts):
+            first_attempt_headers = dict(request_headers)
+            first_attempt_headers["Authorization"] = f"Bearer {self._get_token()}"
+            try:
+                response = http_session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json_body,
+                    headers=first_attempt_headers,
+                    timeout=self.timeout_seconds,
+                )
+            except requests.RequestException as exc:
+                if is_retryable_get and retry_index < self._http_retry_max_attempts - 1:
+                    time.sleep(self._retry_sleep_seconds(response=None, retry_index=retry_index))
+                    continue
+                raise ThanosLocalApiError(f"Request error for {url}: {exc}") from exc
 
-        first_attempt_headers = dict(request_headers)
-        response = self._session.request(
-            method,
-            url,
-            params=params,
-            json=json_body,
-            headers=first_attempt_headers,
-            timeout=self.timeout_seconds,
-        )
+            if response.status_code in (401, 403):
+                retry_headers = dict(request_headers)
+                retry_headers["Authorization"] = f"Bearer {self._get_token(force_refresh=True)}"
+                response = http_session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json_body,
+                    headers=retry_headers,
+                    timeout=self.timeout_seconds,
+                )
 
-        if response.status_code in (401, 403):
-            retry_headers = dict(request_headers)
-            retry_headers["Authorization"] = f"Bearer {self._get_token(force_refresh=True)}"
-            response = self._session.request(
-                method,
-                url,
-                params=params,
-                json=json_body,
-                headers=retry_headers,
-                timeout=self.timeout_seconds,
-            )
+            if (
+                is_retryable_get
+                and self._is_retryable_get_status(int(response.status_code))
+                and retry_index < self._http_retry_max_attempts - 1
+            ):
+                time.sleep(self._retry_sleep_seconds(response=response, retry_index=retry_index))
+                continue
+            break
+
+        if response is None:
+            raise ThanosLocalApiError(f"No response received for {url}")
 
         if response.status_code in (401, 403):
             raise ThanosLocalAuthError(
@@ -281,38 +331,62 @@ class ThanosLocalClient:
         succeeded: list[str] = []
         failed: list[str] = []
 
-        for provider_name in providers:
+        def _run_provider_operation(provider_name: str) -> tuple[dict[str, Any], bool]:
             operation = operations.get(provider_name)
             if operation is None:
-                provider_results[provider_name] = self._provider_entry_error(
-                    "unsupported_provider",
-                    f"Provider '{provider_name}' is not supported for this command.",
+                return (
+                    self._provider_entry_error(
+                        "unsupported_provider",
+                        f"Provider '{provider_name}' is not supported for this command.",
+                    ),
+                    False,
                 )
-                failed.append(provider_name)
-                continue
 
             try:
                 payload = operation()
-                provider_results[provider_name] = self._provider_entry_success(payload)
-                succeeded.append(provider_name)
+                return self._provider_entry_success(payload), True
             except ValueError as exc:
-                provider_results[provider_name] = self._provider_entry_error(
+                return self._provider_entry_error(
                     "invalid_args",
                     str(exc),
-                )
-                failed.append(provider_name)
+                ), False
             except ThanosLocalAuthError as exc:
-                provider_results[provider_name] = self._provider_entry_error(
+                return self._provider_entry_error(
                     "auth_failure",
                     str(exc),
-                )
-                failed.append(provider_name)
+                ), False
             except ThanosLocalApiError as exc:
-                provider_results[provider_name] = self._provider_entry_error(
+                return self._provider_entry_error(
                     "api_error",
                     str(exc),
-                )
-                failed.append(provider_name)
+                ), False
+            except Exception as exc:  # pragma: no cover - defensive conversion
+                return self._provider_entry_error(
+                    "api_error",
+                    f"Unexpected provider error: {exc}",
+                ), False
+
+        if len(providers) > 1:
+            with ThreadPoolExecutor(max_workers=len(providers)) as executor:
+                futures = {
+                    provider_name: executor.submit(_run_provider_operation, provider_name)
+                    for provider_name in providers
+                }
+                for provider_name in providers:
+                    provider_entry, ok = futures[provider_name].result()
+                    provider_results[provider_name] = provider_entry
+                    if ok:
+                        succeeded.append(provider_name)
+                    else:
+                        failed.append(provider_name)
+        else:
+            for provider_name in providers:
+                provider_entry, ok = _run_provider_operation(provider_name)
+                provider_results[provider_name] = provider_entry
+                if ok:
+                    succeeded.append(provider_name)
+                else:
+                    failed.append(provider_name)
 
         if not succeeded:
             error_codes = [
@@ -390,33 +464,56 @@ class ThanosLocalClient:
         expect_json: bool = True,
         session: requests.Session | None = None,
     ) -> Any:
+        method_upper = method.upper()
+        is_retryable_get = method_upper == "GET" and self._http_retry_max_attempts > 1
         url = path if path.startswith("http") else f"{self.github_api_url}{path}"
         request_headers = dict(headers or {})
         request_headers.setdefault("Accept", "application/vnd.github+json")
         request_headers.setdefault("X-GitHub-Api-Version", self.github_api_version)
-        request_headers["Authorization"] = f"Bearer {self._get_github_token()}"
-        http_session = session or self._session
+        http_session = self._get_http_session(session=session)
 
-        response = http_session.request(
-            method,
-            url,
-            params=params,
-            json=json_body,
-            headers=request_headers,
-            timeout=self.github_timeout_seconds,
-        )
+        response: Any = None
+        for retry_index in range(self._http_retry_max_attempts):
+            first_attempt_headers = dict(request_headers)
+            first_attempt_headers["Authorization"] = f"Bearer {self._get_github_token()}"
+            try:
+                response = http_session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json_body,
+                    headers=first_attempt_headers,
+                    timeout=self.github_timeout_seconds,
+                )
+            except requests.RequestException as exc:
+                if is_retryable_get and retry_index < self._http_retry_max_attempts - 1:
+                    time.sleep(self._retry_sleep_seconds(response=None, retry_index=retry_index))
+                    continue
+                raise ThanosLocalApiError(f"Request error for {url}: {exc}") from exc
 
-        if response.status_code in (401, 403):
-            retry_headers = dict(request_headers)
-            retry_headers["Authorization"] = f"Bearer {self._get_github_token(force_refresh=True)}"
-            response = http_session.request(
-                method,
-                url,
-                params=params,
-                json=json_body,
-                headers=retry_headers,
-                timeout=self.github_timeout_seconds,
-            )
+            if response.status_code in (401, 403):
+                retry_headers = dict(request_headers)
+                retry_headers["Authorization"] = f"Bearer {self._get_github_token(force_refresh=True)}"
+                response = http_session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json_body,
+                    headers=retry_headers,
+                    timeout=self.github_timeout_seconds,
+                )
+
+            if (
+                is_retryable_get
+                and self._is_retryable_get_status(int(response.status_code))
+                and retry_index < self._http_retry_max_attempts - 1
+            ):
+                time.sleep(self._retry_sleep_seconds(response=response, retry_index=retry_index))
+                continue
+            break
+
+        if response is None:
+            raise ThanosLocalApiError(f"No response received for {url}")
 
         if response.status_code in (401, 403):
             raise ThanosLocalAuthError(
@@ -526,6 +623,31 @@ class ThanosLocalClient:
         return pattern in (".*", "^.*$", ".*$", "^.*")
 
     @staticmethod
+    def _slice_lines(
+        lines: list[str],
+        *,
+        from_line: int | None,
+        to_line: int | None,
+    ) -> list[str]:
+        if from_line is None and to_line is None:
+            return lines
+        start_idx = (from_line - 1) if from_line and from_line > 0 else 0
+        end_idx = to_line if to_line and to_line > 0 else len(lines)
+        return lines[start_idx:end_idx]
+
+    @staticmethod
+    def _compile_search_pattern(
+        pattern: str,
+        *,
+        case_insensitive: bool,
+    ) -> tuple[re.Pattern[str] | None, str | None]:
+        flags = re.IGNORECASE if case_insensitive else 0
+        try:
+            return re.compile(pattern, flags), None
+        except re.error as exc:
+            return None, f"Error: Invalid regex pattern - {exc}"
+
+    @staticmethod
     def _parse_bool_env(name: str, *, default: bool) -> bool:
         value = os.getenv(name)
         if value is None:
@@ -556,13 +678,66 @@ class ThanosLocalClient:
             return default
         return max(min_value, min(max_value, parsed))
 
-    def _github_get_thread_session(self) -> requests.Session:
-        session = getattr(self._github_thread_local, "session", None)
-        if isinstance(session, requests.Session):
+    def _configure_http_session(self, session: Any) -> None:
+        if not hasattr(session, "mount"):
+            return
+        try:
+            adapter = HTTPAdapter(
+                pool_connections=self._http_pool_connections,
+                pool_maxsize=self._http_pool_maxsize,
+                max_retries=0,
+            )
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+        except Exception:
+            # Keep compatibility with mocked/injected session objects.
+            return
+
+    @staticmethod
+    def _is_retryable_get_status(status_code: int) -> bool:
+        return status_code in {429, 500, 502, 503, 504}
+
+    @staticmethod
+    def _parse_retry_after_seconds(response: Any) -> float | None:
+        headers = getattr(response, "headers", {}) or {}
+        raw = headers.get("Retry-After")
+        if not raw:
+            return None
+        text = str(raw).strip()
+        if not text:
+            return None
+        if text.isdigit():
+            return max(0.0, float(text))
+        try:
+            retry_at = parsedate_to_datetime(text)
+        except Exception:
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
+        return max(0.0, (retry_at - now).total_seconds())
+
+    def _retry_sleep_seconds(self, *, response: Any, retry_index: int) -> float:
+        retry_after_seconds = self._parse_retry_after_seconds(response)
+        if retry_after_seconds is not None:
+            return min(30.0, retry_after_seconds)
+        return self._http_retry_backoff_seconds * (2**max(0, retry_index))
+
+    def _get_http_session(self, *, session: requests.Session | None = None) -> requests.Session:
+        if session is not None:
             return session
-        session = requests.Session()
-        self._github_thread_local.session = session
-        return session
+        if threading.current_thread() is threading.main_thread():
+            return self._session
+        worker_session = getattr(self._http_thread_local, "session", None)
+        if isinstance(worker_session, requests.Session):
+            return worker_session
+        worker_session = requests.Session()
+        self._configure_http_session(worker_session)
+        self._http_thread_local.session = worker_session
+        return worker_session
+
+    def _github_get_thread_session(self) -> requests.Session:
+        return self._get_http_session()
 
     def list_projects(self) -> list[dict[str, Any]]:
         url = f"{self.org_url}/_apis/projects"
@@ -757,12 +932,13 @@ class ThanosLocalClient:
                 "partial": False,
             }
 
-        flags = re.IGNORECASE if case_insensitive else 0
-        try:
-            search_pattern = re.compile(regex_pattern, flags)
-        except re.error as exc:
+        search_pattern, compile_error = self._compile_search_pattern(
+            regex_pattern,
+            case_insensitive=case_insensitive,
+        )
+        if compile_error:
             return {
-                "text": f"Error: Invalid regex pattern - {exc}",
+                "text": compile_error,
                 "files_matched": 0,
                 "warnings": [],
                 "partial": False,
@@ -788,11 +964,11 @@ class ThanosLocalClient:
                 warnings.append(f"failed to read {file_path}: {exc}")
                 continue
 
-            lines = content.splitlines()
-            if from_line is not None or to_line is not None:
-                start_idx = (from_line - 1) if from_line and from_line > 0 else 0
-                end_idx = to_line if to_line and to_line > 0 else len(lines)
-                lines = lines[start_idx:end_idx]
+            lines = self._slice_lines(
+                content.splitlines(),
+                from_line=from_line,
+                to_line=to_line,
+            )
 
             match_line_nums = {
                 idx for idx, line in enumerate(lines) if search_pattern.search(line)
@@ -859,7 +1035,8 @@ class ThanosLocalClient:
         else:
             project_names = [entry["name"] for entry in self.list_projects() if entry.get("name")]
 
-        repo_filter = {repo.lower() for repo in repos or []}
+        repo_targets = [repo for repo in repos or [] if repo]
+        repo_filter = {repo.lower() for repo in repo_targets}
         creator_filter = [creator.lower() for creator in creators or []]
 
         from_dt = self._parse_iso_datetime(date_from)
@@ -868,103 +1045,111 @@ class ThanosLocalClient:
         results: list[dict[str, Any]] = []
 
         for project_name in project_names:
-            for status in normalized_status:
-                page_size = min(max(take, 1), 100)
-                local_skip = 0
-                while True:
-                    url = f"{self.org_url}/{project_name}/_apis/git/pullrequests"
-                    params: dict[str, Any] = {
-                        "api-version": self.api_version,
-                        "searchCriteria.status": status,
-                        "$top": page_size,
-                        "$skip": local_skip,
-                    }
-                    if include_labels:
-                        params["searchCriteria.includeLabels"] = "true"
-                    params["searchCriteria.queryTimeRangeType"] = (
-                        "closed" if status in {"completed", "abandoned"} else "created"
-                    )
-                    if from_dt:
-                        params["searchCriteria.minTime"] = from_dt.astimezone(UTC).strftime(
-                            "%Y-%m-%dT%H:%M:%SZ"
+            repo_scopes = repo_targets or [None]
+            for repo_scope in repo_scopes:
+                for status in normalized_status:
+                    page_size = min(max(take, 1), 100)
+                    local_skip = 0
+                    if repo_scope:
+                        url = (
+                            f"{self.org_url}/{project_name}/_apis/git/repositories/"
+                            f"{quote(str(repo_scope), safe='')}/pullrequests"
                         )
-                    if to_dt:
-                        params["searchCriteria.maxTime"] = to_dt.astimezone(UTC).strftime(
-                            "%Y-%m-%dT%H:%M:%SZ"
-                        )
-
-                    data = self._request_json("GET", url, params=params)
-                    items = data.get("value", [])
-                    if not isinstance(items, list) or not items:
-                        break
-
-                    for item in items:
-                        if not isinstance(item, dict):
-                            continue
-
-                        if exclude_drafts and item.get("isDraft"):
-                            continue
-
-                        repository = item.get("repository") or {}
-                        repository_name = str(repository.get("name") or "")
-                        repository_id = str(repository.get("id") or "")
-                        if repo_filter:
-                            if (
-                                repository_name.lower() not in repo_filter
-                                and repository_id.lower() not in repo_filter
-                            ):
-                                continue
-
-                        created_by = item.get("createdBy") or {}
-                        creator_display = str(created_by.get("displayName") or "")
-                        creator_unique = str(created_by.get("uniqueName") or "")
-                        if creator_filter:
-                            source = f"{creator_display} {creator_unique}".lower()
-                            if not any(token in source for token in creator_filter):
-                                continue
-
-                        creation_dt = self._parse_iso_datetime(item.get("creationDate"))
-                        closed_dt = self._parse_iso_datetime(item.get("closedDate"))
-                        ref_dt = closed_dt if status in {"completed", "abandoned"} else creation_dt
-
-                        if from_dt and ref_dt and ref_dt < from_dt:
-                            continue
-                        if to_dt and ref_dt and ref_dt > to_dt:
-                            continue
-
-                        labels: list[str] = []
+                    else:
+                        url = f"{self.org_url}/{project_name}/_apis/git/pullrequests"
+                    while True:
+                        params: dict[str, Any] = {
+                            "api-version": self.api_version,
+                            "searchCriteria.status": status,
+                            "$top": page_size,
+                            "$skip": local_skip,
+                        }
                         if include_labels:
-                            for label in item.get("labels") or []:
-                                if isinstance(label, dict):
-                                    name = str(label.get("name") or "").strip()
-                                    if name:
-                                        labels.append(name)
-
-                        results.append(
-                            {
-                                "pr_id": item.get("pullRequestId"),
-                                "title": item.get("title") or "",
-                                "created_by": creator_display or creator_unique,
-                                "status": status,
-                                "creation_date": item.get("creationDate"),
-                                "project_name": project_name,
-                                "repository_name": repository_name,
-                                "repository_id": repository_id,
-                                "closed_date": (
-                                    closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
-                                    if closed_dt
-                                    else None
-                                ),
-                                "source_branch": normalize_branch_name(item.get("sourceRefName")),
-                                "target_branch": normalize_branch_name(item.get("targetRefName")),
-                                "target_ref": item.get("targetRefName"),
-                                "labels": labels,
-                            }
+                            params["searchCriteria.includeLabels"] = "true"
+                        params["searchCriteria.queryTimeRangeType"] = (
+                            "closed" if status in {"completed", "abandoned"} else "created"
                         )
+                        if from_dt:
+                            params["searchCriteria.minTime"] = from_dt.astimezone(UTC).strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            )
+                        if to_dt:
+                            params["searchCriteria.maxTime"] = to_dt.astimezone(UTC).strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            )
 
-                    if len(items) < page_size:
-                        break
-                    local_skip += page_size
+                        data = self._request_json("GET", url, params=params)
+                        items = data.get("value", [])
+                        if not isinstance(items, list) or not items:
+                            break
+
+                        for item in items:
+                            if not isinstance(item, dict):
+                                continue
+
+                            if exclude_drafts and item.get("isDraft"):
+                                continue
+
+                            repository = item.get("repository") or {}
+                            repository_name = str(repository.get("name") or "")
+                            repository_id = str(repository.get("id") or "")
+                            if repo_scope is None and repo_filter:
+                                if (
+                                    repository_name.lower() not in repo_filter
+                                    and repository_id.lower() not in repo_filter
+                                ):
+                                    continue
+
+                            created_by = item.get("createdBy") or {}
+                            creator_display = str(created_by.get("displayName") or "")
+                            creator_unique = str(created_by.get("uniqueName") or "")
+                            if creator_filter:
+                                source = f"{creator_display} {creator_unique}".lower()
+                                if not any(token in source for token in creator_filter):
+                                    continue
+
+                            creation_dt = self._parse_iso_datetime(item.get("creationDate"))
+                            closed_dt = self._parse_iso_datetime(item.get("closedDate"))
+                            ref_dt = closed_dt if status in {"completed", "abandoned"} else creation_dt
+
+                            if from_dt and ref_dt and ref_dt < from_dt:
+                                continue
+                            if to_dt and ref_dt and ref_dt > to_dt:
+                                continue
+
+                            labels: list[str] = []
+                            if include_labels:
+                                for label in item.get("labels") or []:
+                                    if isinstance(label, dict):
+                                        name = str(label.get("name") or "").strip()
+                                        if name:
+                                            labels.append(name)
+
+                            results.append(
+                                {
+                                    "pr_id": item.get("pullRequestId"),
+                                    "title": item.get("title") or "",
+                                    "created_by": creator_display or creator_unique,
+                                    "status": status,
+                                    "creation_date": item.get("creationDate"),
+                                    "project_name": project_name,
+                                    "repository_name": repository_name,
+                                    "repository_id": repository_id,
+                                    "closed_date": (
+                                        closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
+                                        if closed_dt
+                                        else None
+                                    ),
+                                    "source_branch": normalize_branch_name(item.get("sourceRefName")),
+                                    "target_branch": normalize_branch_name(item.get("targetRefName")),
+                                    "target_ref": item.get("targetRefName"),
+                                    "labels": labels,
+                                }
+                            )
+
+                        if len(items) < page_size:
+                            break
+                        local_skip += page_size
 
         total = len(results)
         results.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
@@ -1188,12 +1373,13 @@ class ThanosLocalClient:
                 "partial": False,
             }
 
-        flags = re.IGNORECASE if case_insensitive else 0
-        try:
-            search_pattern = re.compile(regex_pattern, flags)
-        except re.error as exc:
+        search_pattern, compile_error = self._compile_search_pattern(
+            regex_pattern,
+            case_insensitive=case_insensitive,
+        )
+        if compile_error:
             return {
-                "text": f"Error: Invalid regex pattern - {exc}",
+                "text": compile_error,
                 "logs_matched": 0,
                 "warnings": [],
                 "partial": False,
@@ -1272,11 +1458,11 @@ class ThanosLocalClient:
                 warnings.append(f"failed to read Log {current_log_id}: {exc}")
                 continue
 
-            lines = content.splitlines()
-            if from_line is not None or to_line is not None:
-                start_idx = (from_line - 1) if from_line and from_line > 0 else 0
-                end_idx = to_line if to_line and to_line > 0 else len(lines)
-                lines = lines[start_idx:end_idx]
+            lines = self._slice_lines(
+                content.splitlines(),
+                from_line=from_line,
+                to_line=to_line,
+            )
 
             matches = {idx for idx, line in enumerate(lines) if search_pattern.search(line)}
             if not matches:
@@ -1620,8 +1806,9 @@ class ThanosLocalClient:
 
         for target_repo in search_targets:
             page = 1
-            per_page = 100
             while len(all_items) < desired:
+                remaining = max(1, desired - len(all_items))
+                per_page = min(100, remaining)
                 qualifiers = [query]
                 if target_repo:
                     qualifiers.append(f"repo:{org}/{target_repo}")
@@ -1666,26 +1853,94 @@ class ThanosLocalClient:
     ) -> list[dict[str, Any]]:
         normalized_path = self._normalize_path(path)
         ref = normalize_branch_name(branch) or self._github_get_repository_default_branch(repo)
-        encoded_ref = quote(ref, safe="")
-        data = self._github_request_json(
-            "GET",
-            f"{self._github_repo_prefix(repo)}/git/trees/{encoded_ref}",
-            params={"recursive": "1"},
-        )
-        tree = data.get("tree", [])
         prefix = normalized_path.strip("/")
-        output: list[dict[str, Any]] = []
-        for item in tree:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") != "blob":
-                continue
-            entry_path = str(item.get("path") or "")
-            if prefix:
-                if entry_path != prefix and not entry_path.startswith(f"{prefix}/"):
+        repo_prefix = self._github_repo_prefix(repo)
+
+        def _tree_entries(treeish: str, *, recursive: bool) -> list[dict[str, Any]]:
+            encoded_treeish = quote(treeish, safe="")
+            params = {"recursive": "1"} if recursive else None
+            data = self._github_request_json(
+                "GET",
+                f"{repo_prefix}/git/trees/{encoded_treeish}",
+                params=params,
+            )
+            entries = data.get("tree", [])
+            if not isinstance(entries, list):
+                return []
+            return [item for item in entries if isinstance(item, dict)]
+
+        def _to_file_entry(entry_path: str, *, sha: str | None) -> dict[str, Any]:
+            return {
+                "path": f"/{entry_path.lstrip('/')}",
+                "is_binary": False,
+                "sha": sha,
+            }
+
+        if not prefix:
+            root_tree = _tree_entries(ref, recursive=True)
+            output: list[dict[str, Any]] = []
+            for item in root_tree:
+                if item.get("type") != "blob":
                     continue
-            output.append({"path": f"/{entry_path}", "is_binary": False})
-        return output
+                output.append(
+                    _to_file_entry(
+                        str(item.get("path") or ""),
+                        sha=str(item.get("sha") or "") or None,
+                    )
+                )
+            return output
+
+        path_parts = [part for part in prefix.split("/") if part]
+        current_entries = _tree_entries(ref, recursive=False)
+        resolved_parts: list[str] = []
+
+        for index, part in enumerate(path_parts):
+            matched = next(
+                (item for item in current_entries if str(item.get("path") or "") == part),
+                None,
+            )
+            if not isinstance(matched, dict):
+                return []
+
+            node_type = str(matched.get("type") or "")
+            resolved_parts.append(part)
+            is_last = index == len(path_parts) - 1
+
+            if is_last and node_type == "blob":
+                return [
+                    _to_file_entry(
+                        "/".join(resolved_parts),
+                        sha=str(matched.get("sha") or "") or None,
+                    )
+                ]
+
+            if node_type != "tree":
+                return []
+
+            tree_sha = str(matched.get("sha") or "").strip()
+            if not tree_sha:
+                return []
+
+            if is_last:
+                subtree = _tree_entries(tree_sha, recursive=True)
+                subtree_prefix = "/".join(resolved_parts)
+                output: list[dict[str, Any]] = []
+                for item in subtree:
+                    if item.get("type") != "blob":
+                        continue
+                    rel_path = str(item.get("path") or "")
+                    full_path = f"{subtree_prefix}/{rel_path}" if rel_path else subtree_prefix
+                    output.append(
+                        _to_file_entry(
+                            full_path,
+                            sha=str(item.get("sha") or "") or None,
+                        )
+                    )
+                return output
+
+            current_entries = _tree_entries(tree_sha, recursive=False)
+
+        return []
 
     def _github_get_file_text(
         self,
@@ -1693,8 +1948,27 @@ class ThanosLocalClient:
         repo: str,
         file_path: str,
         branch: str | None,
+        blob_sha: str | None = None,
         session: requests.Session | None = None,
     ) -> str:
+        if blob_sha:
+            try:
+                blob_data = self._github_request_json(
+                    "GET",
+                    f"{self._github_repo_prefix(repo)}/git/blobs/{quote(blob_sha, safe='')}",
+                    session=session,
+                )
+                blob_content = blob_data.get("content")
+                blob_encoding = str(blob_data.get("encoding") or "")
+                if isinstance(blob_content, str) and blob_encoding.lower() == "base64":
+                    decoded = base64.b64decode(blob_content.encode("utf-8"))
+                    return decoded.decode("utf-8", errors="replace")
+                if isinstance(blob_content, str):
+                    return blob_content
+            except Exception:
+                # Fall back to path/ref retrieval when blob endpoint is unavailable for this object.
+                pass
+
         ref = normalize_branch_name(branch) or self._github_get_repository_default_branch(repo)
         encoded_path = quote(file_path.lstrip("/"), safe="/")
         data = self._github_request_json(
@@ -1716,6 +1990,18 @@ class ThanosLocalClient:
             params={"ref": ref},
             session=session,
         )
+
+    @staticmethod
+    def _github_default_grep_workers(candidate_files: int) -> int:
+        if candidate_files <= 1:
+            return 1
+        if candidate_files <= 8:
+            return 4
+        if candidate_files <= 32:
+            return 8
+        if candidate_files <= 96:
+            return 16
+        return 20
 
     def _github_grep(
         self,
@@ -1757,12 +2043,13 @@ class ThanosLocalClient:
                 "partial": False,
             }
 
-        flags = re.IGNORECASE if case_insensitive else 0
-        try:
-            search_pattern = re.compile(regex_pattern, flags)
-        except re.error as exc:
+        search_pattern, compile_error = self._compile_search_pattern(
+            regex_pattern,
+            case_insensitive=case_insensitive,
+        )
+        if compile_error:
             return {
-                "text": f"Error: Invalid regex pattern - {exc}",
+                "text": compile_error,
                 "files_matched": 0,
                 "warnings": [],
                 "partial": False,
@@ -1778,7 +2065,7 @@ class ThanosLocalClient:
         )
         grep_max_workers = self._parse_int_env(
             "GITHUB_GREP_MAX_WORKERS",
-            default=8,
+            default=self._github_default_grep_workers(len(matching)),
             min_value=1,
             max_value=32,
         )
@@ -1786,6 +2073,7 @@ class ThanosLocalClient:
 
         def _process_file(
             file_path: str,
+            blob_sha: str | None,
             *,
             session: requests.Session | None = None,
         ) -> tuple[list[str], int, str | None]:
@@ -1794,16 +2082,17 @@ class ThanosLocalClient:
                     repo=repo,
                     file_path=file_path,
                     branch=resolved_branch,
+                    blob_sha=blob_sha,
                     session=session,
                 )
             except Exception as exc:
                 return [], 0, f"failed to read {file_path}: {exc}"
 
-            lines = content.splitlines()
-            if from_line is not None or to_line is not None:
-                start_idx = (from_line - 1) if from_line and from_line > 0 else 0
-                end_idx = to_line if to_line and to_line > 0 else len(lines)
-                lines = lines[start_idx:end_idx]
+            lines = self._slice_lines(
+                content.splitlines(),
+                from_line=from_line,
+                to_line=to_line,
+            )
 
             match_line_nums = {idx for idx, line in enumerate(lines) if search_pattern.search(line)}
             if not match_line_nums:
@@ -1825,18 +2114,31 @@ class ThanosLocalClient:
                 None,
             )
 
-        def _process_file_in_worker(file_path: str) -> tuple[list[str], int, str | None]:
-            return _process_file(file_path, session=self._github_get_thread_session())
+        def _process_file_in_worker(
+            file_path: str,
+            blob_sha: str | None,
+        ) -> tuple[list[str], int, str | None]:
+            return _process_file(
+                file_path,
+                blob_sha,
+                session=self._github_get_thread_session(),
+            )
 
-        file_paths = [str(item.get("path", "")) for item in matching]
+        file_entries = [
+            (
+                str(item.get("path", "")),
+                str(item.get("sha") or "") or None,
+            )
+            for item in matching
+        ]
         if use_parallel:
-            max_workers = min(grep_max_workers, len(file_paths))
+            max_workers = min(grep_max_workers, len(file_entries))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [
-                    executor.submit(_process_file_in_worker, file_path)
-                    for file_path in file_paths
+                    executor.submit(_process_file_in_worker, file_path, blob_sha)
+                    for file_path, blob_sha in file_entries
                 ]
-                for file_path, future in zip(file_paths, futures):
+                for (file_path, _blob_sha), future in zip(file_entries, futures):
                     try:
                         lines_out, matched_count, warning = future.result()
                     except Exception as exc:  # pragma: no cover - safety net
@@ -1848,8 +2150,8 @@ class ThanosLocalClient:
                     files_matched += matched_count
                     output_lines.extend(lines_out)
         else:
-            for file_path in file_paths:
-                lines_out, matched_count, warning = _process_file(file_path)
+            for file_path, blob_sha in file_entries:
+                lines_out, matched_count, warning = _process_file(file_path, blob_sha)
                 if warning:
                     warnings.append(warning)
                     continue
@@ -1908,63 +2210,92 @@ class ThanosLocalClient:
         creator_filter = [item.lower() for item in creators or []]
         from_dt = self._parse_iso_datetime(date_from)
         to_dt = self._parse_iso_datetime(date_to)
+        desired_count = max(1, max(0, skip) + max(1, take))
+        single_repo_mode = len(repo_names) == 1
+
+        states_to_fetch: list[str] = []
+        if "active" in normalized_status:
+            states_to_fetch.append("open")
+        if any(item in normalized_status for item in {"completed", "abandoned"}):
+            states_to_fetch.append("closed")
+        if not states_to_fetch:
+            states_to_fetch = ["all"]
 
         output: list[dict[str, Any]] = []
         for repo_name in repo_names:
-            pulls = self._github_get_paginated_list(
-                f"{self._github_repo_prefix(repo_name)}/pulls",
-                params={"state": "all"},
-                limit=300,
-            )
-            for item in pulls:
-                status = self._github_pr_status(item)
-                if status not in normalized_status:
-                    continue
-                if exclude_drafts and bool(item.get("draft")):
-                    continue
+            for github_state in states_to_fetch:
+                page = 1
+                per_page = 100
+                while True:
+                    pulls_data = self._github_request(
+                        "GET",
+                        f"{self._github_repo_prefix(repo_name)}/pulls",
+                        params={"state": github_state, "per_page": per_page, "page": page},
+                        expect_json=True,
+                    )
+                    if not isinstance(pulls_data, list):
+                        break
+                    pulls = [item for item in pulls_data if isinstance(item, dict)]
+                    if not pulls:
+                        break
 
-                user = item.get("user") or {}
-                creator = str(user.get("login") or "")
-                if creator_filter and not any(token in creator.lower() for token in creator_filter):
-                    continue
+                    for item in pulls:
+                        status = self._github_pr_status(item)
+                        if status not in normalized_status:
+                            continue
+                        if exclude_drafts and bool(item.get("draft")):
+                            continue
 
-                created_dt = self._parse_iso_datetime(item.get("created_at"))
-                closed_dt = self._parse_iso_datetime(item.get("closed_at"))
-                reference_dt = closed_dt if status in {"completed", "abandoned"} else created_dt
-                if from_dt and reference_dt and reference_dt < from_dt:
-                    continue
-                if to_dt and reference_dt and reference_dt > to_dt:
-                    continue
+                        user = item.get("user") or {}
+                        creator = str(user.get("login") or "")
+                        if creator_filter and not any(token in creator.lower() for token in creator_filter):
+                            continue
 
-                labels: list[str] = []
-                if include_labels:
-                    for label in item.get("labels") or []:
-                        if isinstance(label, dict):
-                            name = str(label.get("name") or "").strip()
-                            if name:
-                                labels.append(name)
+                        created_dt = self._parse_iso_datetime(item.get("created_at"))
+                        closed_dt = self._parse_iso_datetime(item.get("closed_at"))
+                        reference_dt = closed_dt if status in {"completed", "abandoned"} else created_dt
+                        if from_dt and reference_dt and reference_dt < from_dt:
+                            continue
+                        if to_dt and reference_dt and reference_dt > to_dt:
+                            continue
 
-                output.append(
-                    {
-                        "pr_id": item.get("number"),
-                        "title": item.get("title") or "",
-                        "created_by": creator,
-                        "status": status,
-                        "creation_date": item.get("created_at"),
-                        "project_name": self._require_github_org(),
-                        "repository_name": repo_name,
-                        "repository_id": item.get("id"),
-                        "closed_date": (
-                            closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
-                            if closed_dt
-                            else None
-                        ),
-                        "source_branch": item.get("head", {}).get("ref"),
-                        "target_branch": item.get("base", {}).get("ref"),
-                        "target_ref": item.get("base", {}).get("ref"),
-                        "labels": labels,
-                    }
-                )
+                        labels: list[str] = []
+                        if include_labels:
+                            for label in item.get("labels") or []:
+                                if isinstance(label, dict):
+                                    name = str(label.get("name") or "").strip()
+                                    if name:
+                                        labels.append(name)
+
+                        output.append(
+                            {
+                                "pr_id": item.get("number"),
+                                "title": item.get("title") or "",
+                                "created_by": creator,
+                                "status": status,
+                                "creation_date": item.get("created_at"),
+                                "project_name": self._require_github_org(),
+                                "repository_name": repo_name,
+                                "repository_id": item.get("id"),
+                                "closed_date": (
+                                    closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
+                                    if closed_dt
+                                    else None
+                                ),
+                                "source_branch": item.get("head", {}).get("ref"),
+                                "target_branch": item.get("base", {}).get("ref"),
+                                "target_ref": item.get("base", {}).get("ref"),
+                                "labels": labels,
+                            }
+                        )
+
+                    if single_repo_mode and len(output) >= desired_count:
+                        break
+                    if len(pulls) < per_page:
+                        break
+                    page += 1
+                if single_repo_mode and len(output) >= desired_count:
+                    break
 
         output.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
         paged = output[max(0, skip) : max(0, skip) + max(1, take)]
@@ -2162,12 +2493,13 @@ class ThanosLocalClient:
                 "partial": False,
             }
 
-        flags = re.IGNORECASE if case_insensitive else 0
-        try:
-            search_pattern = re.compile(regex_pattern, flags)
-        except re.error as exc:
+        search_pattern, compile_error = self._compile_search_pattern(
+            regex_pattern,
+            case_insensitive=case_insensitive,
+        )
+        if compile_error:
             return {
-                "text": f"Error: Invalid regex pattern - {exc}",
+                "text": compile_error,
                 "logs_matched": 0,
                 "warnings": [],
                 "partial": False,
@@ -2175,11 +2507,11 @@ class ThanosLocalClient:
 
         if log_id is not None and is_match_all:
             content = self._github_get_build_log_content(repo=repo, log_id=log_id)
-            lines = content.splitlines()
-            if from_line is not None or to_line is not None:
-                start_idx = (from_line - 1) if from_line and from_line > 0 else 0
-                end_idx = to_line if to_line and to_line > 0 else len(lines)
-                lines = lines[start_idx:end_idx]
+            lines = self._slice_lines(
+                content.splitlines(),
+                from_line=from_line,
+                to_line=to_line,
+            )
 
             if output_mode == "logs_with_matches":
                 return {"text": f"Log {log_id}", "logs_matched": 1, "warnings": [], "partial": False}
@@ -2220,11 +2552,11 @@ class ThanosLocalClient:
                 warnings.append(f"failed to read Log {current_log_id}: {exc}")
                 continue
 
-            lines = content.splitlines()
-            if from_line is not None or to_line is not None:
-                start_idx = (from_line - 1) if from_line and from_line > 0 else 0
-                end_idx = to_line if to_line and to_line > 0 else len(lines)
-                lines = lines[start_idx:end_idx]
+            lines = self._slice_lines(
+                content.splitlines(),
+                from_line=from_line,
+                to_line=to_line,
+            )
 
             matches = {idx for idx, line in enumerate(lines) if search_pattern.search(line)}
             if not matches:
