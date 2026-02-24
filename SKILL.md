@@ -38,6 +38,20 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - Start with `code search` to discover candidate repositories and paths.
 - If query intent is still unclear, return findings plus the best next narrowing command.
 
+## Investigation Algorithm
+
+1. Start broad:
+- Run `code search` with the user query to identify candidate repositories.
+
+2. Map repository structure before deep extraction:
+- Run `code grep --output-mode files_with_matches` in the best candidate repo to identify likely files and folders.
+
+3. Extract proof with focused matching:
+- Run `code grep --output-mode content` with narrowed `--path` or `--glob` to capture concrete evidence lines.
+
+4. Escalate only as needed:
+- If code evidence is insufficient, add targeted `pr`, `build`, or `board` read commands and keep proof paths in output.
+
 ## Rules
 
 1. Work autonomously and complete the investigation loop.
