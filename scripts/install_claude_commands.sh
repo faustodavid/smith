@@ -15,9 +15,6 @@ fi
 
 mkdir -p "$TARGET_DIR"
 
-# Hard cutover: remove old thanos command files before installing smith commands
-find "$TARGET_DIR" -maxdepth 1 -type f -name "thanos-*.md" -delete
-
 for src in "$SOURCE_DIR"/*.md; do
   base="$(basename "$src")"
   dst="$TARGET_DIR/$base"

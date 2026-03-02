@@ -1,4 +1,4 @@
 interface:
   display_name: "Smith"
   short_description: "AZDO+GitHub search/grep + DevOps read workflows"
-  default_prompt: "Use $smith to run Thanos-style Azure DevOps and GitHub search, grep, PR, build, and board read workflows with local credentials."
+  default_prompt: "Use $smith to run Smith-style Azure DevOps and GitHub search, grep, PR, build, and board read workflows with local credentials."

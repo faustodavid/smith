@@ -37,7 +37,7 @@ def _candidate_roots() -> list[Path]:
     candidates.extend([this_file.parent, *this_file.parents])
 
     home = Path.home()
-    candidates.append((home / "Documents" / "projects" / "thanos").resolve())
+    candidates.append((home / "Documents" / "projects" / "smith").resolve())
 
     unique: list[Path] = []
     seen: set[Path] = set()
@@ -55,7 +55,7 @@ def _resolve_fixture(filename: str) -> Path:
         if path.exists():
             return path
     # Return the most likely repo path for clear error output
-    return Path.home() / "Documents" / "projects" / "thanos" / "tests" / "skills" / "smith" / "fixtures" / filename
+    return Path.home() / "Documents" / "projects" / "smith" / "tests" / "skills" / "smith" / "fixtures" / filename
 
 
 TRIGGER_FIXTURE = _resolve_fixture("trigger_cases.json")

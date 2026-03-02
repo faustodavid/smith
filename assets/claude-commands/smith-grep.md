@@ -1,4 +1,4 @@
-description: Thanos-style targeted grep for Azure DevOps/GitHub repos via smith CLI (read-only)
+description: Smith-style targeted grep for Azure DevOps/GitHub repos via smith CLI (read-only)
 ---
 
 Scope: read-only provider-specific investigation only.

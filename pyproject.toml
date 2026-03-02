@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smith"
+version = "0.1.0"
+description = "Read-only Azure DevOps and GitHub investigation CLI"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+  { name = "Smith OSS Contributors" }
+]
+dependencies = [
+  "requests>=2.31.0",
+  "azure-identity>=1.17.1"
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.11.0",
+  "pytest>=8.3.0",
+  "ruff>=0.6.0",
+  "types-requests>=2.32.0.20241016"
+]
+
+[project.scripts]
+smith = "smith.cli.main:entrypoint"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 140
+src = ["src", "scripts", "tests"]
+extend-exclude = ["scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_unused_ignores = true
+show_error_codes = true
+plugins = []
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["azure.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["scripts.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+  "smith.client",
+  "smith.formatting",
+  "smith.cli.handlers",
+  "smith.cli.parser",
+  "smith.cli.main",
+  "smith.providers.*",
+  "smith.services.*",
+]
+ignore_errors = true

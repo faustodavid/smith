@@ -1,4 +1,4 @@
-description: Thanos-style Azure DevOps + GitHub discovery search via smith CLI (read-only)
+description: Smith-style Azure DevOps + GitHub discovery search via smith CLI (read-only)
 ---
 
 Scope: read-only provider-aware investigation only.
