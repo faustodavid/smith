@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import re
 import subprocess
@@ -11,11 +12,16 @@ from urllib.parse import quote
 
 import requests
 
-from smith.config import RuntimeConfig
+from smith.config import RuntimeConfig, parse_bool_env, parse_int_env
 from smith.errors import SmithApiError, SmithAuthError
 from smith.formatting import format_grep_matches, glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers.base import BaseProvider
-from smith.config import parse_bool_env, parse_int_env
+from smith.providers.helpers import (
+    build_grep_result,
+    grep_build_logs_core,
+    grep_compile_error_result,
+    paginate_results,
+)
 from smith.utils import (
     compile_search_pattern,
     match_all_pattern,
@@ -23,6 +29,8 @@ from smith.utils import (
     parse_iso_datetime,
     slice_lines,
 )
+
+logger = logging.getLogger(__name__)
 
 GITHUB_DEFAULT_API_URL = "https://api.github.com"
 GITHUB_DEFAULT_API_VERSION = "2022-11-28"
@@ -183,7 +191,7 @@ class GitHubProvider(BaseProvider):
         if project and not effective_repos:
             effective_repos = [project]
 
-        search_targets: list[str | None] = effective_repos or [None]
+        search_targets: list[str | None] = list(effective_repos) if effective_repos else [None]
         desired = max(1, skip + take)
         all_items: list[dict[str, Any]] = []
         total_count = 0
@@ -349,8 +357,8 @@ class GitHubProvider(BaseProvider):
                     return decoded.decode("utf-8", errors="replace")
                 if isinstance(blob_content, str):
                     return blob_content
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Blob fetch failed for %s sha=%s, falling back to contents API: %s", file_path, blob_sha, exc)
 
         ref = normalize_branch_name(branch) or self._get_repository_default_branch(repo)
         encoded_path = quote(file_path.lstrip("/"), safe="/")
@@ -430,13 +438,8 @@ class GitHubProvider(BaseProvider):
             regex_pattern,
             case_insensitive=case_insensitive,
         )
-        if compile_error:
-            return {
-                "text": compile_error,
-                "files_matched": 0,
-                "warnings": [],
-                "partial": False,
-            }
+        if compile_error or search_pattern is None:
+            return grep_compile_error_result(compile_error or "Invalid pattern")
 
         output_lines: list[str] = []
         warnings: list[str] = []
@@ -541,18 +544,13 @@ class GitHubProvider(BaseProvider):
                 files_matched += matched_count
                 output_lines.extend(lines_out)
 
-        text = "\n".join(output_lines)
-        text = truncate_output(
-            text,
-            self.max_output_chars,
-            "Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
+        return build_grep_result(
+            output_lines=output_lines,
+            matched_count=files_matched,
+            warnings=warnings,
+            max_output_chars=self.max_output_chars,
+            truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
         )
-        return {
-            "text": text,
-            "files_matched": files_matched,
-            "warnings": warnings,
-            "partial": bool(warnings),
-        }
 
     @staticmethod
     def _pr_status(pr: dict[str, Any]) -> str:
@@ -681,7 +679,7 @@ class GitHubProvider(BaseProvider):
                     break
 
         output.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
-        paged = output[max(0, skip) : max(0, skip) + max(1, take)]
+        paged = paginate_results(output, skip=skip, take=take)
         has_more = len(output) > max(0, skip) + len(paged)
         return {
             "returned_count": len(paged),
@@ -864,117 +862,30 @@ class GitHubProvider(BaseProvider):
         from_line: int | None = None,
         to_line: int | None = None,
     ) -> dict[str, Any]:
-        regex_pattern = pattern or ".*"
-        is_match_all = match_all_pattern(regex_pattern)
-        if log_id is None and is_match_all:
-            return {
-                "text": (
-                    "Error: Specify a log_id to read full content, or provide a pattern to search across all logs."
-                ),
-                "logs_matched": 0,
-                "warnings": [],
-                "partial": False,
-            }
-
-        search_pattern, compile_error = compile_search_pattern(
-            regex_pattern,
-            case_insensitive=case_insensitive,
-        )
-        if compile_error:
-            return {
-                "text": compile_error,
-                "logs_matched": 0,
-                "warnings": [],
-                "partial": False,
-            }
-
-        if log_id is not None and is_match_all:
-            content = self.get_build_log_content(repo=repo, log_id=log_id)
-            lines = slice_lines(
-                content.splitlines(),
-                from_line=from_line,
-                to_line=to_line,
-            )
-
-            if output_mode == "logs_with_matches":
-                return {"text": f"Log {log_id}", "logs_matched": 1, "warnings": [], "partial": False}
-            if output_mode == "count":
-                return {
-                    "text": f"Log {log_id}:{len(lines)}",
-                    "logs_matched": 1,
-                    "warnings": [],
-                    "partial": False,
-                }
-            start = from_line or 1
-            text = "\n".join(f"{start + idx}:{line}" for idx, line in enumerate(lines))
-            text = truncate_output(
-                text,
-                self.max_output_chars,
-                "Use from_line/to_line to read specific ranges.",
-            )
-            return {"text": text, "logs_matched": 1, "warnings": [], "partial": False}
-
         if log_id is not None:
-            log_ids = [log_id]
+            resolved_log_ids = [log_id]
         else:
             build_logs = self.get_build_log(repo=repo, build_id=build_id)
-            log_ids = [
+            resolved_log_ids = [
                 int(item["id"])
                 for item in build_logs.get("logs", [])
                 if isinstance(item, dict) and item.get("id") is not None
             ]
 
-        output_lines: list[str] = []
-        warnings: list[str] = []
-        logs_matched = 0
+        def _get_content(lid: int) -> str:
+            return self.get_build_log_content(repo=repo, log_id=lid)
 
-        for current_log_id in log_ids:
-            try:
-                content = self.get_build_log_content(repo=repo, log_id=current_log_id)
-            except Exception as exc:
-                warnings.append(f"failed to read Log {current_log_id}: {exc}")
-                continue
-
-            lines = slice_lines(
-                content.splitlines(),
-                from_line=from_line,
-                to_line=to_line,
-            )
-
-            matches = {idx for idx, line in enumerate(lines) if search_pattern.search(line)}
-            if not matches:
-                continue
-            logs_matched += 1
-
-            if output_mode == "logs_with_matches":
-                output_lines.append(f"Log {current_log_id}")
-                continue
-            if output_mode == "count":
-                output_lines.append(f"Log {current_log_id}:{len(matches)}")
-                continue
-
-            output_lines.extend(
-                format_grep_matches(
-                    f"Log {current_log_id}",
-                    lines,
-                    matches,
-                    context_lines or 0,
-                    include_line_numbers=True,
-                )
-            )
-
-        text = "\n".join(output_lines)
-        text = truncate_output(
-            text,
-            self.max_output_chars,
-            "Use from_line/to_line to read specific ranges, or narrow with pattern/log-id.",
+        return grep_build_logs_core(
+            log_ids=resolved_log_ids,
+            get_content=_get_content,
+            pattern=pattern,
+            output_mode=output_mode,
+            case_insensitive=case_insensitive,
+            context_lines=context_lines,
+            from_line=from_line,
+            to_line=to_line,
+            max_output_chars=self.max_output_chars,
         )
-        return {
-            "text": text,
-            "logs_matched": logs_matched,
-            "warnings": warnings,
-            "partial": bool(warnings),
-        }
 
     def _issue_to_work_item(self, issue: dict[str, Any], repo: str) -> dict[str, Any]:
         labels = issue.get("labels") or []

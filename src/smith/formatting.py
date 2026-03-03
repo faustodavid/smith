@@ -133,168 +133,171 @@ def _fmt_table_line(columns: list[str]) -> str:
     return " | ".join(columns)
 
 
-def _render_single(command: str, data: Any) -> str:
-    if command == "projects.list":
-        rows = data if isinstance(data, list) else []
-        lines = [
-            str(row.get("name", ""))
-            for row in rows
-            if str(row.get("name", "")).strip()
-        ]
-        return "\n".join(lines)
+def _render_name_list(data: Any) -> str:
+    rows = data if isinstance(data, list) else []
+    return "\n".join(
+        str(row.get("name", ""))
+        for row in rows
+        if str(row.get("name", "")).strip()
+    )
 
-    if command == "repos.list":
-        rows = data if isinstance(data, list) else []
-        lines = [
-            str(row.get("name", ""))
-            for row in rows
-            if str(row.get("name", "")).strip()
-        ]
-        return "\n".join(lines)
 
-    if command == "code.search":
-        matches_count = int(data.get("matchesCount", 0))
-        result_lines = data.get("results", [])
-        lines = [f"matches: {matches_count}"]
-        lines.extend(str(entry) for entry in result_lines)
-        return "\n".join(lines)
+def _render_code_search(data: Any) -> str:
+    matches_count = int(data.get("matchesCount", 0))
+    result_lines = data.get("results", [])
+    lines = [f"matches: {matches_count}"]
+    lines.extend(str(entry) for entry in result_lines)
+    return "\n".join(lines)
 
-    if command in {"code.grep", "build.grep"}:
-        text = str(data.get("text", ""))
-        warnings = data.get("warnings") or []
-        if warnings:
-            warning_block = "\n".join(f"warning: {w}" for w in warnings)
-            if text:
-                return f"{text}\n{warning_block}"
-            return warning_block
-        return text
 
-    if command == "pr.list":
-        rows = data.get("results", []) if isinstance(data, dict) else []
-        lines = [_fmt_table_line(["project", "repo", "pr_id", "status", "title"])]
-        lines.extend(
-            _fmt_table_line(
-                [
-                    str(row.get("project_name", "")),
-                    str(row.get("repository_name", "")),
-                    str(row.get("pr_id", "")),
-                    str(row.get("status", "")),
-                    str(row.get("title", "")),
-                ]
-            )
-            for row in rows
+def _render_grep(data: Any) -> str:
+    text = str(data.get("text", ""))
+    warnings = data.get("warnings") or []
+    if warnings:
+        warning_block = "\n".join(f"warning: {w}" for w in warnings)
+        return f"{text}\n{warning_block}" if text else warning_block
+    return text
+
+
+def _render_pr_list(data: Any) -> str:
+    rows = data.get("results", []) if isinstance(data, dict) else []
+    lines = [_fmt_table_line(["project", "repo", "pr_id", "status", "title"])]
+    lines.extend(
+        _fmt_table_line([
+            str(row.get("project_name", "")),
+            str(row.get("repository_name", "")),
+            str(row.get("pr_id", "")),
+            str(row.get("status", "")),
+            str(row.get("title", "")),
+        ])
+        for row in rows
+    )
+    lines.append(f"returned_count: {data.get('returned_count', len(rows))}")
+    lines.append(f"has_more: {data.get('has_more', False)}")
+    return "\n".join(lines)
+
+
+def _render_pr_get(data: Any) -> str:
+    pr = data.get("pull_request", {}) if isinstance(data, dict) else {}
+    threads = data.get("threads", []) if isinstance(data, dict) else []
+    return "\n".join([
+        f"id: {pr.get('pullRequestId')}",
+        f"title: {pr.get('title', '')}",
+        f"status: {pr.get('status', '')}",
+        f"creator: {(pr.get('createdBy') or {}).get('displayName', '')}",
+        f"source_branch: {normalize_branch_name(pr.get('sourceRefName')) or ''}",
+        f"target_branch: {normalize_branch_name(pr.get('targetRefName')) or ''}",
+        f"comments_threads: {len(threads)}",
+    ])
+
+
+def _render_pr_threads(data: Any) -> str:
+    threads = data.get("threads", []) if isinstance(data, dict) else []
+    lines = [
+        f"pull_request_id: {data.get('pull_request_id')}",
+        f"returned_count: {data.get('returned_count', len(threads))}",
+        f"total_comments: {data.get('total_comments', 0)}",
+    ]
+    for thread in threads:
+        if not isinstance(thread, dict):
+            continue
+        header = (
+            f"thread {thread.get('id')} status={thread.get('status')} "
+            f"comments={thread.get('comment_count', 0)}"
         )
-        lines.append(f"returned_count: {data.get('returned_count', len(rows))}")
-        lines.append(f"has_more: {data.get('has_more', False)}")
-        return "\n".join(lines)
-
-    if command == "pr.get":
-        pr = data.get("pull_request", {}) if isinstance(data, dict) else {}
-        threads = data.get("threads", []) if isinstance(data, dict) else []
-        lines = [
-            f"id: {pr.get('pullRequestId')}",
-            f"title: {pr.get('title', '')}",
-            f"status: {pr.get('status', '')}",
-            f"creator: {(pr.get('createdBy') or {}).get('displayName', '')}",
-            f"source_branch: {normalize_branch_name(pr.get('sourceRefName')) or ''}",
-            f"target_branch: {normalize_branch_name(pr.get('targetRefName')) or ''}",
-            f"comments_threads: {len(threads)}",
-        ]
-        return "\n".join(lines)
-
-    if command == "pr.threads":
-        threads = data.get("threads", []) if isinstance(data, dict) else []
-        lines = [
-            f"pull_request_id: {data.get('pull_request_id')}",
-            f"returned_count: {data.get('returned_count', len(threads))}",
-            f"total_comments: {data.get('total_comments', 0)}",
-        ]
-        for thread in threads:
-            if not isinstance(thread, dict):
+        file_path = thread.get("file_path")
+        line_start = thread.get("line_start")
+        if file_path and line_start:
+            header = f"{header} file={file_path}:{line_start}"
+        elif file_path:
+            header = f"{header} file={file_path}"
+        lines.append(header)
+        for comment in thread.get("comments", []):
+            if not isinstance(comment, dict):
                 continue
-            header = (
-                f"thread {thread.get('id')} status={thread.get('status')} "
-                f"comments={thread.get('comment_count', 0)}"
-            )
-            file_path = thread.get("file_path")
-            line_start = thread.get("line_start")
-            if file_path and line_start:
-                header = f"{header} file={file_path}:{line_start}"
-            elif file_path:
-                header = f"{header} file={file_path}"
-            lines.append(header)
+            author = str(comment.get("author") or "unknown")
+            content = str(comment.get("content") or "").strip().replace("\n", " ")
+            if len(content) > 180:
+                content = content[:177] + "..."
+            lines.append(f"  - {author}: {content}")
+    return "\n".join(lines)
 
-            comments = thread.get("comments", [])
-            for comment in comments:
-                if not isinstance(comment, dict):
-                    continue
-                author = str(comment.get("author") or "unknown")
-                content = str(comment.get("content") or "").strip().replace("\n", " ")
-                if len(content) > 180:
-                    content = content[:177] + "..."
-                lines.append(f"  - {author}: {content}")
-        return "\n".join(lines)
 
-    if command == "build.logs":
-        metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
-        logs = data.get("logs", []) if isinstance(data, dict) else []
-        lines = [
-            f"build_id: {metadata.get('build_id')}",
-            f"status: {metadata.get('status')}",
-            f"result: {metadata.get('result')}",
-            f"definition: {metadata.get('definition_name')}",
-            "logs:",
-        ]
-        lines.extend(
-            _fmt_table_line(
-                [
-                    str(log.get("id", "")),
-                    str(log.get("line_count", "")),
-                    str(log.get("stage_name", "")),
-                    str(log.get("job_name", "")),
-                    str(log.get("step_name", "")),
-                ]
-            )
-            for log in logs
+def _render_build_logs(data: Any) -> str:
+    metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
+    logs = data.get("logs", []) if isinstance(data, dict) else []
+    lines = [
+        f"build_id: {metadata.get('build_id')}",
+        f"status: {metadata.get('status')}",
+        f"result: {metadata.get('result')}",
+        f"definition: {metadata.get('definition_name')}",
+        "logs:",
+    ]
+    lines.extend(
+        _fmt_table_line([
+            str(log.get("id", "")),
+            str(log.get("line_count", "")),
+            str(log.get("stage_name", "")),
+            str(log.get("job_name", "")),
+            str(log.get("step_name", "")),
+        ])
+        for log in logs
+    )
+    return "\n".join(lines)
+
+
+def _render_board_ticket(data: Any) -> str:
+    fields = (data.get("fields") or {}) if isinstance(data, dict) else {}
+    return "\n".join([
+        f"id: {data.get('id')}",
+        f"type: {fields.get('System.WorkItemType', '')}",
+        f"state: {fields.get('System.State', '')}",
+        f"title: {fields.get('System.Title', '')}",
+    ])
+
+
+def _render_board_table(data: Any) -> str:
+    rows = data.get("results", []) if isinstance(data, dict) else []
+    lines = [_fmt_table_line(["id", "type", "state", "title"])]
+    for row in rows:
+        fields = row.get("fields", {}) if isinstance(row, dict) else {}
+        lines.append(
+            _fmt_table_line([
+                str(row.get("id", "")),
+                str(row.get("type") or fields.get("System.WorkItemType", "")),
+                str(row.get("state") or fields.get("System.State", "")),
+                str(row.get("title") or fields.get("System.Title", "")),
+            ])
         )
-        return "\n".join(lines)
+    if isinstance(data, dict):
+        if "returned_count" in data:
+            lines.append(f"returned_count: {data['returned_count']}")
+        if "has_more" in data:
+            lines.append(f"has_more: {data['has_more']}")
+    return "\n".join(lines)
 
-    if command in {"board.ticket", "board.list", "board.search", "board.mine"}:
-        if command == "board.ticket":
-            fields = (data.get("fields") or {}) if isinstance(data, dict) else {}
-            return "\n".join(
-                [
-                    f"id: {data.get('id')}",
-                    f"type: {fields.get('System.WorkItemType', '')}",
-                    f"state: {fields.get('System.State', '')}",
-                    f"title: {fields.get('System.Title', '')}",
-                ]
-            )
 
-        rows = data.get("results", []) if isinstance(data, dict) else []
-        lines = [_fmt_table_line(["id", "type", "state", "title"])]
-        for row in rows:
-            fields = row.get("fields", {}) if isinstance(row, dict) else {}
-            lines.append(
-                _fmt_table_line(
-                    [
-                        str(row.get("id", row.get("id") if isinstance(row, dict) else "")),
-                        str(
-                            row.get("type")
-                            or fields.get("System.WorkItemType", "")
-                        ),
-                        str(row.get("state") or fields.get("System.State", "")),
-                        str(row.get("title") or fields.get("System.Title", "")),
-                    ]
-                )
-            )
-        if isinstance(data, dict):
-            if "returned_count" in data:
-                lines.append(f"returned_count: {data['returned_count']}")
-            if "has_more" in data:
-                lines.append(f"has_more: {data['has_more']}")
-        return "\n".join(lines)
+_RENDER_DISPATCH: dict[str, Any] = {
+    "projects.list": _render_name_list,
+    "repos.list": _render_name_list,
+    "code.search": _render_code_search,
+    "code.grep": _render_grep,
+    "build.grep": _render_grep,
+    "pr.list": _render_pr_list,
+    "pr.get": _render_pr_get,
+    "pr.threads": _render_pr_threads,
+    "build.logs": _render_build_logs,
+    "board.ticket": _render_board_ticket,
+    "board.list": _render_board_table,
+    "board.search": _render_board_table,
+    "board.mine": _render_board_table,
+}
 
+
+def _render_single(command: str, data: Any) -> str:
+    renderer = _RENDER_DISPATCH.get(command)
+    if renderer is not None:
+        return renderer(data)
     return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=True)
 
 
@@ -333,7 +336,7 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
             lines.append("partial: true")
         return "\n".join(lines).rstrip()
 
-    lines: list[str] = []
+    output_lines: list[str] = []
 
     for provider in ordered:
         entry = providers.get(provider, {})
@@ -341,11 +344,11 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
             continue
 
         if not bool(entry.get("ok", False)):
-            lines.append(f"[{provider}]")
+            output_lines.append(f"[{provider}]")
             error = entry.get("error") or {}
             message = error.get("message") if isinstance(error, dict) else error
-            lines.append(f"error: {message}")
-            lines.append("")
+            output_lines.append(f"error: {message}")
+            output_lines.append("")
             continue
 
         provider_data = entry.get("data")
@@ -361,23 +364,23 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
                 raw_results = provider_data.get("results", [])
                 if isinstance(raw_results, list):
                     result_lines = raw_results
-            lines.append(f"[{provider}] matches: {matches_count}")
-            lines.extend(str(entry_line) for entry_line in result_lines)
+            output_lines.append(f"[{provider}] matches: {matches_count}")
+            output_lines.extend(str(entry_line) for entry_line in result_lines)
         else:
-            lines.append(f"[{provider}]")
+            output_lines.append(f"[{provider}]")
             rendered = _render_single(command, provider_data)
             if rendered.strip():
-                lines.append(rendered)
+                output_lines.append(rendered)
 
         warnings = entry.get("warnings") or []
         if command not in {"code.grep", "build.grep"}:
             for warning in warnings if isinstance(warnings, list) else []:
-                lines.append(f"warning: {warning}")
+                output_lines.append(f"warning: {warning}")
         if bool(entry.get("partial", False)):
-            lines.append("partial: true")
-        lines.append("")
+            output_lines.append("partial: true")
+        output_lines.append("")
 
-    return "\n".join(lines).rstrip()
+    return "\n".join(output_lines).rstrip()
 
 
 def render_text(command: str, data: Any) -> str:

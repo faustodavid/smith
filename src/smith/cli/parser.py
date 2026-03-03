@@ -200,6 +200,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override AZURE_DEVOPS_ORG_URL for this invocation.",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Enable verbose (DEBUG) logging to stderr.",
+    )
 
     root_subparsers = parser.add_subparsers(dest="group", required=True)
 

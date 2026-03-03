@@ -62,15 +62,3 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["scripts.*"]
 ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = [
-  "smith.client",
-  "smith.formatting",
-  "smith.cli.handlers",
-  "smith.cli.parser",
-  "smith.cli.main",
-  "smith.providers.*",
-  "smith.utils",
-]
-ignore_errors = true

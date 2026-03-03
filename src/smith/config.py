@@ -61,7 +61,12 @@ def parse_runtime_config(
     github_api_version_default: str,
 ) -> RuntimeConfig:
     resolved_api_version = api_version or os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1"
-    timeout = int(os.getenv("AZURE_DEVOPS_TIMEOUT_SECONDS", timeout_seconds or 30))
+    timeout = parse_int_env(
+        "AZURE_DEVOPS_TIMEOUT_SECONDS",
+        default=timeout_seconds or 30,
+        min_value=1,
+        max_value=300,
+    )
 
     retry_backoff_env = os.getenv("SMITH_HTTP_RETRY_BACKOFF_SECONDS")
     try:
@@ -73,11 +78,21 @@ def parse_runtime_config(
         org_url=org_url.rstrip("/"),
         api_version=resolved_api_version,
         timeout_seconds=timeout,
-        max_output_chars=int(os.getenv("THANOS_LOCAL_MAX_OUTPUT_CHARS", max_output_chars or 10240)),
+        max_output_chars=parse_int_env(
+            "THANOS_LOCAL_MAX_OUTPUT_CHARS",
+            default=max_output_chars or 10240,
+            min_value=256,
+            max_value=1_000_000,
+        ),
         github_org=os.getenv("GITHUB_ORG", "").strip(),
         github_api_url=os.getenv("GITHUB_API_URL", github_api_url_default).rstrip("/"),
         github_api_version=os.getenv("GITHUB_API_VERSION", github_api_version_default),
-        github_timeout_seconds=int(os.getenv("GITHUB_TIMEOUT_SECONDS", timeout)),
+        github_timeout_seconds=parse_int_env(
+            "GITHUB_TIMEOUT_SECONDS",
+            default=timeout,
+            min_value=1,
+            max_value=300,
+        ),
         http_pool_maxsize=parse_int_env(
             "SMITH_HTTP_POOL_MAXSIZE",
             default=32,

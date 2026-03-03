@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from datetime import UTC, datetime
@@ -11,8 +12,15 @@ from azure.identity import DefaultAzureCredential
 
 from smith.config import RuntimeConfig
 from smith.errors import SmithAuthError
-from smith.formatting import format_grep_matches, glob_to_regex, normalize_branch_name, truncate_output
+from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers.base import BaseProvider
+from smith.providers.helpers import (
+    build_grep_result,
+    grep_build_logs_core,
+    grep_compile_error_result,
+    grep_match_lines,
+    paginate_results,
+)
 from smith.utils import (
     compile_search_pattern,
     match_all_pattern,
@@ -20,6 +28,8 @@ from smith.utils import (
     parse_iso_datetime,
     slice_lines,
 )
+
+logger = logging.getLogger(__name__)
 
 ADO_SCOPE = "499b84ac-1321-427f-aa17-267ca6975798/.default"
 
@@ -273,13 +283,8 @@ class AzdoProvider(BaseProvider):
             regex_pattern,
             case_insensitive=case_insensitive,
         )
-        if compile_error:
-            return {
-                "text": compile_error,
-                "files_matched": 0,
-                "warnings": [],
-                "partial": False,
-            }
+        if compile_error or search_pattern is None:
+            return grep_compile_error_result(compile_error or "Invalid pattern")
 
         output_lines: list[str] = []
         warnings: list[str] = []
@@ -307,41 +312,24 @@ class AzdoProvider(BaseProvider):
                 to_line=to_line,
             )
 
-            match_line_nums = {
-                idx for idx, line in enumerate(lines) if search_pattern.search(line)
-            }
-            if not match_line_nums:
-                continue
-
-            files_matched += 1
-            if output_mode == "files_with_matches":
-                output_lines.append(file_path)
-                continue
-            if output_mode == "count":
-                output_lines.append(f"{file_path}:{len(match_line_nums)}")
-                continue
-
-            formatted = format_grep_matches(
-                file_path,
-                lines,
-                match_line_nums,
-                context_lines or 0,
-                include_line_numbers=True,
+            matched_lines, count = grep_match_lines(
+                lines=lines,
+                search_pattern=search_pattern,
+                file_label=file_path,
+                output_mode=output_mode,
+                context_lines=context_lines or 0,
             )
-            output_lines.extend(formatted)
+            if count:
+                files_matched += count
+                output_lines.extend(matched_lines)
 
-        text = "\n".join(output_lines)
-        text = truncate_output(
-            text,
-            self.max_output_chars,
-            "Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
+        return build_grep_result(
+            output_lines=output_lines,
+            matched_count=files_matched,
+            warnings=warnings,
+            max_output_chars=self.max_output_chars,
+            truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
         )
-        return {
-            "text": text,
-            "files_matched": files_matched,
-            "warnings": warnings,
-            "partial": bool(warnings),
-        }
 
     def list_pull_requests(
         self,
@@ -382,7 +370,7 @@ class AzdoProvider(BaseProvider):
         results: list[dict[str, Any]] = []
 
         for project_name in project_names:
-            repo_scopes: list[str | None] = repo_targets or [None]
+            repo_scopes: list[str | None] = list(repo_targets) if repo_targets else [None]
             for repo_scope in repo_scopes:
                 for status in normalized_status:
                     page_size = min(max(take, 1), 100)
@@ -490,7 +478,7 @@ class AzdoProvider(BaseProvider):
 
         total = len(results)
         results.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
-        paged = results[max(0, skip) : max(0, skip) + max(1, take)]
+        paged = paginate_results(results, skip=skip, take=take)
         has_more = total > max(0, skip) + len(paged)
 
         return {
@@ -543,7 +531,8 @@ class AzdoProvider(BaseProvider):
                         path = item.get("path")
                         if path:
                             changed_files.append(path)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to fetch PR iteration changes for PR %d: %s", pull_request_id, exc)
             changed_files = []
 
         return {
@@ -697,145 +686,33 @@ class AzdoProvider(BaseProvider):
         from_line: int | None = None,
         to_line: int | None = None,
     ) -> dict[str, Any]:
-        regex_pattern = pattern or ".*"
-        is_match_all = match_all_pattern(regex_pattern)
-
-        if log_id is None and is_match_all:
-            return {
-                "text": (
-                    "Error: Specify a log_id to read full content, or provide a pattern to search across all logs."
-                ),
-                "logs_matched": 0,
-                "warnings": [],
-                "partial": False,
-            }
-
-        search_pattern, compile_error = compile_search_pattern(
-            regex_pattern,
-            case_insensitive=case_insensitive,
-        )
-        if compile_error:
-            return {
-                "text": compile_error,
-                "logs_matched": 0,
-                "warnings": [],
-                "partial": False,
-            }
-
-        warnings: list[str] = []
-
-        if log_id is not None and is_match_all:
-            if output_mode == "logs_with_matches":
-                text = f"Log {log_id}"
-                return {
-                    "text": text,
-                    "logs_matched": 1,
-                    "warnings": [],
-                    "partial": False,
-                }
-            if output_mode == "count":
-                content = self.get_build_log_content(
-                    project=project,
-                    build_id=build_id,
-                    log_id=log_id,
-                    start_line=from_line,
-                    end_line=to_line,
-                )
-                return {
-                    "text": f"Log {log_id}:{len(content.splitlines())}",
-                    "logs_matched": 1,
-                    "warnings": [],
-                    "partial": False,
-                }
-
-            content = self.get_build_log_content(
-                project=project,
-                build_id=build_id,
-                log_id=log_id,
-                start_line=from_line,
-                end_line=to_line,
-            )
-            start = from_line or 1
-            text = "\n".join(
-                f"{start + idx}:{line}" for idx, line in enumerate(content.splitlines())
-            )
-            text = truncate_output(
-                text,
-                self.max_output_chars,
-                "Use from_line/to_line to read specific ranges.",
-            )
-            return {
-                "text": text,
-                "logs_matched": 1,
-                "warnings": [],
-                "partial": False,
-            }
-
         if log_id is not None:
-            log_ids = [log_id]
+            resolved_log_ids = [log_id]
         else:
             build_logs = self.get_build_log(project=project, build_id=build_id)
-            log_ids = [
+            resolved_log_ids = [
                 int(entry["id"])
                 for entry in build_logs.get("logs", [])
                 if isinstance(entry, dict) and entry.get("id") is not None
             ]
 
-        output_lines: list[str] = []
-        logs_matched = 0
-
-        for current_log_id in log_ids:
-            try:
-                content = self.get_build_log_content(
-                    project=project,
-                    build_id=build_id,
-                    log_id=current_log_id,
-                )
-            except Exception as exc:
-                warnings.append(f"failed to read Log {current_log_id}: {exc}")
-                continue
-
-            lines = slice_lines(
-                content.splitlines(),
-                from_line=from_line,
-                to_line=to_line,
+        def _get_content(lid: int) -> str:
+            return self.get_build_log_content(
+                project=project, build_id=build_id, log_id=lid,
+                start_line=from_line, end_line=to_line,
             )
 
-            matches = {idx for idx, line in enumerate(lines) if search_pattern.search(line)}
-            if not matches:
-                continue
-
-            logs_matched += 1
-            if output_mode == "logs_with_matches":
-                output_lines.append(f"Log {current_log_id}")
-                continue
-            if output_mode == "count":
-                output_lines.append(f"Log {current_log_id}:{len(matches)}")
-                continue
-
-            output_lines.extend(
-                format_grep_matches(
-                    f"Log {current_log_id}",
-                    lines,
-                    matches,
-                    context_lines or 0,
-                    include_line_numbers=True,
-                )
-            )
-
-        text = "\n".join(output_lines)
-        text = truncate_output(
-            text,
-            self.max_output_chars,
-            "Use from_line/to_line to read specific ranges, or narrow with pattern/log-id.",
+        return grep_build_logs_core(
+            log_ids=resolved_log_ids,
+            get_content=_get_content,
+            pattern=pattern,
+            output_mode=output_mode,
+            case_insensitive=case_insensitive,
+            context_lines=context_lines,
+            from_line=from_line,
+            to_line=to_line,
+            max_output_chars=self.max_output_chars,
         )
-
-        return {
-            "text": text,
-            "logs_matched": logs_matched,
-            "warnings": warnings,
-            "partial": bool(warnings),
-        }
 
     def get_ticket_by_id(self, *, project: str, work_item_id: int) -> dict[str, Any]:
         url = f"{self.org_url}/{project}/_apis/wit/workitems/{work_item_id}"
@@ -866,7 +743,7 @@ class AzdoProvider(BaseProvider):
         ]
 
         total = len(ids)
-        paged_ids = ids[max(0, skip) : max(0, skip) + max(1, take)]
+        paged_ids = paginate_results(ids, skip=skip, take=take)
         has_more = total > max(0, skip) + len(paged_ids)
 
         if not paged_ids:
@@ -1046,7 +923,7 @@ class AzdoProvider(BaseProvider):
                 continue
             aggregated.extend(result.get("results", []))
 
-        aggregated = aggregated[max(0, skip) : max(0, skip) + max(1, take)]
+        aggregated = paginate_results(aggregated, skip=skip, take=take)
         return {
             "returned_count": len(aggregated),
             "has_more": False,

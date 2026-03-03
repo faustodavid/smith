@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import sys
 
 from smith.cli.handlers import (
@@ -15,6 +16,15 @@ from smith.cli.parser import build_parser
 from smith.errors import SmithApiError, SmithAuthError
 
 
+def _configure_logging(*, verbose: bool) -> None:
+    level = logging.DEBUG if verbose else logging.WARNING
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    root = logging.getLogger("smith")
+    root.setLevel(level)
+    root.addHandler(handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
 
@@ -22,7 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(raw_argv)
     except SystemExit as exc:
-        return int(exc.code)
+        return int(exc.code) if exc.code is not None else 0
+
+    _configure_logging(verbose=getattr(args, "verbose", False))
 
     handler = getattr(args, "handler", None)
     if handler is None:

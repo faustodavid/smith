@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import requests
 
 from smith.config import RuntimeConfig
 from smith.errors import SmithApiError, SmithAuthError
 from smith.http import configure_http_session, is_retryable_get_status, parse_retry_after_seconds
+
+logger = logging.getLogger(__name__)
 
 ProviderName = Literal["azdo", "github", "all"]
 
@@ -18,7 +21,7 @@ def normalize_provider(provider: str | None) -> ProviderName:
     normalized = (provider or "azdo").strip().lower()
     if normalized not in {"azdo", "github", "all"}:
         raise ValueError("provider must be one of: azdo, github, all")
-    return normalized  # type: ignore[return-value]
+    return cast(ProviderName, normalized)
 
 
 def resolve_providers(provider: str | None) -> list[str]:
@@ -112,6 +115,7 @@ class BaseProvider(ABC):
         for retry_index in range(max_attempts):
             attempt_headers = dict(request_headers)
             attempt_headers["Authorization"] = f"Bearer {self._get_token()}"
+            logger.debug("%s %s (attempt %d/%d)", method_upper, resolved_url, retry_index + 1, max_attempts)
             try:
                 response = http_session.request(
                     method,
@@ -123,28 +127,39 @@ class BaseProvider(ABC):
                 )
             except requests.RequestException as exc:
                 if is_retryable_get and retry_index < max_attempts - 1:
-                    time.sleep(self._retry_sleep_seconds(response=None, retry_index=retry_index))
+                    sleep_secs = self._retry_sleep_seconds(response=None, retry_index=retry_index)
+                    logger.debug("Request failed (%s), retrying in %.1fs", exc, sleep_secs)
+                    time.sleep(sleep_secs)
                     continue
                 raise SmithApiError(f"Request error for {resolved_url}: {exc}") from exc
 
+            logger.debug("%s %s -> HTTP %d", method_upper, resolved_url, response.status_code)
+
             if response.status_code in (401, 403):
+                logger.debug("HTTP %d, refreshing token and retrying", response.status_code)
                 retry_headers = dict(request_headers)
                 retry_headers["Authorization"] = f"Bearer {self._get_token(force_refresh=True)}"
-                response = http_session.request(
-                    method,
-                    resolved_url,
-                    params=params,
-                    json=json_body,
-                    headers=retry_headers,
-                    timeout=timeout,
-                )
+                try:
+                    response = http_session.request(
+                        method,
+                        resolved_url,
+                        params=params,
+                        json=json_body,
+                        headers=retry_headers,
+                        timeout=timeout,
+                    )
+                except requests.RequestException as exc:
+                    raise SmithApiError(f"Request error during auth retry for {resolved_url}: {exc}") from exc
+                logger.debug("Auth retry -> HTTP %d", response.status_code)
 
             if (
                 is_retryable_get
                 and is_retryable_get_status(int(response.status_code))
                 and retry_index < max_attempts - 1
             ):
-                time.sleep(self._retry_sleep_seconds(response=response, retry_index=retry_index))
+                sleep_secs = self._retry_sleep_seconds(response=response, retry_index=retry_index)
+                logger.debug("HTTP %d is retryable, sleeping %.1fs", response.status_code, sleep_secs)
+                time.sleep(sleep_secs)
                 continue
             break
 

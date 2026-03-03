@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_path(path: str | None) -> str:
@@ -19,7 +22,8 @@ def parse_iso_datetime(value: str | datetime | None) -> datetime | None:
         return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except Exception:
+    except (TypeError, ValueError) as exc:
+        logger.debug("Could not parse datetime %r: %s", value, exc)
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 

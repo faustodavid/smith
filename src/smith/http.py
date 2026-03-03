@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 from requests.adapters import HTTPAdapter
+
+logger = logging.getLogger(__name__)
 
 
 def configure_http_session(session: Any, *, pool_connections: int, pool_maxsize: int) -> None:
@@ -18,9 +21,8 @@ def configure_http_session(session: Any, *, pool_connections: int, pool_maxsize:
         )
         session.mount("https://", adapter)
         session.mount("http://", adapter)
-    except Exception:
-        # Keep behavior safe for mocked/injected session objects.
-        return
+    except (TypeError, AttributeError) as exc:
+        logger.debug("Could not configure HTTP adapter (mocked session?): %s", exc)
 
 
 def is_retryable_get_status(status_code: int) -> bool:
@@ -39,7 +41,8 @@ def parse_retry_after_seconds(response: Any) -> float | None:
         return max(0.0, float(text))
     try:
         retry_at = parsedate_to_datetime(text)
-    except Exception:
+    except (TypeError, ValueError) as exc:
+        logger.debug("Could not parse Retry-After header %r: %s", text, exc)
         return None
     if retry_at.tzinfo is None:
         retry_at = retry_at.replace(tzinfo=UTC)

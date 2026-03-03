@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from smith.errors import SmithApiError, SmithAuthError
+
+logger = logging.getLogger(__name__)
 
 
 def run_fanout(
@@ -29,16 +32,22 @@ def run_fanout(
                 False,
             )
 
+        logger.debug("Running provider operation: %s", provider_name)
         try:
             payload = operation()
+            logger.debug("Provider %s succeeded", provider_name)
             return provider_entry_success(payload), True
         except ValueError as exc:
+            logger.debug("Provider %s raised ValueError: %s", provider_name, exc)
             return provider_entry_error("invalid_args", str(exc)), False
         except SmithAuthError as exc:
+            logger.debug("Provider %s auth failure: %s", provider_name, exc)
             return provider_entry_error("auth_failure", str(exc)), False
         except SmithApiError as exc:
+            logger.debug("Provider %s API error: %s", provider_name, exc)
             return provider_entry_error("api_error", str(exc)), False
         except Exception as exc:  # pragma: no cover - defensive conversion
+            logger.warning("Provider %s unexpected error: %s", provider_name, exc, exc_info=True)
             return provider_entry_error("api_error", f"Unexpected provider error: {exc}"), False
 
     if len(providers) > 1:
