@@ -76,10 +76,6 @@ class AzdoProvider(BaseProvider):
     def _almsearch_url(self, suffix: str) -> str:
         return f"https://almsearch.dev.azure.com/{self.org_name}{suffix}"
 
-    # ------------------------------------------------------------------
-    # Projects & Repositories
-    # ------------------------------------------------------------------
-
     def list_projects(self) -> list[dict[str, Any]]:
         url = f"{self.org_url}/_apis/projects"
         params = {"api-version": self.api_version}
@@ -111,10 +107,6 @@ class AzdoProvider(BaseProvider):
             for item in values
             if isinstance(item, dict)
         ]
-
-    # ------------------------------------------------------------------
-    # Code search & grep
-    # ------------------------------------------------------------------
 
     def search_code(
         self,
@@ -350,10 +342,6 @@ class AzdoProvider(BaseProvider):
             "warnings": warnings,
             "partial": bool(warnings),
         }
-
-    # ------------------------------------------------------------------
-    # Pull requests
-    # ------------------------------------------------------------------
 
     def list_pull_requests(
         self,
@@ -639,10 +627,6 @@ class AzdoProvider(BaseProvider):
             "threads": threads,
         }
 
-    # ------------------------------------------------------------------
-    # Builds
-    # ------------------------------------------------------------------
-
     def get_build_log(self, *, project: str, build_id: int) -> dict[str, Any]:
         logs_url = f"{self.org_url}/{project}/_apis/build/builds/{build_id}/logs"
         build_url = f"{self.org_url}/{project}/_apis/build/builds/{build_id}"
@@ -852,10 +836,6 @@ class AzdoProvider(BaseProvider):
             "warnings": warnings,
             "partial": bool(warnings),
         }
-
-    # ------------------------------------------------------------------
-    # Work items (board)
-    # ------------------------------------------------------------------
 
     def get_ticket_by_id(self, *, project: str, work_item_id: int) -> dict[str, Any]:
         url = f"{self.org_url}/{project}/_apis/wit/workitems/{work_item_id}"

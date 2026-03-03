@@ -15,12 +15,11 @@ from smith.config import RuntimeConfig
 from smith.errors import SmithApiError, SmithAuthError
 from smith.formatting import format_grep_matches, glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers.base import BaseProvider
+from smith.config import parse_bool_env, parse_int_env
 from smith.utils import (
     compile_search_pattern,
     match_all_pattern,
     normalize_path,
-    parse_bool_env,
-    parse_int_env,
     parse_iso_datetime,
     slice_lines,
 )
@@ -145,10 +144,6 @@ class GitHubProvider(BaseProvider):
         self._default_branch_cache[cache_key] = branch
         return branch
 
-    # ------------------------------------------------------------------
-    # Projects & Repositories
-    # ------------------------------------------------------------------
-
     def list_projects(self) -> list[dict[str, Any]]:
         org = self._require_github_org()
         return [
@@ -173,10 +168,6 @@ class GitHubProvider(BaseProvider):
             for item in repos
             if isinstance(item, dict)
         ]
-
-    # ------------------------------------------------------------------
-    # Code search & grep
-    # ------------------------------------------------------------------
 
     def search_code(
         self,
@@ -563,10 +554,6 @@ class GitHubProvider(BaseProvider):
             "partial": bool(warnings),
         }
 
-    # ------------------------------------------------------------------
-    # Pull requests
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _pr_status(pr: dict[str, Any]) -> str:
         state = str(pr.get("state") or "").lower()
@@ -815,10 +802,6 @@ class GitHubProvider(BaseProvider):
             "threads": threads,
         }
 
-    # ------------------------------------------------------------------
-    # Builds (GitHub Actions)
-    # ------------------------------------------------------------------
-
     def get_build_log(self, *, repo: str, build_id: int) -> dict[str, Any]:
         run = self._request_json("GET", f"{self._repo_prefix(repo)}/actions/runs/{build_id}")
         jobs_data = self._request_json(
@@ -992,10 +975,6 @@ class GitHubProvider(BaseProvider):
             "warnings": warnings,
             "partial": bool(warnings),
         }
-
-    # ------------------------------------------------------------------
-    # Work items (issues)
-    # ------------------------------------------------------------------
 
     def _issue_to_work_item(self, issue: dict[str, Any], repo: str) -> dict[str, Any]:
         labels = issue.get("labels") or []

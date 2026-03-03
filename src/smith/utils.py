@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from datetime import UTC, datetime
 
@@ -54,32 +53,3 @@ def compile_search_pattern(
         return None, f"Error: Invalid regex pattern - {exc}"
 
 
-def parse_bool_env(name: str, *, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    normalized = value.strip().lower()
-    if not normalized:
-        return default
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
-def parse_int_env(
-    name: str,
-    *,
-    default: int,
-    min_value: int,
-    max_value: int,
-) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        parsed = int(value.strip())
-    except (TypeError, ValueError):
-        return default
-    return max(min_value, min(max_value, parsed))

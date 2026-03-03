@@ -64,10 +64,6 @@ class SmithClient:
         self.github_timeout_seconds = runtime.github_timeout_seconds
         self.org_name = self._azdo.org_name
 
-    # ------------------------------------------------------------------
-    # Fanout helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _provider_warnings_and_partial(payload: Any) -> tuple[list[str], bool]:
         if not isinstance(payload, dict):
@@ -82,15 +78,14 @@ class SmithClient:
 
     @staticmethod
     def _provider_entry_success(payload: Any) -> dict[str, Any]:
-        if not isinstance(payload, dict):
-            return {"ok": True, "data": payload, "warnings": [], "partial": False, "error": None}
-        warnings = payload.get("warnings")
-        if isinstance(warnings, list):
-            warning_list = [str(item) for item in warnings if str(item).strip()]
-        else:
-            warning_list = []
-        partial = bool(payload.get("partial", False))
-        return {"ok": True, "data": payload, "warnings": warning_list, "partial": partial, "error": None}
+        warnings, partial = SmithClient._provider_warnings_and_partial(payload)
+        return {
+            "ok": True,
+            "data": payload,
+            "warnings": warnings,
+            "partial": partial,
+            "error": None,
+        }
 
     @staticmethod
     def _provider_entry_error(code: str, message: str) -> dict[str, Any]:
@@ -117,10 +112,6 @@ class SmithClient:
             provider_entry_success=self._provider_entry_success,
             provider_entry_error=self._provider_entry_error,
         )
-
-    # ------------------------------------------------------------------
-    # Execute methods (public API)
-    # ------------------------------------------------------------------
 
     def execute_projects_list(self, *, provider: str) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="projects.list")
