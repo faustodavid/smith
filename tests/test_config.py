@@ -164,3 +164,51 @@ def test_parse_runtime_config_falls_back_for_invalid_retry_backoff(monkeypatch: 
     )
 
     assert runtime.http_retry_backoff_seconds == pytest.approx(0.4)
+
+
+def test_parse_runtime_config_github_org_override(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITHUB_ORG", raising=False)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_org="override-gh-org",
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+    )
+
+    assert runtime.github_org == "override-gh-org"
+    assert runtime.github_configured is True
+
+
+def test_parse_runtime_config_github_org_env_fallback(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+    )
+
+    assert runtime.github_org == "env-gh-org"
+
+
+def test_parse_runtime_config_github_org_override_wins_over_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_org="cli-override",
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+    )
+
+    assert runtime.github_org == "cli-override"

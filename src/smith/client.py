@@ -21,6 +21,7 @@ class SmithClient:
         self,
         *,
         azdo_org: str | None = None,
+        github_org: str | None = None,
         api_version: str | None = None,
         timeout_seconds: int | None = None,
         max_output_chars: int | None = None,
@@ -32,6 +33,7 @@ class SmithClient:
             api_version=api_version,
             timeout_seconds=timeout_seconds,
             max_output_chars=max_output_chars,
+            github_org=github_org,
             github_api_url_default=GITHUB_DEFAULT_API_URL,
             github_api_version_default=GITHUB_DEFAULT_API_VERSION,
         )

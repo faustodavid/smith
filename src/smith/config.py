@@ -77,6 +77,7 @@ def parse_runtime_config(
     api_version: str | None,
     timeout_seconds: int | None,
     max_output_chars: int | None,
+    github_org: str | None = None,
     github_api_url_default: str,
     github_api_version_default: str,
 ) -> RuntimeConfig:
@@ -106,7 +107,7 @@ def parse_runtime_config(
             min_value=256,
             max_value=1_000_000,
         ),
-        github_org=os.getenv("GITHUB_ORG", "").strip(),
+        github_org=(github_org or os.getenv("GITHUB_ORG", "") or "").strip(),
         github_api_url=os.getenv("GITHUB_API_URL", github_api_url_default).rstrip("/"),
         github_api_version=os.getenv("GITHUB_API_VERSION", github_api_version_default),
         github_timeout_seconds=parse_int_env(

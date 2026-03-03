@@ -70,15 +70,15 @@ def validate_args_for_provider(args: argparse.Namespace) -> None:
         raise ValueError("code search requires a query. Example: smith code search \"grafana.*\"")
 
     selected = _selected_providers(provider)
-    if "github" in selected and not os.getenv("GITHUB_ORG", "").strip():
-        raise ValueError("Missing GITHUB_ORG. Example: export GITHUB_ORG=<org>")
-    if "azdo" in selected and not os.getenv("AZURE_DEVOPS_ORG", "").strip():
-        azdo_org = str(getattr(args, "azdo_org", "") or "").strip()
-        if not azdo_org:
-            raise ValueError(
-                "Missing AZURE_DEVOPS_ORG. "
-                "Example: export AZURE_DEVOPS_ORG=<your-org>"
-            )
+    github_org = str(getattr(args, "github_org", "") or "").strip()
+    azdo_org = str(getattr(args, "azdo_org", "") or "").strip()
+    if "github" in selected and not os.getenv("GITHUB_ORG", "").strip() and not github_org:
+        raise ValueError("Missing GITHUB_ORG. Example: export GITHUB_ORG=<org>  (or use --github-org)")
+    if "azdo" in selected and not os.getenv("AZURE_DEVOPS_ORG", "").strip() and not azdo_org:
+        raise ValueError(
+            "Missing AZURE_DEVOPS_ORG. "
+            "Example: export AZURE_DEVOPS_ORG=<your-org>  (or use --azdo-org)"
+        )
 
     if command == "board.list" and provider == "github":
         raise ValueError("GitHub does not support `board list`. Use `board search` instead.")
@@ -126,7 +126,10 @@ def _emit_error(
 
 
 def _client_from_args(args: argparse.Namespace) -> SmithClient:
-    return SmithClient(azdo_org=args.azdo_org)
+    return SmithClient(
+        azdo_org=getattr(args, "azdo_org", None),
+        github_org=getattr(args, "github_org", None),
+    )
 
 
 def handle_projects_list(client: SmithClient, args: argparse.Namespace) -> int:

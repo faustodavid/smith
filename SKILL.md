@@ -180,6 +180,9 @@ Behavior defaults:
 - At least one provider must be configured:
   - `AZURE_DEVOPS_ORG` — Azure DevOps org name (example `my-org`)
   - `GITHUB_ORG` — GitHub org name (example `my-org`)
+- Per-provider org overrides for a single invocation:
+  - `--azdo-org <name>` overrides `AZURE_DEVOPS_ORG`
+  - `--github-org <name>` overrides `GITHUB_ORG`
 - Optional env vars:
   - `AZURE_DEVOPS_API_VERSION` (default `7.1`)
   - `AZURE_DEVOPS_TIMEOUT_SECONDS` (default `30`)

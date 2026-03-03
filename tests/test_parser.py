@@ -21,3 +21,27 @@ def test_board_alias_group_stories_parses() -> None:
     assert args.provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 123
+
+
+def test_azdo_org_flag_parses() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["--azdo-org", "my-azdo", "projects", "list", "azdo"])
+
+    assert args.azdo_org == "my-azdo"
+    assert args.github_org is None
+
+
+def test_github_org_flag_parses() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["--github-org", "my-gh", "repos", "list", "github"])
+
+    assert args.github_org == "my-gh"
+    assert args.azdo_org is None
+
+
+def test_both_org_flags_parse_independently() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["--azdo-org", "a-org", "--github-org", "g-org", "code", "search", "test"])
+
+    assert args.azdo_org == "a-org"
+    assert args.github_org == "g-org"

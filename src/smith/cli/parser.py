@@ -195,10 +195,16 @@ def build_parser() -> argparse.ArgumentParser:
         description="Smith Azure DevOps and GitHub read-only workflows with local credentials.",
     )
     parser.add_argument(
-        "--org",
+        "--azdo-org",
         dest="azdo_org",
         default=None,
         help="Override AZURE_DEVOPS_ORG for this invocation.",
+    )
+    parser.add_argument(
+        "--github-org",
+        dest="github_org",
+        default=None,
+        help="Override GITHUB_ORG for this invocation.",
     )
     parser.add_argument(
         "-v",
