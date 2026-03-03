@@ -177,10 +177,9 @@ Behavior defaults:
 
 ## Auth and Config
 
-- Required env var:
-  - `AZURE_DEVOPS_ORG_URL` (example `https://dev.azure.com/rtl-nl`)
-- Required for GitHub provider:
-  - `GITHUB_ORG` (example `rtl-nl`)
+- At least one provider must be configured:
+  - `AZURE_DEVOPS_ORG` — Azure DevOps org name (example `my-org`)
+  - `GITHUB_ORG` — GitHub org name (example `my-org`)
 - Optional env vars:
   - `AZURE_DEVOPS_API_VERSION` (default `7.1`)
   - `AZURE_DEVOPS_TIMEOUT_SECONDS` (default `30`)

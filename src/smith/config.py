@@ -4,9 +4,13 @@ import os
 from dataclasses import dataclass
 
 
+AZDO_BASE_URL = "https://dev.azure.com"
+AZDO_SEARCH_BASE_URL = "https://almsearch.dev.azure.com"
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
-    org_url: str
+    azdo_org: str
     api_version: str
     timeout_seconds: int
     max_output_chars: int
@@ -18,6 +22,22 @@ class RuntimeConfig:
     http_pool_connections: int
     http_retry_max_attempts: int
     http_retry_backoff_seconds: float
+
+    @property
+    def azdo_configured(self) -> bool:
+        return bool(self.azdo_org)
+
+    @property
+    def github_configured(self) -> bool:
+        return bool(self.github_org)
+
+    @property
+    def azdo_org_url(self) -> str:
+        return f"{AZDO_BASE_URL}/{self.azdo_org}" if self.azdo_org else ""
+
+    @property
+    def azdo_search_url(self) -> str:
+        return f"{AZDO_SEARCH_BASE_URL}/{self.azdo_org}" if self.azdo_org else ""
 
 
 def parse_bool_env(name: str, *, default: bool) -> bool:
@@ -53,13 +73,15 @@ def parse_int_env(
 
 def parse_runtime_config(
     *,
-    org_url: str,
+    azdo_org: str | None,
     api_version: str | None,
     timeout_seconds: int | None,
     max_output_chars: int | None,
     github_api_url_default: str,
     github_api_version_default: str,
 ) -> RuntimeConfig:
+    resolved_azdo_org = (azdo_org or os.getenv("AZURE_DEVOPS_ORG", "") or "").strip()
+
     resolved_api_version = api_version or os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1"
     timeout = parse_int_env(
         "AZURE_DEVOPS_TIMEOUT_SECONDS",
@@ -75,7 +97,7 @@ def parse_runtime_config(
         parsed_backoff = 0.4
 
     return RuntimeConfig(
-        org_url=org_url.rstrip("/"),
+        azdo_org=resolved_azdo_org,
         api_version=resolved_api_version,
         timeout_seconds=timeout,
         max_output_chars=parse_int_env(

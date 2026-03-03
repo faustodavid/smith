@@ -24,6 +24,7 @@ class _FakeClient:
 
 
 def test_success_exit_code_zero(monkeypatch: Any, capsys: Any) -> None:
+    monkeypatch.setenv("AZURE_DEVOPS_ORG", "test-org")
     monkeypatch.setattr(
         cli_main,
         "_client_from_args",
@@ -38,6 +39,7 @@ def test_success_exit_code_zero(monkeypatch: Any, capsys: Any) -> None:
 
 
 def test_partial_exit_code_five(monkeypatch: Any, capsys: Any) -> None:
+    monkeypatch.setenv("AZURE_DEVOPS_ORG", "test-org")
     payload = {
         "providers": {
             "azdo": {
@@ -64,6 +66,7 @@ def test_partial_exit_code_five(monkeypatch: Any, capsys: Any) -> None:
 
 
 def test_auth_and_api_exit_codes(monkeypatch: Any, capsys: Any) -> None:
+    monkeypatch.setenv("AZURE_DEVOPS_ORG", "test-org")
     monkeypatch.setattr(
         cli_main,
         "_client_from_args",

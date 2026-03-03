@@ -5,7 +5,7 @@ Scope: read-only provider-specific investigation only.
 
 Preflight:
 ```bash
-: "${AZURE_DEVOPS_ORG_URL:?Set AZURE_DEVOPS_ORG_URL first (for azdo)}"
+: "${AZURE_DEVOPS_ORG:?Set AZURE_DEVOPS_ORG first (for azdo)}"
 : "${GITHUB_ORG:?Set GITHUB_ORG first (for github)}"
 az account show >/dev/null
 ```

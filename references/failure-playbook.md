@@ -6,7 +6,7 @@ Use this playbook when a command path fails.
 
 1. Verify org context:
 ```bash
-echo "$AZURE_DEVOPS_ORG_URL"
+echo "$AZURE_DEVOPS_ORG"
 ```
 2. Re-authenticate:
 ```bash

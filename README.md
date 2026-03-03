@@ -16,7 +16,7 @@ python -m pip install .
 ## Quick Start
 
 ```bash
-export AZURE_DEVOPS_ORG_URL="https://dev.azure.com/<org>"
+export AZURE_DEVOPS_ORG="<org>"
 export GITHUB_ORG="<org>"
 smith code search "grafana" --provider all
 ```

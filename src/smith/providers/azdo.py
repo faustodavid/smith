@@ -5,7 +5,7 @@ import os
 import re
 from datetime import UTC, datetime
 from typing import Any, Literal
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 import requests
 from azure.identity import DefaultAzureCredential
@@ -43,27 +43,14 @@ class AzdoProvider(BaseProvider):
         session: requests.Session,
     ) -> None:
         super().__init__(config=config, session=session)
-        self.org_url = config.org_url
+        self.org_name = config.azdo_org
+        self.org_url = config.azdo_org_url
         self.api_version = config.api_version
         self.max_output_chars = config.max_output_chars
-        self.org_name = self._extract_org_name(self.org_url)
         self._credential = credential or DefaultAzureCredential(
             exclude_interactive_browser_credential=True
         )
         self._access_token: str | None = None
-
-    @staticmethod
-    def _extract_org_name(org_url: str) -> str:
-        parsed = urlparse(org_url)
-        path_bits = [bit for bit in parsed.path.split("/") if bit]
-        if parsed.netloc == "dev.azure.com" and path_bits:
-            return path_bits[0]
-
-        host_bits = parsed.netloc.split(".")
-        if host_bits and host_bits[0]:
-            return host_bits[0]
-
-        raise ValueError(f"Unable to infer organization name from URL: {org_url}")
 
     def _get_token(self, *, force_refresh: bool = False) -> str:
         if self._access_token and not force_refresh:
@@ -84,7 +71,7 @@ class AzdoProvider(BaseProvider):
         return "Authentication rejected with HTTP 401/403. Run `az login` and retry."
 
     def _almsearch_url(self, suffix: str) -> str:
-        return f"https://almsearch.dev.azure.com/{self.org_name}{suffix}"
+        return f"{self._config.azdo_search_url}{suffix}"
 
     def list_projects(self) -> list[dict[str, Any]]:
         url = f"{self.org_url}/_apis/projects"

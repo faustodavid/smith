@@ -72,6 +72,7 @@ def test_parse_int_env_handles_parsing_and_bounds(
 
 def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -> None:
     for env_name in (
+        "AZURE_DEVOPS_ORG",
         "AZURE_DEVOPS_API_VERSION",
         "AZURE_DEVOPS_TIMEOUT_SECONDS",
         "THANOS_LOCAL_MAX_OUTPUT_CHARS",
@@ -87,7 +88,7 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
         monkeypatch.delenv(env_name, raising=False)
 
     runtime = parse_runtime_config(
-        org_url="https://dev.azure.com/example/",
+        azdo_org="example",
         api_version=None,
         timeout_seconds=None,
         max_output_chars=None,
@@ -95,7 +96,8 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
         github_api_version_default="2022-11-28",
     )
 
-    assert runtime.org_url == "https://dev.azure.com/example"
+    assert runtime.azdo_org == "example"
+    assert runtime.azdo_org_url == "https://dev.azure.com/example"
     assert runtime.api_version == "7.1"
     assert runtime.timeout_seconds == 30
     assert runtime.max_output_chars == 10240
@@ -115,7 +117,7 @@ def test_parse_runtime_config_applies_timeout_and_backoff_overrides(monkeypatch:
     monkeypatch.setenv("SMITH_HTTP_RETRY_BACKOFF_SECONDS", "1.75")
 
     runtime = parse_runtime_config(
-        org_url="https://dev.azure.com/example/",
+        azdo_org="example",
         api_version=None,
         timeout_seconds=None,
         max_output_chars=None,
@@ -137,7 +139,7 @@ def test_parse_runtime_config_handles_invalid_or_empty_azure_timeout_env(
     monkeypatch.delenv("GITHUB_TIMEOUT_SECONDS", raising=False)
 
     runtime = parse_runtime_config(
-        org_url="https://dev.azure.com/example/",
+        azdo_org="example",
         api_version=None,
         timeout_seconds=11,
         max_output_chars=None,
@@ -153,7 +155,7 @@ def test_parse_runtime_config_falls_back_for_invalid_retry_backoff(monkeypatch: 
     monkeypatch.setenv("SMITH_HTTP_RETRY_BACKOFF_SECONDS", "not-a-float")
 
     runtime = parse_runtime_config(
-        org_url="https://dev.azure.com/example/",
+        azdo_org="example",
         api_version=None,
         timeout_seconds=None,
         max_output_chars=None,

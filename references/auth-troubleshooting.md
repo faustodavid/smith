@@ -1,11 +1,11 @@
 # Auth Troubleshooting
 
-## Symptom: "Missing AZURE_DEVOPS_ORG_URL"
+## Symptom: "Missing AZURE_DEVOPS_ORG"
 
 Set the required env var:
 
 ```bash
-export AZURE_DEVOPS_ORG_URL="https://dev.azure.com/<org>"
+export AZURE_DEVOPS_ORG="<org>"
 ```
 
 ## Symptom: token acquisition failure

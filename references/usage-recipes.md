@@ -10,7 +10,7 @@ For non-trivial requests, follow this order first:
 ## Prerequisites
 
 ```bash
-export AZURE_DEVOPS_ORG_URL="https://dev.azure.com/<org>"
+export AZURE_DEVOPS_ORG="<org>"
 export GITHUB_ORG="<org>"
 az login
 ```
