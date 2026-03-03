@@ -71,6 +71,6 @@ module = [
   "smith.cli.parser",
   "smith.cli.main",
   "smith.providers.*",
-  "smith.services.*",
+  "smith.utils",
 ]
 ignore_errors = true
