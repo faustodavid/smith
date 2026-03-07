@@ -47,7 +47,7 @@ select = ["E", "F", "I"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/contract", "tests/integration"]
 
 [tool.mypy]
 python_version = "3.12"

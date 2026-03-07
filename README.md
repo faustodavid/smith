@@ -30,6 +30,19 @@ mypy src
 pytest -q
 ```
 
+`pytest -q` runs the fast `unit` and `contract` tiers and skips live integration smoke tests by default.
+
+Run the live provider smoke lane explicitly when credentials and fixture IDs are available:
+
+```bash
+pytest tests/integration -q --run-integration
+```
+
+Integration smoke tests read these environment variables when present:
+
+- GitHub: `GITHUB_ORG`, `GITHUB_TOKEN`, `SMITH_TEST_GITHUB_REPO`, `SMITH_TEST_GITHUB_PR_ID`, `SMITH_TEST_GITHUB_RUN_ID`, `SMITH_TEST_GITHUB_ISSUE_ID`
+- Azure DevOps: `AZURE_DEVOPS_ORG`, `SMITH_TEST_AZDO_PROJECT`, `SMITH_TEST_AZDO_REPO`, `SMITH_TEST_AZDO_PR_ID`, `SMITH_TEST_AZDO_BUILD_ID`, `SMITH_TEST_AZDO_WORK_ITEM_ID`
+
 ## License
 
 MIT (see `LICENSE`).

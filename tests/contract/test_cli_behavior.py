@@ -91,7 +91,7 @@ def test_auth_and_api_exit_codes(monkeypatch: Any, capsys: Any) -> None:
 
 
 def test_script_entrypoint_smoke() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
         [sys.executable, "scripts/smith_cli.py", "--help"],
         cwd=str(repo_root),

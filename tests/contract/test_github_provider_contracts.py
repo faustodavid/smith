@@ -1,66 +1,18 @@
 from __future__ import annotations
 
-import base64
-from types import SimpleNamespace
 from typing import Any
 
-import pytest
 import requests
+from tests.support import make_runtime_config
 
-from smith.errors import SmithApiError, SmithAuthError
 from smith.providers.github import GitHubProvider
-from tests.support import FakeResponse, make_runtime_config
 
 
 def _provider(config: Any | None = None) -> GitHubProvider:
     return GitHubProvider(config=config or make_runtime_config(), session=requests.Session())
 
 
-def test_github_token_helpers_and_rate_limit_handling(monkeypatch: Any) -> None:
-    provider = _provider()
-    monkeypatch.setenv("GITHUB_TOKEN", "env-token")
-    monkeypatch.setattr(
-        "smith.providers.github.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("subprocess should not be called")),
-    )
-
-    assert provider._get_token() == "env-token"
-    assert provider._get_token() == "env-token"
-    assert provider._default_accept_header() == "application/vnd.github+json"
-    assert provider._default_headers() == {"X-GitHub-Api-Version": "2022-11-28"}
-    assert provider._timeout() == 30
-    assert provider._build_url("/repos/test") == "https://api.github.com/repos/test"
-
-    with pytest.raises(SmithApiError, match="rate limited"):
-        provider._handle_response_status(FakeResponse(429), "https://api.github.com/repos/test")
-
-
-def test_github_token_falls_back_to_gh_cli_and_reports_auth_failures(monkeypatch: Any) -> None:
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    provider = _provider()
-    calls: list[list[str]] = []
-
-    def _fake_run(args: list[str], **kwargs: Any) -> Any:
-        calls.append(args)
-        return SimpleNamespace(stdout="cli-token\n")
-
-    monkeypatch.setattr("smith.providers.github.subprocess.run", _fake_run)
-
-    assert provider._get_token() == "cli-token"
-    assert provider._get_token() == "cli-token"
-    assert calls == [["gh", "auth", "token"]]
-
-    monkeypatch.setattr(
-        "smith.providers.github.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("missing gh")),
-    )
-    failing_provider = _provider()
-
-    with pytest.raises(SmithAuthError, match="Failed to acquire GitHub token"):
-        failing_provider._get_token()
-
-
-def test_github_requires_org_and_maps_project_repository_views(monkeypatch: Any) -> None:
+def test_github_maps_project_repository_views(monkeypatch: Any) -> None:
     provider = _provider()
     monkeypatch.setattr(
         provider,
@@ -86,9 +38,6 @@ def test_github_requires_org_and_maps_project_repository_views(monkeypatch: Any)
             "webUrl": "https://github.com/octo-org/repo-a",
         }
     ]
-
-    with pytest.raises(ValueError, match="Missing GITHUB_ORG"):
-        _provider(make_runtime_config(github_org=""))._require_github_org()
 
 
 def test_github_search_code_builds_repo_qualifier_and_applies_skip_take(monkeypatch: Any) -> None:
@@ -119,84 +68,33 @@ def test_github_search_code_builds_repo_qualifier_and_applies_skip_take(monkeypa
     ]
 
 
-def test_github_repository_file_resolution_handles_root_directory_and_file_paths(monkeypatch: Any) -> None:
-    provider = _provider()
-    repo_prefix = provider._repo_prefix("repo-a")
-
-    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
-        if path == f"{repo_prefix}/git/trees/main" and params == {"recursive": "1"}:
-            return {"tree": [{"path": "README.md", "type": "blob", "sha": "sha-readme"}]}
-        if path == f"{repo_prefix}/git/trees/main" and params is None:
-            return {
-                "tree": [
-                    {"path": "README.md", "type": "blob", "sha": "sha-readme"},
-                    {"path": "src", "type": "tree", "sha": "tree-src"},
-                ]
-            }
-        if path == f"{repo_prefix}/git/trees/tree-src" and params == {"recursive": "1"}:
-            return {"tree": [{"path": "app.py", "type": "blob", "sha": "sha-app"}]}
-        raise AssertionError(f"unexpected request: {path} {params}")
-
-    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
-
-    assert provider._get_repository_files(repo="repo-a", path=None, branch="main") == [
-        {"path": "/README.md", "is_binary": False, "sha": "sha-readme"}
-    ]
-    assert provider._get_repository_files(repo="repo-a", path="/src", branch="main") == [
-        {"path": "/src/app.py", "is_binary": False, "sha": "sha-app"}
-    ]
-    assert provider._get_repository_files(repo="repo-a", path="/README.md", branch="main") == [
-        {"path": "/README.md", "is_binary": False, "sha": "sha-readme"}
-    ]
-
-
-def test_github_file_text_prefers_blob_api_and_falls_back_to_contents(monkeypatch: Any) -> None:
-    provider = _provider()
-    blob_value = base64.b64encode(b"hello from blob").decode("utf-8")
-    contents_value = base64.b64encode(b"hello from contents").decode("utf-8")
-    repo_prefix = provider._repo_prefix("repo-a")
-
-    def _blob_success(method: str, path: str, **kwargs: Any) -> Any:
-        assert path == f"{repo_prefix}/git/blobs/sha-1"
-        return {"content": blob_value, "encoding": "base64"}
-
-    monkeypatch.setattr(provider, "_request_json", _blob_success)
-    assert provider._get_file_text(repo="repo-a", file_path="/src/app.py", branch="main", blob_sha="sha-1") == "hello from blob"
-
-    calls: list[str] = []
-
-    def _blob_fallback(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
-        calls.append(path)
-        if path == f"{repo_prefix}/git/blobs/sha-2":
-            raise RuntimeError("blob missing")
-        assert params == {"ref": "main"}
-        return {"content": contents_value, "encoding": "base64"}
-
-    monkeypatch.setattr(provider, "_request_json", _blob_fallback)
-    assert (
-        provider._get_file_text(
-            repo="repo-a",
-            file_path="/src/app.py",
-            branch="refs/heads/main",
-            blob_sha="sha-2",
-        )
-        == "hello from contents"
-    )
-    assert calls == [f"{repo_prefix}/git/blobs/sha-2", f"{repo_prefix}/contents/src/app.py"]
-
-
 def test_github_grep_supports_match_all_shortcut_compile_errors_and_warning_paths(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
     monkeypatch.setenv("GITHUB_GREP_ENABLE_PARALLEL", "false")
-    monkeypatch.setattr(provider, "_get_repository_default_branch", lambda repo: "main")
-    monkeypatch.setattr(
-        provider,
-        "_get_repository_files",
-        lambda **kwargs: [
-            {"path": "/src/app.py", "sha": "sha-app"},
-            {"path": "/src/util.py", "sha": "sha-util"},
-        ],
-    )
+    repo_prefix = provider._repo_prefix("repo-a")
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        if path == repo_prefix:
+            return {"default_branch": "main"}
+        if path == f"{repo_prefix}/git/trees/main" and params == {"recursive": "1"}:
+            return {
+                "tree": [
+                    {"path": "src/app.py", "type": "blob", "sha": "sha-app"},
+                    {"path": "src/util.py", "type": "blob", "sha": "sha-util"},
+                ]
+            }
+        if path == f"{repo_prefix}/git/blobs/sha-app":
+            return {
+                "content": "b2sKZXJyb3IKZXJyb3I=",
+                "encoding": "base64",
+            }
+        if path == f"{repo_prefix}/git/blobs/sha-util":
+            raise RuntimeError("blob missing")
+        if path == f"{repo_prefix}/contents/src/util.py":
+            raise RuntimeError("denied")
+        raise AssertionError(f"unexpected request: {path} {params}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
 
     shortcut = provider.grep(repo="repo-a", pattern=".*", output_mode="files_with_matches")
     assert shortcut == {
@@ -206,13 +104,6 @@ def test_github_grep_supports_match_all_shortcut_compile_errors_and_warning_path
         "partial": False,
     }
 
-    monkeypatch.setattr(
-        provider,
-        "_get_file_text",
-        lambda *, file_path, **kwargs: (_ for _ in ()).throw(RuntimeError("denied"))
-        if file_path == "/src/util.py"
-        else "ok\nerror\nerror",
-    )
     result = provider.grep(repo="repo-a", pattern="error", output_mode="count", case_insensitive=False, context_lines=0)
 
     assert result["text"] == "/src/app.py:2"

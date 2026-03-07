@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 import requests
+from tests.support import FakeResponse, RecordingSession, make_runtime_config
 
 from smith.errors import SmithApiError, SmithAuthError
 from smith.providers.base import BaseProvider, normalize_provider, normalize_single_provider, resolve_providers
-from tests.support import FakeResponse, RecordingSession, make_runtime_config
 
 
 class _TestProvider(BaseProvider):

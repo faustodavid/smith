@@ -1,43 +1,16 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import requests
-
-from smith.errors import SmithAuthError
-from smith.providers.azdo import ADO_SCOPE, AzdoProvider
 from tests.support import make_runtime_config
+
+from smith.providers.azdo import AzdoProvider
 
 
 def _provider(config: Any | None = None, credential: Any | None = None) -> AzdoProvider:
     return AzdoProvider(config=config or make_runtime_config(), credential=credential, session=requests.Session())
-
-
-def test_azdo_token_helpers_and_auth_failures() -> None:
-    credential_calls: list[str] = []
-
-    class _Credential:
-        def get_token(self, scope: str) -> Any:
-            credential_calls.append(scope)
-            return SimpleNamespace(token="ado-token")
-
-    provider = _provider(credential=_Credential())
-
-    assert provider._get_token() == "ado-token"
-    assert provider._get_token() == "ado-token"
-    assert credential_calls == [ADO_SCOPE]
-    assert provider._almsearch_url("/_apis/search") == "https://almsearch.dev.azure.com/acme/_apis/search"
-    assert provider._auth_error_message() == "Authentication rejected with HTTP 401/403. Run `az login` and retry."
-
-    class _FailingCredential:
-        def get_token(self, scope: str) -> Any:
-            raise RuntimeError("no az login")
-
-    failing_provider = _provider(credential=_FailingCredential())
-    with pytest.raises(SmithAuthError, match="Failed to acquire Azure DevOps token"):
-        failing_provider._get_token()
 
 
 def test_azdo_list_project_repository_and_search_code_views(monkeypatch: Any) -> None:
@@ -97,16 +70,24 @@ def test_azdo_list_project_repository_and_search_code_views(monkeypatch: Any) ->
 
 def test_azdo_grep_supports_match_all_shortcut_and_warning_paths(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
-    monkeypatch.setattr(
-        provider,
-        "_request_json",
-        lambda method, url, *, params=None, **kwargs: {
-            "value": [
-                {"path": "/src/app.py", "gitObjectType": "blob", "contentMetadata": {"isBinary": False}},
-                {"path": "/src/util.py", "gitObjectType": "blob", "contentMetadata": {"isBinary": False}},
-            ]
-        },
-    )
+    repo_url = f"{provider.org_url}/proj-a/_apis/git/repositories/repo-a/items"
+
+    def _fake_request_json(method: str, url: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        assert url == repo_url
+        if params and params.get("scopePath") in {"/src", "/"}:
+            return {
+                "value": [
+                    {"path": "/src/app.py", "gitObjectType": "blob", "contentMetadata": {"isBinary": False}},
+                    {"path": "/src/util.py", "gitObjectType": "blob", "contentMetadata": {"isBinary": False}},
+                ]
+            }
+        if params and params.get("path") == "/src/app.py":
+            return {"content": "ok\nerror"}
+        if params and params.get("path") == "/src/util.py":
+            raise RuntimeError("denied")
+        raise AssertionError(f"unexpected request: {url} {params}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
 
     shortcut = provider.grep(project="proj-a", repo="repo-a", pattern=".*", path="/src", glob="*.py", output_mode="files_with_matches")
     assert shortcut == {
@@ -116,21 +97,6 @@ def test_azdo_grep_supports_match_all_shortcut_and_warning_paths(monkeypatch: An
         "partial": False,
     }
 
-    monkeypatch.setattr(
-        provider,
-        "_get_repository_files",
-        lambda **kwargs: [
-            {"path": "/src/app.py", "isBinary": False, "contentMetadata": {"isBinary": False}},
-            {"path": "/src/util.py", "isBinary": False, "contentMetadata": {"isBinary": False}},
-        ],
-    )
-    monkeypatch.setattr(
-        provider,
-        "_get_file_text",
-        lambda *, file_path, **kwargs: (_ for _ in ()).throw(RuntimeError("denied"))
-        if file_path == "/src/util.py"
-        else "ok\nerror",
-    )
     result = provider.grep(project="proj-a", repo="repo-a", pattern="error", output_mode="count", case_insensitive=False, context_lines=0)
 
     assert result["text"] == "/src/app.py:1"

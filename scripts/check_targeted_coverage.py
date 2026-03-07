@@ -13,8 +13,16 @@ MODULE_FLOORS: dict[str, float] = {
     "smith.client": 80.0,
     "smith.formatting": 80.0,
     "smith.providers.base": 85.0,
-    "smith.providers.github": 45.0,
-    "smith.providers.azdo": 45.0,
+    "smith.providers.azdo": 80.0,
+    "smith.providers.azdo_code": 65.0,
+    "smith.providers.azdo_pull_requests": 65.0,
+    "smith.providers.azdo_builds": 70.0,
+    "smith.providers.azdo_work_items": 65.0,
+    "smith.providers.github": 80.0,
+    "smith.providers.github_code": 65.0,
+    "smith.providers.github_pull_requests": 70.0,
+    "smith.providers.github_builds": 70.0,
+    "smith.providers.github_issues": 70.0,
 }
 
 

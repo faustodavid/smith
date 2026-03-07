@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests.support import make_runtime_config
 
 from smith import client as client_module
 from smith.client import SmithClient
-from tests.support import make_runtime_config
 
 
 class _FakeProvider:
