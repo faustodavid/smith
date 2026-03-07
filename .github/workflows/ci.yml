@@ -22,4 +22,6 @@ jobs:
       - name: Typecheck
         run: mypy src
       - name: Unit tests
-        run: pytest -q
+        run: |
+          pytest --cov=src/smith --cov-report=term-missing -q
+          python scripts/check_targeted_coverage.py

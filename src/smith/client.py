@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from typing import Any, Callable, Literal
 

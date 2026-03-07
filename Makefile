@@ -1,15 +1,16 @@
 .PHONY: lint typecheck test check install
 
 lint:
-	python -m ruff check .
+	ruff check .
 
 typecheck:
-	python -m mypy src
+	mypy src
 
 test:
-	python -m pytest -q
+	pytest --cov=src/smith --cov-report=term-missing -q
+	python3 scripts/check_targeted_coverage.py
 
 check: lint typecheck test
 
 install:
-	pip install -e ".[dev]"
+	python3 -m pip install -e ".[dev]"

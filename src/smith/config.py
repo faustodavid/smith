@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-
 AZDO_BASE_URL = "https://dev.azure.com"
 AZDO_SEARCH_BASE_URL = "https://almsearch.dev.azure.com"
 
