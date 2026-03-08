@@ -104,13 +104,12 @@ smith ci logs grep github rtl-devops-gitops <run_id> --pattern "ERROR|Exception"
 
 ```bash
 smith stories get azdo SRE 123456
-smith stories query azdo SRE --wiql "Select [System.Id], [System.Title] From WorkItems Where [System.WorkItemType] = 'Bug'"
 smith stories search azdo SRE --query "login error" --state Active
+smith stories search azdo SRE --query "Bug login error" --type Bug
 smith stories mine azdo SRE
 smith stories get github rtl-devops-gitops 123
 smith stories search github rtl-devops-gitops --query "retention"
 smith stories mine github rtl-devops-gitops
-# GitHub does not support stories query in smith vNext; use stories search instead.
 ```
 
 ## JSON output for automation

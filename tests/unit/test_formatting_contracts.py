@@ -106,8 +106,8 @@ def test_render_text_renders_pr_ci_and_story_views() -> None:
         "stories.get",
         {"id": 9, "fields": {"System.WorkItemType": "Bug", "System.State": "Active", "System.Title": "Fix login"}},
     )
-    work_query = render_text(
-        "stories.query",
+    work_search = render_text(
+        "stories.search",
         {
             "results": [{"id": 9, "type": "Bug", "state": "Active", "title": "Fix login"}],
             "returned_count": 1,
@@ -146,7 +146,7 @@ def test_render_text_renders_pr_ci_and_story_views() -> None:
         "1 | 50 | Build | linux | pytest"
     )
     assert work_get == "id: 9\ntype: Bug\nstate: Active\ntitle: Fix login"
-    assert work_query == "id | type | state | title\n9 | Bug | Active | Fix login\nreturned_count: 1\nhas_more: False"
+    assert work_search == "id | type | state | title\n9 | Bug | Active | Fix login\nreturned_count: 1\nhas_more: False"
 
 
 def test_render_text_grouped_provider_output_preserves_order_warnings_and_errors() -> None:

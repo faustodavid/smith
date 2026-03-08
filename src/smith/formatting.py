@@ -313,7 +313,6 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "pr.threads": _render_pr_threads,
     "ci.logs.list": _render_build_logs,
     "stories.get": _render_board_ticket,
-    "stories.query": _render_board_table,
     "stories.search": _render_board_table,
     "stories.mine": _render_board_table,
 }

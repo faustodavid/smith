@@ -123,7 +123,7 @@ Stop and report unresolved when all are true:
 
 6. Provider incompatibility.
 - If a command is unsupported for a provider, return a concrete fallback command.
-- Example: for GitHub `work query`, use `work search`.
+- Prefer the closest supported read command and say exactly what to run next.
 
 ## Commands (Read-Only)
 
@@ -151,7 +151,6 @@ Stop and report unresolved when all are true:
 - Work read (`board` and `stories` are hidden legacy aliases):
   - `work get azdo <project> <id> [--format text|json]`
   - `work get github <repo> <id> [--format text|json]`
-  - `work query azdo <project> --wiql "<query>" [--skip N] [--take N] [--format text|json]`
   - `work search azdo <project> --query <text> [--area <path>] [--type <work_item_type>] [--state <state>] [--assigned-to <email>] [--skip N] [--take N] [--format text|json]`
   - `work search github <repo> --query <text> [--type <work_item_type>] [--state <state>] [--assigned-to <email>] [--skip N] [--take N] [--format text|json]`
   - `work mine azdo <project> [--include-closed] [--skip N] [--take N] [--format text|json]`
@@ -166,7 +165,7 @@ Command defaults:
 - `ci grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
 - `work search`: default `--skip 0`, default `--take 20`.
 - `work mine`: default `--skip 0`, default `--take 20`, closed items excluded unless `--include-closed`.
-- `discover projects`, `discover repos`, `pr get`, `pr threads`, `ci logs`, `work get`, `work query`: default `--format text`.
+- `discover projects`, `discover repos`, `pr get`, `pr threads`, `ci logs`, `work get`: default `--format text`.
 
 Behavior defaults:
 - If `--branch` is omitted, provider default branch is used.

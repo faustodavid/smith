@@ -116,9 +116,25 @@ def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) ->
     assert "stories" in output
     assert "discover" not in output
     assert "\n    work" not in output
-    assert "Code search and grep" in output
-    assert "Pull request read" in output
-    assert "CI run and log read" in output
+    assert "List repositories" in output
+    assert "List GitHub organization or Azure DevOps projects" in output
+    assert "Search and grep across providers and repos" in output
+    assert "List, get, and read comments" in output
+    assert "Read and grep logs" in output
+    assert "Get, search, and get mine" in output
+
+
+def test_stories_help_lists_get_search_and_mine_only(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["stories", "--help"])
+
+    output = capsys.readouterr().out
+    assert "get" in output
+    assert "search" in output
+    assert "mine" in output
+    assert "query" not in output
 
 
 def test_ci_help_lists_only_logs(capsys: pytest.CaptureFixture[str]) -> None:
@@ -130,7 +146,8 @@ def test_ci_help_lists_only_logs(capsys: pytest.CaptureFixture[str]) -> None:
     output = capsys.readouterr().out
     assert "logs" in output
     assert "Inspect CI logs" in output
-    assert "grep" not in output
+    assert "{logs}" in output
+    assert "\n    grep" not in output
 
 
 def test_ci_logs_help_lists_list_and_grep(capsys: pytest.CaptureFixture[str]) -> None:
@@ -144,3 +161,10 @@ def test_ci_logs_help_lists_list_and_grep(capsys: pytest.CaptureFixture[str]) ->
     assert "grep" in output
     assert "List logs for a CI run" in output
     assert "Search or read CI logs" in output
+
+
+def test_stories_query_path_fails_to_parse() -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["stories", "query", "azdo", "SRE", "--wiql", "SELECT 1"])

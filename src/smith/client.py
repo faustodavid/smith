@@ -497,31 +497,6 @@ class SmithClient:
             },
         )
 
-    def execute_work_query(
-        self,
-        *,
-        provider: str,
-        project: str | None,
-        wiql: str,
-        skip: int,
-        take: int,
-    ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="stories.query")
-        return self._fanout(
-            provider=single_provider,
-            operations={
-                "azdo": lambda: self._get_azdo().list_work_items(
-                    project=str(project),
-                    wiql=wiql,
-                    skip=skip,
-                    take=take,
-                ),
-                "github": lambda: (_ for _ in ()).throw(
-                    ValueError("GitHub does not support `stories query`. Use `stories search` instead.")
-                ),
-            },
-        )
-
     def execute_work_search(
         self,
         *,
@@ -606,23 +581,6 @@ class SmithClient:
             project=project,
             repo=repo,
             work_item_id=work_item_id,
-        )
-
-    def execute_board_list(
-        self,
-        *,
-        provider: str,
-        project: str | None,
-        wiql: str,
-        skip: int,
-        take: int,
-    ) -> dict[str, Any]:
-        return self.execute_work_query(
-            provider=provider,
-            project=project,
-            wiql=wiql,
-            skip=skip,
-            take=take,
         )
 
     def execute_board_search(

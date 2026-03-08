@@ -51,4 +51,4 @@ smith code search "<broader query>"
 
 If a command is unsupported for a selected provider, use the explicit fallback:
 
-- GitHub `work query` => run `work search` with equivalent query terms.
+- Prefer the closest supported read command for that provider and restate the fallback explicitly.

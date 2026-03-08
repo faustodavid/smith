@@ -370,16 +370,6 @@ def test_execute_pr_list_uses_projects_as_github_repo_fallback(monkeypatch: Any)
 
     assert result["providers"]["github"]["data"]["kwargs"]["repos"] == ["repo-from-project"]
 
-
-def test_execute_work_query_rejects_github(monkeypatch: Any) -> None:
-    runtime = make_runtime_config()
-    _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
-
-    with pytest.raises(ValueError, match="GitHub does not support `stories query`"):
-        client.execute_work_query(provider="github", project="proj-a", wiql="SELECT 1", skip=0, take=10)
-
-
 def test_legacy_wrapper_methods_delegate_to_canonical_operations(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)

@@ -107,10 +107,6 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
         (_make_args(command_id="repos", provider="github"), "Missing GITHUB_ORG"),
         (_make_args(command_id="repos", provider="azdo"), "Missing AZURE_DEVOPS_ORG"),
         (
-            _make_args(command_id="stories.query", provider="github", github_org="gh-org"),
-            "GitHub does not support `stories query`",
-        ),
-        (
             _make_args(command_id="code.search", provider="github", project="proj-a", github_org="gh-org"),
             "GitHub code search does not support `--project`",
         ),
@@ -277,12 +273,6 @@ def test_emit_error_supports_text_and_json_with_cli_warnings(capsys: Any) -> Non
             _make_args(command_id="stories.get"),
             "execute_work_get",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "work_item_id": 42},
-        ),
-        (
-            "handle_work_query",
-            _make_args(command_id="stories.query"),
-            "execute_work_query",
-            {"provider": "azdo", "project": "proj-a", "wiql": "SELECT [System.Id] FROM WorkItems", "skip": 3, "take": 7},
         ),
         (
             "handle_work_search",

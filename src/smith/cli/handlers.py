@@ -132,9 +132,6 @@ def validate_args_for_provider(args: argparse.Namespace) -> None:
     if command == "code.search" and provider == "github" and str(getattr(args, "project", "") or "").strip():
         raise ValueError("GitHub code search does not support `--project`. Use `--repo` instead.")
 
-    if command == "stories.query" and provider == "github":
-        raise ValueError("GitHub does not support `stories query`. Use `stories search` instead.")
-
 
 def _emit_success(
     *,
@@ -350,22 +347,6 @@ def handle_work_get(client: SmithClient, args: argparse.Namespace) -> int:
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
         work_item_id=args.id,
-    )
-    return _emit_success(
-        args=args,
-        command=args.command_id,
-        data=data,
-        partial=_is_partial_result(data),
-    )
-
-
-def handle_work_query(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_work_query(
-        provider=args.provider,
-        project=getattr(args, "project", None),
-        wiql=args.wiql,
-        skip=args.skip,
-        take=args.take,
     )
     return _emit_success(
         args=args,

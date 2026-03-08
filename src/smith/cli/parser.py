@@ -17,7 +17,6 @@ from smith.cli.handlers import (
     handle_pr_threads,
     handle_work_get,
     handle_work_mine,
-    handle_work_query,
     handle_work_search,
 )
 from smith.client import SmithClient
@@ -152,7 +151,7 @@ def _add_repos_group(root_subparsers: argparse._SubParsersAction[argparse.Argume
     repos = _add_parser(
         root_subparsers,
         "repos",
-        help_text="List Azure DevOps or GitHub repositories",
+        help_text="List repositories",
     )
     repos_provider = repos.add_subparsers(dest="provider", required=True)
 
@@ -189,7 +188,7 @@ def _add_organizations_group(root_subparsers: argparse._SubParsersAction[argpars
     organizations = _add_parser(
         root_subparsers,
         "organizations",
-        help_text="List Azure DevOps projects or the configured GitHub organization",
+        help_text="List GitHub organization or Azure DevOps projects",
     )
     organizations_provider = organizations.add_subparsers(dest="provider", required=True)
 
@@ -221,7 +220,7 @@ def _add_organizations_group(root_subparsers: argparse._SubParsersAction[argpars
 
 
 def _add_code_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    code = _add_parser(root_subparsers, "code", help_text="Code search and grep")
+    code = _add_parser(root_subparsers, "code", help_text="Search and grep across providers and repos")
     code_sub = code.add_subparsers(dest="action", required=True)
 
     code_search = _add_parser(
@@ -269,7 +268,7 @@ def _add_code_group(root_subparsers: argparse._SubParsersAction[argparse.Argumen
 
 
 def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    pr = _add_parser(root_subparsers, "pr", help_text="Pull request read")
+    pr = _add_parser(root_subparsers, "pr", help_text="List, get, and read comments")
     pr_sub = pr.add_subparsers(dest="action", required=True)
 
     pr_list = _add_parser(pr_sub, "list", help_text="List pull requests")
@@ -325,7 +324,7 @@ def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
 
 
 def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    ci = _add_parser(root_subparsers, "ci", help_text="CI run and log read")
+    ci = _add_parser(root_subparsers, "ci", help_text="Read and grep logs")
     ci_sub = ci.add_subparsers(dest="action", required=True)
 
     ci_logs = _add_parser(ci_sub, "logs", help_text="Inspect CI logs")
@@ -408,7 +407,7 @@ def _add_stories_group(root_subparsers: argparse._SubParsersAction[argparse.Argu
     stories = _add_parser(
         root_subparsers,
         "stories",
-        help_text="Story, work item, and issue read",
+        help_text="Get, search, and get mine",
     )
     stories_sub = stories.add_subparsers(dest="action", required=True)
 
@@ -437,22 +436,6 @@ def _add_stories_group(root_subparsers: argparse._SubParsersAction[argparse.Argu
         handle_work_get,
         "stories.get",
         primary_path="stories get",
-    )
-
-    stories_query = _add_parser(stories_sub, "query", help_text="Run WIQL query (AZDO only)")
-    stories_query_provider = stories_query.add_subparsers(dest="provider", required=True)
-
-    stories_query_azdo = _add_parser(stories_query_provider, "azdo", help_text="Azure DevOps WIQL query")
-    stories_query_azdo.add_argument("project")
-    stories_query_azdo.add_argument("--wiql", required=True)
-    stories_query_azdo.add_argument("--skip", type=int, default=0)
-    stories_query_azdo.add_argument("--take", type=int, default=20)
-    _add_output_format(stories_query_azdo)
-    _set_handler(
-        stories_query_azdo,
-        handle_work_query,
-        "stories.query",
-        primary_path="stories query",
     )
 
     stories_search = _add_parser(stories_sub, "search", help_text="Search work items and issues")
