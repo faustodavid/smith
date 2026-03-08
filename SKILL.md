@@ -1,6 +1,6 @@
 ---
 name: smith
-description: Read-only Azure DevOps and GitHub investigation skill for code search, grep, pull request review context, build-log analysis, and work-item discovery using local single-user credentials. Use when prompts ask to find where configuration lives, trace infrastructure keys, inspect PR or CI failures, or map unknown paths in Azure DevOps or GitHub repositories. Do not use for write actions (create, update, approve, post), generic internet research, or non-DevOps creative tasks.
+description: Read-only Azure DevOps and GitHub investigation skill for code search, grep, pull request review context, build-log analysis, and work-item discovery using local single-user credentials. Use when prompts ask to find where configuration lives, trace infrastructure keys, inspect PR or pipeline failures, or map unknown paths in Azure DevOps or GitHub repositories. Do not use for write actions (create, update, approve, post), generic internet research, or non-DevOps creative tasks.
 ---
 
 # Smith
@@ -23,9 +23,9 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - The user asks where configuration is defined in Azure DevOps repositories.
 - The user asks to locate Terraform, Helm, YAML, or code keys in Azure DevOps repos.
 - The user asks to locate Terraform, Helm, YAML, or code keys in GitHub repos for a known org.
-- The user asks to inspect pull requests, CI logs, or work-item context.
+- The user asks to inspect pull requests, pipeline logs, or work-item context.
 - The user asks to map an unknown path, module, or service ownership in Azure DevOps code.
-- The user asks to investigate incidents rooted in repository config or CI logs.
+- The user asks to investigate incidents rooted in repository config or pipeline logs.
 
 ### Do not use smith when
 
@@ -50,7 +50,7 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - Run `code grep --output-mode content` with narrowed `--path` or `--glob` to capture concrete evidence lines.
 
 4. Escalate only as needed:
-- If code evidence is insufficient, add targeted `pr`, `ci`, or `work` read commands and keep proof paths in output.
+- If code evidence is insufficient, add targeted `prs`, `pipelines`, or `work` read commands and keep proof paths in output.
 
 ## Rules
 
@@ -77,7 +77,7 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 
 4. Prefer Git evidence over assumptions.
 - Treat repository files as source of truth.
-- Corroborate with PR/CI/work data only when needed.
+- Corroborate with pull-request/pipeline/work data only when needed.
 
 5. Cite concrete source paths.
 - Always include `project/repository:path` (or equivalent) evidence as source at the end of the answer.
@@ -137,17 +137,17 @@ Stop and report unresolved when all are true:
   - `code grep azdo <project> <repo> [<regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
   - `code grep github <repo> [<regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
 - Pull requests:
-  - `pr list azdo <project> <repo> [--status active,completed,abandoned] [--creator user1,user2] [--date-from ISO] [--date-to ISO] [--skip N] [--take N] [--exclude-drafts] [--include-labels] [--format text|json]`
-  - `pr list github <repo> [--status active,completed,abandoned] [--creator user1,user2] [--date-from ISO] [--date-to ISO] [--skip N] [--take N] [--exclude-drafts] [--include-labels] [--format text|json]`
-  - `pr get azdo <project> <repo> <id> [--format text|json]`
-  - `pr get github <repo> <id> [--format text|json]`
-  - `pr threads azdo <project> <repo> <id> [--format text|json]`
-  - `pr threads github <repo> <id> [--format text|json]`
-- CI logs:
-  - `ci logs azdo <project> <id> [--format text|json]`
-  - `ci logs github <repo> <id> [--format text|json]`
-  - `ci grep azdo <project> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
-  - `ci grep github <repo> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
+  - `prs list azdo <project> <repo> [--status active,completed,abandoned] [--creator user1,user2] [--date-from ISO] [--date-to ISO] [--skip N] [--take N] [--exclude-drafts] [--include-labels] [--format text|json]`
+  - `prs list github <repo> [--status active,completed,abandoned] [--creator user1,user2] [--date-from ISO] [--date-to ISO] [--skip N] [--take N] [--exclude-drafts] [--include-labels] [--format text|json]`
+  - `prs get azdo <project> <repo> <id> [--format text|json]`
+  - `prs get github <repo> <id> [--format text|json]`
+  - `prs threads azdo <project> <repo> <id> [--format text|json]`
+  - `prs threads github <repo> <id> [--format text|json]`
+- Pipeline logs:
+  - `pipelines logs list azdo <project> <id> [--format text|json]`
+  - `pipelines logs list github <repo> <id> [--format text|json]`
+  - `pipelines logs grep azdo <project> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
+  - `pipelines logs grep github <repo> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
 - Work read (`board` and `stories` are hidden legacy aliases):
   - `work get azdo <project> <id> [--format text|json]`
   - `work get github <repo> <id> [--format text|json]`
@@ -161,11 +161,11 @@ Stop and report unresolved when all are true:
 Command defaults:
 - `code search`: default `--provider all`, `--skip 0`, `--take 20`, `--format text`.
 - `code grep`: default pattern `.*`, default path `/`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
-- `pr list`: default statuses `active,completed,abandoned`, default `--skip 0`, default `--take 100`, drafts included unless `--exclude-drafts`.
-- `ci grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
+- `prs list`: default statuses `active,completed,abandoned`, default `--skip 0`, default `--take 100`, drafts included unless `--exclude-drafts`.
+- `pipelines logs grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
 - `work search`: default `--skip 0`, default `--take 20`.
 - `work mine`: default `--skip 0`, default `--take 20`, closed items excluded unless `--include-closed`.
-- `discover projects`, `discover repos`, `pr get`, `pr threads`, `ci logs`, `work get`: default `--format text`.
+- `discover projects`, `discover repos`, `prs get`, `prs threads`, `pipelines logs list`, `work get`: default `--format text`.
 
 Behavior defaults:
 - If `--branch` is omitted, provider default branch is used.

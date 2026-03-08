@@ -1,7 +1,7 @@
-description: Read and grep Azure DevOps/GitHub build logs via smith CLI (read-only)
+description: Read and grep Azure DevOps/GitHub pipeline logs via smith CLI (read-only)
 ---
 
-Scope: read-only provider-specific build-log investigation only.
+Scope: read-only provider-specific pipeline-log investigation only.
 
 Preflight:
 ```bash
@@ -11,19 +11,14 @@ az account show >/dev/null
 ```
 
 Required arguments:
-- Metadata AZDO: `logs azdo <project> <id>`
-- Metadata GitHub: `logs github <repo> <id>`
+- List AZDO: `list azdo <project> <id>`
+- List GitHub: `list github <repo> <id>`
 - Grep AZDO: `grep azdo <project> <id> [--log-id <n>] --pattern <regex>`
 - Grep GitHub: `grep github <repo> <id> [--log-id <n>] --pattern <regex>`
 
 First command to run:
-- Start with metadata:
 ```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" build logs $ARGUMENTS
-```
-- Then narrow with grep:
-```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" build grep $ARGUMENTS
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" pipelines logs $ARGUMENTS
 ```
 
 If no results:

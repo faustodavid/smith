@@ -4,11 +4,11 @@ from smith.formatting import dumps_json, make_envelope, render_text
 
 
 def test_json_envelope_shape() -> None:
-    payload = make_envelope(ok=True, command="organizations", data=[{"name": "A"}], meta={}, error=None)
+    payload = make_envelope(ok=True, command="orgs", data=[{"name": "A"}], meta={}, error=None)
     rendered = dumps_json(payload)
 
     assert '"ok": true' in rendered
-    assert '"command": "organizations"' in rendered
+    assert '"command": "orgs"' in rendered
     assert '"data"' in rendered
     assert '"error": null' in rendered
 

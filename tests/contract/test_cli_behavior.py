@@ -31,7 +31,7 @@ def test_success_exit_code_zero(monkeypatch: Any, capsys: Any) -> None:
         lambda args: _FakeClient(payload=[{"name": "proj-a"}]),
     )
 
-    code = cli_main.main(["organizations", "azdo"])
+    code = cli_main.main(["orgs", "azdo"])
     captured = capsys.readouterr()
 
     assert code == 0
@@ -59,7 +59,7 @@ def test_partial_exit_code_five(monkeypatch: Any, capsys: Any) -> None:
     }
     monkeypatch.setattr(cli_main, "_client_from_args", lambda args: _FakeClient(payload=payload))
 
-    code = cli_main.main(["organizations", "azdo"])
+    code = cli_main.main(["orgs", "azdo"])
     _ = capsys.readouterr()
 
     assert code == 5
@@ -72,7 +72,7 @@ def test_auth_and_api_exit_codes(monkeypatch: Any, capsys: Any) -> None:
         "_client_from_args",
         lambda args: _FakeClient(err=SmithAuthError("auth failed")),
     )
-    code_auth = cli_main.main(["organizations", "azdo"])
+    code_auth = cli_main.main(["orgs", "azdo"])
     auth_out = capsys.readouterr()
 
     assert code_auth == 3
@@ -83,7 +83,7 @@ def test_auth_and_api_exit_codes(monkeypatch: Any, capsys: Any) -> None:
         "_client_from_args",
         lambda args: _FakeClient(err=SmithApiError("api failed")),
     )
-    code_api = cli_main.main(["organizations", "azdo"])
+    code_api = cli_main.main(["orgs", "azdo"])
     api_out = capsys.readouterr()
 
     assert code_api == 4

@@ -184,38 +184,38 @@ def _add_repos_group(root_subparsers: argparse._SubParsersAction[argparse.Argume
     )
 
 
-def _add_organizations_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    organizations = _add_parser(
+def _add_orgs_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    orgs = _add_parser(
         root_subparsers,
-        "organizations",
+        "orgs",
         help_text="List GitHub organization or Azure DevOps projects",
     )
-    organizations_provider = organizations.add_subparsers(dest="provider", required=True)
+    orgs_provider = orgs.add_subparsers(dest="provider", required=True)
 
-    organizations_azdo = _add_parser(
-        organizations_provider,
+    orgs_azdo = _add_parser(
+        orgs_provider,
         "azdo",
         help_text="List Azure DevOps projects",
     )
-    _add_output_format(organizations_azdo)
+    _add_output_format(orgs_azdo)
     _set_handler(
-        organizations_azdo,
+        orgs_azdo,
         handle_discover_projects,
-        "organizations",
-        primary_path="organizations",
+        "orgs",
+        primary_path="orgs",
     )
 
-    organizations_github = _add_parser(
-        organizations_provider,
+    orgs_github = _add_parser(
+        orgs_provider,
         "github",
         help_text="Show the configured GitHub organization",
     )
-    _add_output_format(organizations_github)
+    _add_output_format(orgs_github)
     _set_handler(
-        organizations_github,
+        orgs_github,
         handle_discover_projects,
-        "organizations",
-        primary_path="organizations",
+        "orgs",
+        primary_path="orgs",
     )
 
 
@@ -268,8 +268,8 @@ def _add_code_group(root_subparsers: argparse._SubParsersAction[argparse.Argumen
 
 
 def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    pr = _add_parser(root_subparsers, "pr", help_text="List, get, and read comments")
-    pr_sub = pr.add_subparsers(dest="action", required=True)
+    prs = _add_parser(root_subparsers, "prs", help_text="List, get, and read pull request comments")
+    pr_sub = prs.add_subparsers(dest="action", required=True)
 
     pr_list = _add_parser(pr_sub, "list", help_text="List pull requests")
     pr_list_provider = pr_list.add_subparsers(dest="provider", required=True)
@@ -279,14 +279,14 @@ def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     pr_list_azdo.add_argument("repo", help="Repository name")
     _add_pr_list_filters(pr_list_azdo)
     _add_output_format(pr_list_azdo)
-    _set_handler(pr_list_azdo, handle_pr_list, "pr.list", primary_path="pr list")
+    _set_handler(pr_list_azdo, handle_pr_list, "prs.list", primary_path="prs list")
 
     pr_list_github = _add_parser(pr_list_provider, "github", help_text="List GitHub pull requests")
     pr_list_github.add_argument("repo", help="Repository name")
     pr_list_github.set_defaults(project=None)
     _add_pr_list_filters(pr_list_github)
     _add_output_format(pr_list_github)
-    _set_handler(pr_list_github, handle_pr_list, "pr.list", primary_path="pr list")
+    _set_handler(pr_list_github, handle_pr_list, "prs.list", primary_path="prs list")
 
     pr_get = _add_parser(pr_sub, "get", help_text="Get pull request details")
     pr_get_provider = pr_get.add_subparsers(dest="provider", required=True)
@@ -296,41 +296,41 @@ def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     pr_get_azdo.add_argument("repo")
     pr_get_azdo.add_argument("id", type=int)
     _add_output_format(pr_get_azdo)
-    _set_handler(pr_get_azdo, handle_pr_get, "pr.get", primary_path="pr get")
+    _set_handler(pr_get_azdo, handle_pr_get, "prs.get", primary_path="prs get")
 
     pr_get_github = _add_parser(pr_get_provider, "github", help_text="Get GitHub pull request details")
     pr_get_github.add_argument("repo")
     pr_get_github.add_argument("id", type=int)
     pr_get_github.set_defaults(project=None)
     _add_output_format(pr_get_github)
-    _set_handler(pr_get_github, handle_pr_get, "pr.get", primary_path="pr get")
+    _set_handler(pr_get_github, handle_pr_get, "prs.get", primary_path="prs get")
 
     pr_threads = _add_parser(pr_sub, "threads", help_text="Get pull request comment threads")
     pr_threads_provider = pr_threads.add_subparsers(dest="provider", required=True)
 
-    pr_threads_azdo = _add_parser(pr_threads_provider, "azdo", help_text="Get Azure DevOps PR threads")
+    pr_threads_azdo = _add_parser(pr_threads_provider, "azdo", help_text="Get Azure DevOps pull request threads")
     pr_threads_azdo.add_argument("project")
     pr_threads_azdo.add_argument("repo")
     pr_threads_azdo.add_argument("id", type=int)
     _add_output_format(pr_threads_azdo)
-    _set_handler(pr_threads_azdo, handle_pr_threads, "pr.threads", primary_path="pr threads")
+    _set_handler(pr_threads_azdo, handle_pr_threads, "prs.threads", primary_path="prs threads")
 
-    pr_threads_github = _add_parser(pr_threads_provider, "github", help_text="Get GitHub PR threads")
+    pr_threads_github = _add_parser(pr_threads_provider, "github", help_text="Get GitHub pull request threads")
     pr_threads_github.add_argument("repo")
     pr_threads_github.add_argument("id", type=int)
     pr_threads_github.set_defaults(project=None)
     _add_output_format(pr_threads_github)
-    _set_handler(pr_threads_github, handle_pr_threads, "pr.threads", primary_path="pr threads")
+    _set_handler(pr_threads_github, handle_pr_threads, "prs.threads", primary_path="prs threads")
 
 
 def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    ci = _add_parser(root_subparsers, "ci", help_text="Read and grep logs")
-    ci_sub = ci.add_subparsers(dest="action", required=True)
+    pipelines = _add_parser(root_subparsers, "pipelines", help_text="Read and grep pipeline logs")
+    ci_sub = pipelines.add_subparsers(dest="action", required=True)
 
-    ci_logs = _add_parser(ci_sub, "logs", help_text="Inspect CI logs")
+    ci_logs = _add_parser(ci_sub, "logs", help_text="Inspect pipeline logs")
     ci_logs_sub = ci_logs.add_subparsers(dest="log_action", required=True)
 
-    ci_logs_list = _add_parser(ci_logs_sub, "list", help_text="List logs for a CI run")
+    ci_logs_list = _add_parser(ci_logs_sub, "list", help_text="List logs for a pipeline run")
     ci_logs_list_provider = ci_logs_list.add_subparsers(dest="provider", required=True)
 
     ci_logs_list_azdo = _add_parser(
@@ -345,8 +345,8 @@ def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     _set_handler(
         ci_logs_list_azdo,
         handle_ci_logs,
-        "ci.logs.list",
-        primary_path="ci logs list",
+        "pipelines.logs.list",
+        primary_path="pipelines logs list",
     )
 
     ci_logs_list_github = _add_parser(
@@ -361,11 +361,11 @@ def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     _set_handler(
         ci_logs_list_github,
         handle_ci_logs,
-        "ci.logs.list",
-        primary_path="ci logs list",
+        "pipelines.logs.list",
+        primary_path="pipelines logs list",
     )
 
-    ci_logs_grep = _add_parser(ci_logs_sub, "grep", help_text="Search or read CI logs")
+    ci_logs_grep = _add_parser(ci_logs_sub, "grep", help_text="Search or read pipeline logs")
     ci_logs_grep_provider = ci_logs_grep.add_subparsers(dest="provider", required=True)
 
     ci_logs_grep_azdo = _add_parser(
@@ -381,8 +381,8 @@ def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     _set_handler(
         ci_logs_grep_azdo,
         handle_ci_grep,
-        "ci.logs.grep",
-        primary_path="ci logs grep",
+        "pipelines.logs.grep",
+        primary_path="pipelines logs grep",
     )
 
     ci_logs_grep_github = _add_parser(
@@ -398,8 +398,8 @@ def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     _set_handler(
         ci_logs_grep_github,
         handle_ci_grep,
-        "ci.logs.grep",
-        primary_path="ci logs grep",
+        "pipelines.logs.grep",
+        primary_path="pipelines logs grep",
     )
 
 
@@ -527,11 +527,11 @@ def build_parser() -> argparse.ArgumentParser:
     root_subparsers = parser.add_subparsers(
         dest="group",
         required=True,
-        metavar="{repos,organizations,code,pr,ci,stories}",
+        metavar="{repos,orgs,code,prs,pipelines,stories}",
     )
 
     _add_repos_group(root_subparsers)
-    _add_organizations_group(root_subparsers)
+    _add_orgs_group(root_subparsers)
     _add_code_group(root_subparsers)
     _add_pr_group(root_subparsers)
     _add_ci_group(root_subparsers)

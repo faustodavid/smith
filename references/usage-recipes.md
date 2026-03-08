@@ -60,11 +60,11 @@ smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --context-
 - Include exact `project/repository:path` sources.
 - If unresolved, state "not enough evidence" and provide the next narrowing command.
 
-## List organizations and repos
+## List orgs and repos
 
 ```bash
-smith organizations azdo
-smith organizations github
+smith orgs azdo
+smith orgs github
 smith repos azdo SRE
 smith repos azdo
 smith repos github
@@ -82,22 +82,22 @@ smith code grep github rtl-devops-gitops "severity" --glob "*.yaml" --context-li
 ## Pull request investigation
 
 ```bash
-smith pr list azdo SRE rtl-devops-gitops --status active,completed --take 25
-smith pr get azdo SRE rtl-devops-gitops 12345
-smith pr threads azdo SRE rtl-devops-gitops 12345
-smith pr list github rtl-devops-gitops --status active,completed
-smith pr get github rtl-devops-gitops 12345
-smith pr threads github rtl-devops-gitops 12345
+smith prs list azdo SRE rtl-devops-gitops --status active,completed --take 25
+smith prs get azdo SRE rtl-devops-gitops 12345
+smith prs threads azdo SRE rtl-devops-gitops 12345
+smith prs list github rtl-devops-gitops --status active,completed
+smith prs get github rtl-devops-gitops 12345
+smith prs threads github rtl-devops-gitops 12345
 ```
 
-## CI log investigation
+## Pipeline log investigation
 
 ```bash
-smith ci logs list azdo SRE 942510
-smith ci logs grep azdo SRE 942510 --pattern "ERROR|Exception" --output-mode logs_with_matches
-smith ci logs grep azdo SRE 942510 --log-id 18 --from-line 380
-smith ci logs list github rtl-devops-gitops <run_id>
-smith ci logs grep github rtl-devops-gitops <run_id> --pattern "ERROR|Exception"
+smith pipelines logs list azdo SRE 942510
+smith pipelines logs grep azdo SRE 942510 --pattern "ERROR|Exception" --output-mode logs_with_matches
+smith pipelines logs grep azdo SRE 942510 --log-id 18 --from-line 380
+smith pipelines logs list github rtl-devops-gitops <run_id>
+smith pipelines logs grep github rtl-devops-gitops <run_id> --pattern "ERROR|Exception"
 ```
 
 ## Work item and issue read workflows

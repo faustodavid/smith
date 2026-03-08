@@ -55,10 +55,10 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario(
         key="pr_list_github",
-        description="smith pr list github publishing-msp-drupal8 --take 20",
+        description="smith prs list github publishing-msp-drupal8 --take 20",
         command=[
             "smith",
-            "pr",
+            "prs",
             "list",
             "github",
             "publishing-msp-drupal8",
@@ -185,4 +185,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

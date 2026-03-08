@@ -166,7 +166,7 @@ class SmithClient:
         return results
 
     def execute_discover_projects(self, *, provider: str) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="organizations")
+        single_provider = normalize_single_provider(provider, command="orgs")
         return self._fanout(
             provider=single_provider,
             operations={
@@ -294,7 +294,7 @@ class SmithClient:
         exclude_drafts: bool,
         include_labels: bool,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="pr.list")
+        single_provider = normalize_single_provider(provider, command="prs.list")
         return self._fanout(
             provider=single_provider,
             operations={
@@ -332,7 +332,7 @@ class SmithClient:
         repo: str,
         pull_request_id: int,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="pr.get")
+        single_provider = normalize_single_provider(provider, command="prs.get")
         return self._fanout(
             provider=single_provider,
             operations={
@@ -356,7 +356,7 @@ class SmithClient:
         repo: str,
         pull_request_id: int,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="pr.threads")
+        single_provider = normalize_single_provider(provider, command="prs.threads")
         return self._fanout(
             provider=single_provider,
             operations={
@@ -380,7 +380,7 @@ class SmithClient:
         repo: str | None,
         build_id: int,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="ci.logs.list")
+        single_provider = normalize_single_provider(provider, command="pipelines.logs.list")
         effective_repo = repo or project
         return self._fanout(
             provider=single_provider,
@@ -405,7 +405,7 @@ class SmithClient:
         from_line: int | None,
         to_line: int | None,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="ci.logs.grep")
+        single_provider = normalize_single_provider(provider, command="pipelines.logs.grep")
         effective_repo = repo or project
         return self._fanout(
             provider=single_provider,

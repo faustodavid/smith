@@ -13,8 +13,8 @@ def _make_args(**overrides: Any) -> Namespace:
     defaults = {
         "output_format": "text",
         "provider": "azdo",
-        "command_id": "organizations",
-        "primary_path": "organizations",
+        "command_id": "orgs",
+        "primary_path": "orgs",
         "alias_used": None,
         "deprecated_flags": [],
         "query": "grafana",
@@ -137,11 +137,11 @@ def test_emit_success_supports_text_and_json_and_metadata(capsys: Any, monkeypat
     json_args = _make_args(output_format="json", deprecated_flags=["--repos"])
     text_args = _make_args(output_format="text")
 
-    exit_text = handlers._emit_success(args=text_args, command="organizations", data={"name": "repo-a"})
+    exit_text = handlers._emit_success(args=text_args, command="orgs", data={"name": "repo-a"})
     text_output = capsys.readouterr()
     exit_json = handlers._emit_success(
         args=json_args,
-        command="organizations",
+        command="orgs",
         data={"name": "repo-a"},
         meta={"provider": "azdo"},
         partial=True,
@@ -149,7 +149,7 @@ def test_emit_success_supports_text_and_json_and_metadata(capsys: Any, monkeypat
     json_output = capsys.readouterr()
 
     assert exit_text == handlers.EXIT_OK
-    assert text_output.out.strip() == "organizations:repo-a"
+    assert text_output.out.strip() == "orgs:repo-a"
     assert exit_json == handlers.EXIT_PARTIAL
     assert '"ok": true' in json_output.out
     assert '"provider": "azdo"' in json_output.out
@@ -162,7 +162,7 @@ def test_emit_error_supports_text_and_json_with_cli_warnings(capsys: Any) -> Non
 
     exit_text = handlers._emit_error(
         args=text_args,
-        command="organizations",
+        command="orgs",
         code="invalid_args",
         message="bad args",
         exit_code=handlers.EXIT_INVALID_ARGS,
@@ -170,7 +170,7 @@ def test_emit_error_supports_text_and_json_with_cli_warnings(capsys: Any) -> Non
     text_output = capsys.readouterr()
     exit_json = handlers._emit_error(
         args=json_args,
-        command="organizations",
+        command="orgs",
         code="invalid_args",
         message="bad args",
         exit_code=handlers.EXIT_INVALID_ARGS,
@@ -190,7 +190,7 @@ def test_emit_error_supports_text_and_json_with_cli_warnings(capsys: Any) -> Non
     [
         (
             "handle_discover_projects",
-            _make_args(command_id="organizations"),
+            _make_args(command_id="orgs"),
             "execute_discover_projects",
             {"provider": "azdo"},
         ),
@@ -234,25 +234,25 @@ def test_emit_error_supports_text_and_json_with_cli_warnings(capsys: Any) -> Non
         ),
         (
             "handle_pr_get",
-            _make_args(command_id="pr.get"),
+            _make_args(command_id="prs.get"),
             "execute_pr_get",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "pull_request_id": 42},
         ),
         (
             "handle_pr_threads",
-            _make_args(command_id="pr.threads"),
+            _make_args(command_id="prs.threads"),
             "execute_pr_threads",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "pull_request_id": 42},
         ),
         (
             "handle_ci_logs",
-            _make_args(command_id="ci.logs.list"),
+            _make_args(command_id="pipelines.logs.list"),
             "execute_ci_logs",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "build_id": 42},
         ),
         (
             "handle_ci_grep",
-            _make_args(command_id="ci.logs.grep"),
+            _make_args(command_id="pipelines.logs.grep"),
             "execute_ci_grep",
             {
                 "provider": "azdo",
@@ -333,14 +333,14 @@ def test_handle_pr_list_branches_by_provider(
     expected_repos: list[str] | None,
 ) -> None:
     client = _RecordingClient(payload={"marker": provider})
-    args = _make_args(command_id="pr.list", provider=provider)
+    args = _make_args(command_id="prs.list", provider=provider)
     monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
 
     exit_code = handlers.handle_pr_list(client, args)
     output = capsys.readouterr()
 
     assert exit_code == handlers.EXIT_OK
-    assert output.out.strip() == f"pr.list:{provider}"
+    assert output.out.strip() == f"prs.list:{provider}"
     assert client.calls == [
         (
             "execute_pr_list",

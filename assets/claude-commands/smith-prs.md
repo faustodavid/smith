@@ -19,17 +19,8 @@ Required arguments:
 - Threads GitHub: `threads github <repo> <id>`
 
 First command to run:
-- If PR id is known:
 ```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" pr get $ARGUMENTS
-```
-- If discussion context is needed:
-```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" pr threads $ARGUMENTS
-```
-- Otherwise start with listing:
-```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" pr list $ARGUMENTS
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" prs $ARGUMENTS
 ```
 
 If no results:

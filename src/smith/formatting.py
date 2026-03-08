@@ -303,15 +303,15 @@ def _render_board_table(data: Any) -> str:
 
 
 _RENDER_DISPATCH: dict[str, Any] = {
-    "organizations": _render_name_list,
+    "orgs": _render_name_list,
     "repos": _render_discover_repos,
     "code.search": _render_code_search,
     "code.grep": _render_grep,
-    "ci.logs.grep": _render_grep,
-    "pr.list": _render_pr_list,
-    "pr.get": _render_pr_get,
-    "pr.threads": _render_pr_threads,
-    "ci.logs.list": _render_build_logs,
+    "pipelines.logs.grep": _render_grep,
+    "prs.list": _render_pr_list,
+    "prs.get": _render_pr_get,
+    "prs.threads": _render_pr_threads,
+    "pipelines.logs.list": _render_build_logs,
     "stories.get": _render_board_ticket,
     "stories.search": _render_board_table,
     "stories.mine": _render_board_table,
@@ -353,7 +353,7 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
             lines.append(rendered)
 
         warnings = entry.get("warnings") or []
-        if command not in {"code.grep", "ci.logs.grep"}:
+        if command not in {"code.grep", "pipelines.logs.grep"}:
             for warning in warnings if isinstance(warnings, list) else []:
                 lines.append(f"warning: {warning}")
         if bool(entry.get("partial", False)):
@@ -397,7 +397,7 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
                 output_lines.append(rendered)
 
         warnings = entry.get("warnings") or []
-        if command not in {"code.grep", "ci.logs.grep"}:
+        if command not in {"code.grep", "pipelines.logs.grep"}:
             for warning in warnings if isinstance(warnings, list) else []:
                 output_lines.append(f"warning: {warning}")
         if bool(entry.get("partial", False)):

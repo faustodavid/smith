@@ -54,9 +54,9 @@ def test_truncate_output_reports_character_and_line_counts() -> None:
     )
 
 
-def test_render_text_renders_pr_ci_and_story_views() -> None:
+def test_render_text_renders_prs_pipeline_and_story_views() -> None:
     pr_list = render_text(
-        "pr.list",
+        "prs.list",
         {
             "results": [{"project_name": "proj", "repository_name": "repo", "pr_id": 17, "status": "active", "title": "Fix"}],
             "returned_count": 1,
@@ -64,7 +64,7 @@ def test_render_text_renders_pr_ci_and_story_views() -> None:
         },
     )
     pr_get = render_text(
-        "pr.get",
+        "prs.get",
         {
             "pull_request": {
                 "pullRequestId": 17,
@@ -78,7 +78,7 @@ def test_render_text_renders_pr_ci_and_story_views() -> None:
         },
     )
     pr_threads = render_text(
-        "pr.threads",
+        "prs.threads",
         {
             "pull_request_id": 17,
             "returned_count": 1,
@@ -96,7 +96,7 @@ def test_render_text_renders_pr_ci_and_story_views() -> None:
         },
     )
     ci_logs = render_text(
-        "ci.logs.list",
+        "pipelines.logs.list",
         {
             "metadata": {"build_id": 101, "status": "completed", "result": "failed", "definition_name": "CI"},
             "logs": [{"id": 1, "line_count": 50, "stage_name": "Build", "job_name": "linux", "step_name": "pytest"}],
@@ -193,7 +193,7 @@ def test_render_text_flattens_single_provider_and_omits_duplicate_grep_warnings(
         "summary": {"queried": ["github"]},
     }
 
-    assert render_text("ci.logs.grep", payload) == "line one\nwarning: inner warning\npartial: true"
+    assert render_text("pipelines.logs.grep", payload) == "line one\nwarning: inner warning\npartial: true"
 
 
 def test_render_text_returns_provider_error_for_single_provider_failures() -> None:

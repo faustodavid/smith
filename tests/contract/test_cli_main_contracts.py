@@ -39,7 +39,7 @@ def test_main_prints_help_when_no_handler(monkeypatch: Any) -> None:
     parser = _Parser(args=Namespace(verbose=False, handler=None, output_format="text"))
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
 
-    assert cli_main.main(["organizations"]) == cli_main.EXIT_INVALID_ARGS
+    assert cli_main.main(["orgs"]) == cli_main.EXIT_INVALID_ARGS
     assert parser.help_called is True
 
 
