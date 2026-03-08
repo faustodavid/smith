@@ -84,15 +84,53 @@ def test_pipelines_logs_list_parser_uses_canonical_command_id() -> None:
     assert args.id == 42
 
 
+def test_code_grep_parser_uses_required_positional_pattern() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["code", "grep", "github", "repo-a", "--path", "/src", "error"])
+
+    assert args.command_id == "code.grep"
+    assert args.provider == "github"
+    assert args.repo == "repo-a"
+    assert args.path == "/src"
+    assert args.pattern == "error"
+
+
 def test_pipelines_logs_grep_parser_uses_canonical_command_id() -> None:
     parser = build_parser()
-    args = parser.parse_args(["pipelines", "logs", "grep", "github", "repo-a", "42", "--pattern", "error"])
+    args = parser.parse_args(["pipelines", "logs", "grep", "github", "repo-a", "42", "error"])
 
     assert args.command_id == "pipelines.logs.grep"
     assert args.provider == "github"
     assert args.repo == "repo-a"
     assert args.id == 42
     assert args.pattern == "error"
+
+
+def test_pipelines_logs_grep_parser_accepts_log_id_before_pattern() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipelines", "logs", "grep", "azdo", "SRE", "42", "--log-id", "18", "error"])
+
+    assert args.command_id == "pipelines.logs.grep"
+    assert args.provider == "azdo"
+    assert args.project == "SRE"
+    assert args.id == 42
+    assert args.log_id == 18
+    assert args.pattern == "error"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["code", "grep", "github", "repo-a"],
+        ["pipelines", "logs", "grep", "azdo", "SRE", "42"],
+        ["pipelines", "logs", "grep", "github", "repo-a", "42", "--pattern", "error"],
+    ],
+)
+def test_grep_commands_fail_when_pattern_contract_is_not_met(argv: list[str]) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(argv)
 
 
 @pytest.mark.parametrize(

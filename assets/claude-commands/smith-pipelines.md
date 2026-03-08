@@ -13,8 +13,8 @@ az account show >/dev/null
 Required arguments:
 - List AZDO: `list azdo <project> <id>`
 - List GitHub: `list github <repo> <id>`
-- Grep AZDO: `grep azdo <project> <id> [--log-id <n>] --pattern <regex>`
-- Grep GitHub: `grep github <repo> <id> [--log-id <n>] --pattern <regex>`
+- Grep AZDO: `grep azdo <project> <id> <regex> [--log-id <n>]`
+- Grep GitHub: `grep github <repo> <id> <regex> [--log-id <n>]`
 
 First command to run:
 ```bash

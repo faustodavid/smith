@@ -94,10 +94,10 @@ smith prs threads github rtl-devops-gitops 12345
 
 ```bash
 smith pipelines logs list azdo SRE 942510
-smith pipelines logs grep azdo SRE 942510 --pattern "ERROR|Exception" --output-mode logs_with_matches
-smith pipelines logs grep azdo SRE 942510 --log-id 18 --from-line 380
+smith pipelines logs grep azdo SRE 942510 "ERROR|Exception" --output-mode logs_with_matches
+smith pipelines logs grep azdo SRE 942510 ".*" --log-id 18 --from-line 380
 smith pipelines logs list github rtl-devops-gitops <run_id>
-smith pipelines logs grep github rtl-devops-gitops <run_id> --pattern "ERROR|Exception"
+smith pipelines logs grep github rtl-devops-gitops <run_id> "ERROR|Exception"
 ```
 
 ## Work item and issue read workflows

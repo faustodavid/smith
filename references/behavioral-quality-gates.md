@@ -16,8 +16,8 @@ A hardened run is acceptable only if all gates pass.
   3. focused `code grep --output-mode content`
 - PR/pipeline/work tools are used only when needed to corroborate.
 - Provider selection is explicit via positional syntax for deep commands.
-  - `code grep azdo <project> <repo>`
-  - `code grep github <repo>`
+  - `code grep azdo <project> <repo> "<regex>"`
+  - `code grep github <repo> "<regex>"`
   - `pipelines logs list github <repo> <id>`
 
 ## Gate 3: Evidence output quality

@@ -92,8 +92,7 @@ def _add_parser(
 def _add_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "pattern",
-        nargs="?",
-        help='Regex pattern (default: match all). Preferred positional form: smith code grep <provider> <scope> "<regex>"',
+        help='Regex pattern. Use ".*" to match all. Form: smith code grep <provider> <scope> "<regex>"',
     )
     parser.add_argument("--path", help="Path scope (default: /)")
     parser.add_argument("--branch", help="Branch name")
@@ -126,7 +125,10 @@ def _add_pr_list_filters(parser: argparse.ArgumentParser) -> None:
 
 def _add_ci_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--log-id", type=int)
-    parser.add_argument("--pattern")
+    parser.add_argument(
+        "pattern",
+        help='Regex pattern. Use ".*" to match all. Form: smith pipelines logs grep <provider> <scope> <id> "<regex>"',
+    )
     parser.add_argument(
         "--output-mode",
         choices=["content", "logs_with_matches", "count"],
