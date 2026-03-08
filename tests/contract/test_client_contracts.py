@@ -151,8 +151,7 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
 @pytest.mark.parametrize(
     ("method_name", "kwargs", "expected_provider", "expected_method", "expected_kwargs"),
     [
-        ("execute_projects_list", {"provider": "azdo"}, "azdo", "list_projects", {}),
-        ("execute_repos_list", {"provider": "azdo", "project": "proj-a"}, "azdo", "list_repositories", {"project": "proj-a"}),
+        ("execute_discover_projects", {"provider": "azdo"}, "azdo", "list_projects", {}),
         (
             "execute_code_grep",
             {
@@ -199,14 +198,14 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
             {"project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
         ),
         (
-            "execute_build_logs",
+            "execute_ci_logs",
             {"provider": "github", "project": "proj-a", "repo": None, "build_id": 19},
             "github",
             "get_build_log",
             {"repo": "proj-a", "build_id": 19},
         ),
         (
-            "execute_build_grep",
+            "execute_ci_grep",
             {
                 "provider": "github",
                 "project": "proj-a",
@@ -235,14 +234,14 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
             },
         ),
         (
-            "execute_board_ticket",
+            "execute_work_get",
             {"provider": "github", "project": "proj-a", "repo": None, "work_item_id": 21},
             "github",
             "get_ticket_by_id",
             {"repo": "proj-a", "work_item_id": 21},
         ),
         (
-            "execute_board_search",
+            "execute_work_search",
             {
                 "provider": "github",
                 "query": "incident",
@@ -269,7 +268,7 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
             },
         ),
         (
-            "execute_board_mine",
+            "execute_work_mine",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
             "azdo",
             "get_my_work_items",
@@ -294,6 +293,41 @@ def test_execute_methods_dispatch_to_provider_operations(
     provider_entry = result["providers"][expected_provider]["data"]
     assert provider_entry["method"] == expected_method
     assert provider_entry["kwargs"] == expected_kwargs
+
+
+def test_execute_discover_repos_for_azdo_project_calls_list_repositories(monkeypatch: Any) -> None:
+    runtime = make_runtime_config()
+    _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object())
+
+    result = client.execute_discover_repos(provider="azdo", project="proj-a")
+
+    provider_entry = result["providers"]["azdo"]["data"]
+    assert provider_entry == [
+        {
+            "provider": "azdo",
+            "method": "list_repositories",
+            "kwargs": {"project": "proj-a"},
+            "projectName": "proj-a",
+        }
+    ]
+
+
+def test_execute_discover_repos_for_azdo_without_project_fans_out_projects(monkeypatch: Any) -> None:
+    runtime = make_runtime_config()
+    _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object())
+
+    azdo = client._get_azdo()
+    azdo.list_projects = lambda: [{"name": "proj-a"}, {"name": "proj-b"}]  # type: ignore[method-assign]
+    azdo.list_repositories = lambda project: [{"name": f"{project}-repo"}]  # type: ignore[method-assign]
+
+    result = client.execute_discover_repos(provider="azdo", project=None)
+
+    assert result["providers"]["azdo"]["data"] == [
+        {"name": "proj-a-repo", "projectName": "proj-a"},
+        {"name": "proj-b-repo", "projectName": "proj-b"},
+    ]
 
 
 def test_execute_code_search_runs_both_provider_operations(monkeypatch: Any) -> None:
@@ -337,10 +371,24 @@ def test_execute_pr_list_uses_projects_as_github_repo_fallback(monkeypatch: Any)
     assert result["providers"]["github"]["data"]["kwargs"]["repos"] == ["repo-from-project"]
 
 
-def test_execute_board_list_rejects_github(monkeypatch: Any) -> None:
+def test_execute_work_query_rejects_github(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object())
 
-    with pytest.raises(ValueError, match="GitHub does not support `board list`"):
-        client.execute_board_list(provider="github", project="proj-a", wiql="SELECT 1", skip=0, take=10)
+    with pytest.raises(ValueError, match="GitHub does not support `stories query`"):
+        client.execute_work_query(provider="github", project="proj-a", wiql="SELECT 1", skip=0, take=10)
+
+
+def test_legacy_wrapper_methods_delegate_to_canonical_operations(monkeypatch: Any) -> None:
+    runtime = make_runtime_config()
+    _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object())
+
+    discover_projects = client.execute_projects_list(provider="azdo")
+    ci_logs = client.execute_build_logs(provider="github", project=None, repo="repo-a", build_id=1)
+    work_get = client.execute_board_ticket(provider="github", project=None, repo="repo-a", work_item_id=2)
+
+    assert discover_projects["providers"]["azdo"]["data"]["method"] == "list_projects"
+    assert ci_logs["providers"]["github"]["data"]["method"] == "get_build_log"
+    assert work_get["providers"]["github"]["data"]["method"] == "get_ticket_by_id"

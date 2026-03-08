@@ -6,21 +6,39 @@ from typing import Callable
 
 from smith.cli.handlers import (
     _csv_list,
-    handle_board_list,
-    handle_board_mine,
-    handle_board_search,
-    handle_board_ticket,
-    handle_build_grep,
-    handle_build_logs,
+    handle_ci_grep,
+    handle_ci_logs,
     handle_code_grep,
     handle_code_search,
+    handle_discover_projects,
+    handle_discover_repos,
     handle_pr_get,
     handle_pr_list,
     handle_pr_threads,
-    handle_projects_list,
-    handle_repos_list,
+    handle_work_get,
+    handle_work_mine,
+    handle_work_query,
+    handle_work_search,
 )
 from smith.client import SmithClient
+
+
+class _DeprecatedCsvAppendAction(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str,
+        option_string: str | None = None,
+    ) -> None:
+        items = list(getattr(namespace, self.dest, None) or [])
+        items.extend(_csv_list(values))
+        setattr(namespace, self.dest, items)
+
+        deprecated_flags = list(getattr(namespace, "deprecated_flags", None) or [])
+        if option_string and option_string not in deprecated_flags:
+            deprecated_flags.append(option_string)
+        setattr(namespace, "deprecated_flags", deprecated_flags)
 
 
 def _add_output_format(parser: argparse.ArgumentParser) -> None:
@@ -46,15 +64,37 @@ def _set_handler(
     parser: argparse.ArgumentParser,
     handler: Callable[[SmithClient, argparse.Namespace], int],
     command_id: str,
+    *,
+    primary_path: str,
+    alias_used: str | None = None,
 ) -> None:
-    parser.set_defaults(handler=handler, command_id=command_id)
+    parser.set_defaults(
+        handler=handler,
+        command_id=command_id,
+        primary_path=primary_path,
+        alias_used=alias_used,
+    )
+
+
+def _add_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    name: str,
+    *,
+    help_text: str,
+    description: str | None = None,
+) -> argparse.ArgumentParser:
+    return subparsers.add_parser(
+        name,
+        help=help_text,
+        description=description or help_text,
+    )
 
 
 def _add_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "pattern",
         nargs="?",
-        help="Regex pattern (default: match all). Preferred positional form: smith code grep <provider> <scope> \"<regex>\"",
+        help='Regex pattern (default: match all). Preferred positional form: smith code grep <provider> <scope> "<regex>"',
     )
     parser.add_argument("--path", help="Path scope (default: /)")
     parser.add_argument("--branch", help="Branch name")
@@ -85,7 +125,7 @@ def _add_pr_list_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--include-labels", action="store_true")
 
 
-def _add_build_grep_options(parser: argparse.ArgumentParser) -> None:
+def _add_ci_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--log-id", type=int)
     parser.add_argument("--pattern")
     parser.add_argument(
@@ -99,7 +139,7 @@ def _add_build_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--case-sensitive", action="store_true")
 
 
-def _add_board_search_filters(parser: argparse.ArgumentParser) -> None:
+def _add_work_search_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--area")
     parser.add_argument("--type")
     parser.add_argument("--state")
@@ -108,85 +148,372 @@ def _add_board_search_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--take", type=int, default=20)
 
 
-def _add_board_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser], group_name: str) -> None:
-    board = root_subparsers.add_parser(group_name, help="Board read commands")
-    board_sub = board.add_subparsers(dest="action", required=True)
+def _add_repos_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    repos = _add_parser(
+        root_subparsers,
+        "repos",
+        help_text="List Azure DevOps or GitHub repositories",
+    )
+    repos_provider = repos.add_subparsers(dest="provider", required=True)
 
-    board_ticket = board_sub.add_parser("ticket", help="Get work item/issue by ID")
-    board_ticket_provider = board_ticket.add_subparsers(dest="provider", required=True)
+    repos_azdo = _add_parser(
+        repos_provider,
+        "azdo",
+        help_text="List Azure DevOps repositories",
+    )
+    repos_azdo.add_argument("project", nargs="?", help="Azure DevOps project name")
+    _add_output_format(repos_azdo)
+    _set_handler(
+        repos_azdo,
+        handle_discover_repos,
+        "repos",
+        primary_path="repos",
+    )
 
-    board_ticket_azdo = board_ticket_provider.add_parser("azdo", help="Azure DevOps board ticket")
-    board_ticket_azdo.add_argument("project")
-    board_ticket_azdo.add_argument("id", type=int)
-    board_ticket_azdo.set_defaults(repo=None)
-    _add_output_format(board_ticket_azdo)
-    _set_handler(board_ticket_azdo, handle_board_ticket, "board.ticket")
+    repos_github = _add_parser(
+        repos_provider,
+        "github",
+        help_text="List GitHub repositories",
+    )
+    repos_github.set_defaults(project=None)
+    _add_output_format(repos_github)
+    _set_handler(
+        repos_github,
+        handle_discover_repos,
+        "repos",
+        primary_path="repos",
+    )
 
-    board_ticket_github = board_ticket_provider.add_parser("github", help="GitHub issue ticket")
-    board_ticket_github.add_argument("repo")
-    board_ticket_github.add_argument("id", type=int)
-    board_ticket_github.set_defaults(project=None)
-    _add_output_format(board_ticket_github)
-    _set_handler(board_ticket_github, handle_board_ticket, "board.ticket")
 
-    board_list = board_sub.add_parser("list", help="Run WIQL query (AZDO only)")
-    board_list_provider = board_list.add_subparsers(dest="provider", required=True)
+def _add_organizations_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    organizations = _add_parser(
+        root_subparsers,
+        "organizations",
+        help_text="List Azure DevOps projects or the configured GitHub organization",
+    )
+    organizations_provider = organizations.add_subparsers(dest="provider", required=True)
 
-    board_list_azdo = board_list_provider.add_parser("azdo", help="Azure DevOps WIQL list")
-    board_list_azdo.add_argument("project")
-    board_list_azdo.add_argument("--wiql", required=True)
-    board_list_azdo.add_argument("--skip", type=int, default=0)
-    board_list_azdo.add_argument("--take", type=int, default=20)
-    _add_output_format(board_list_azdo)
-    _set_handler(board_list_azdo, handle_board_list, "board.list")
+    organizations_azdo = _add_parser(
+        organizations_provider,
+        "azdo",
+        help_text="List Azure DevOps projects",
+    )
+    _add_output_format(organizations_azdo)
+    _set_handler(
+        organizations_azdo,
+        handle_discover_projects,
+        "organizations",
+        primary_path="organizations",
+    )
 
-    board_list_github = board_list_provider.add_parser("github", help="Unsupported; use board search")
-    board_list_github.add_argument("--wiql", required=True)
-    board_list_github.add_argument("--skip", type=int, default=0)
-    board_list_github.add_argument("--take", type=int, default=20)
-    board_list_github.set_defaults(project=None)
-    _add_output_format(board_list_github)
-    _set_handler(board_list_github, handle_board_list, "board.list")
+    organizations_github = _add_parser(
+        organizations_provider,
+        "github",
+        help_text="Show the configured GitHub organization",
+    )
+    _add_output_format(organizations_github)
+    _set_handler(
+        organizations_github,
+        handle_discover_projects,
+        "organizations",
+        primary_path="organizations",
+    )
 
-    board_search = board_sub.add_parser("search", help="Search work items/issues")
-    board_search_provider = board_search.add_subparsers(dest="provider", required=True)
 
-    board_search_azdo = board_search_provider.add_parser("azdo", help="Azure DevOps work item search")
-    board_search_azdo.add_argument("project")
-    board_search_azdo.add_argument("--query", required=True)
-    board_search_azdo.set_defaults(repo=None)
-    _add_board_search_filters(board_search_azdo)
-    _add_output_format(board_search_azdo)
-    _set_handler(board_search_azdo, handle_board_search, "board.search")
+def _add_code_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    code = _add_parser(root_subparsers, "code", help_text="Code search and grep")
+    code_sub = code.add_subparsers(dest="action", required=True)
 
-    board_search_github = board_search_provider.add_parser("github", help="GitHub issue search")
-    board_search_github.add_argument("repo")
-    board_search_github.add_argument("--query", required=True)
-    board_search_github.set_defaults(project=None)
-    _add_board_search_filters(board_search_github)
-    _add_output_format(board_search_github)
-    _set_handler(board_search_github, handle_board_search, "board.search")
+    code_search = _add_parser(
+        code_sub,
+        "search",
+        help_text="Broad code search across configured providers",
+    )
+    code_search.add_argument("query", nargs="?", help="Search query text")
+    code_search.add_argument("--project", help="Azure DevOps project filter")
+    code_search.add_argument(
+        "--repo",
+        dest="repos",
+        action="append",
+        default=None,
+        metavar="REPO",
+        help="Repository filter (repeatable)",
+    )
+    code_search.add_argument("--repos", dest="repos", action=_DeprecatedCsvAppendAction, help=argparse.SUPPRESS)
+    code_search.add_argument("--skip", type=int, default=0, help="Results offset")
+    code_search.add_argument("--take", type=int, default=20, help="Results count")
+    _add_search_provider_option(code_search)
+    _add_output_format(code_search)
+    _set_handler(code_search, handle_code_search, "code.search", primary_path="code search")
 
-    board_mine = board_sub.add_parser("mine", help="Get my assigned work items/issues")
-    board_mine_provider = board_mine.add_subparsers(dest="provider", required=True)
+    code_grep = _add_parser(
+        code_sub,
+        "grep",
+        help_text="Targeted grep in a provider-specific repository",
+    )
+    code_grep_provider = code_grep.add_subparsers(dest="provider", required=True)
 
-    board_mine_azdo = board_mine_provider.add_parser("azdo", help="Azure DevOps assigned work items")
-    board_mine_azdo.add_argument("project")
-    board_mine_azdo.add_argument("--include-closed", action="store_true")
-    board_mine_azdo.add_argument("--skip", type=int, default=0)
-    board_mine_azdo.add_argument("--take", type=int, default=20)
-    board_mine_azdo.set_defaults(repo=None)
-    _add_output_format(board_mine_azdo)
-    _set_handler(board_mine_azdo, handle_board_mine, "board.mine")
+    code_grep_azdo = _add_parser(code_grep_provider, "azdo", help_text="Grep Azure DevOps repository")
+    code_grep_azdo.add_argument("project", help="Azure DevOps project name")
+    code_grep_azdo.add_argument("repo", help="Repository name")
+    _add_grep_options(code_grep_azdo)
+    _add_output_format(code_grep_azdo)
+    _set_handler(code_grep_azdo, handle_code_grep, "code.grep", primary_path="code grep")
 
-    board_mine_github = board_mine_provider.add_parser("github", help="GitHub assigned issues")
-    board_mine_github.add_argument("repo")
-    board_mine_github.add_argument("--include-closed", action="store_true")
-    board_mine_github.add_argument("--skip", type=int, default=0)
-    board_mine_github.add_argument("--take", type=int, default=20)
-    board_mine_github.set_defaults(project=None)
-    _add_output_format(board_mine_github)
-    _set_handler(board_mine_github, handle_board_mine, "board.mine")
+    code_grep_github = _add_parser(code_grep_provider, "github", help_text="Grep GitHub repository")
+    code_grep_github.add_argument("repo", help="Repository name")
+    code_grep_github.set_defaults(project=None)
+    _add_grep_options(code_grep_github)
+    _add_output_format(code_grep_github)
+    _set_handler(code_grep_github, handle_code_grep, "code.grep", primary_path="code grep")
+
+
+def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    pr = _add_parser(root_subparsers, "pr", help_text="Pull request read")
+    pr_sub = pr.add_subparsers(dest="action", required=True)
+
+    pr_list = _add_parser(pr_sub, "list", help_text="List pull requests")
+    pr_list_provider = pr_list.add_subparsers(dest="provider", required=True)
+
+    pr_list_azdo = _add_parser(pr_list_provider, "azdo", help_text="List Azure DevOps pull requests")
+    pr_list_azdo.add_argument("project", help="Azure DevOps project name")
+    pr_list_azdo.add_argument("repo", help="Repository name")
+    _add_pr_list_filters(pr_list_azdo)
+    _add_output_format(pr_list_azdo)
+    _set_handler(pr_list_azdo, handle_pr_list, "pr.list", primary_path="pr list")
+
+    pr_list_github = _add_parser(pr_list_provider, "github", help_text="List GitHub pull requests")
+    pr_list_github.add_argument("repo", help="Repository name")
+    pr_list_github.set_defaults(project=None)
+    _add_pr_list_filters(pr_list_github)
+    _add_output_format(pr_list_github)
+    _set_handler(pr_list_github, handle_pr_list, "pr.list", primary_path="pr list")
+
+    pr_get = _add_parser(pr_sub, "get", help_text="Get pull request details")
+    pr_get_provider = pr_get.add_subparsers(dest="provider", required=True)
+
+    pr_get_azdo = _add_parser(pr_get_provider, "azdo", help_text="Get Azure DevOps pull request details")
+    pr_get_azdo.add_argument("project")
+    pr_get_azdo.add_argument("repo")
+    pr_get_azdo.add_argument("id", type=int)
+    _add_output_format(pr_get_azdo)
+    _set_handler(pr_get_azdo, handle_pr_get, "pr.get", primary_path="pr get")
+
+    pr_get_github = _add_parser(pr_get_provider, "github", help_text="Get GitHub pull request details")
+    pr_get_github.add_argument("repo")
+    pr_get_github.add_argument("id", type=int)
+    pr_get_github.set_defaults(project=None)
+    _add_output_format(pr_get_github)
+    _set_handler(pr_get_github, handle_pr_get, "pr.get", primary_path="pr get")
+
+    pr_threads = _add_parser(pr_sub, "threads", help_text="Get pull request comment threads")
+    pr_threads_provider = pr_threads.add_subparsers(dest="provider", required=True)
+
+    pr_threads_azdo = _add_parser(pr_threads_provider, "azdo", help_text="Get Azure DevOps PR threads")
+    pr_threads_azdo.add_argument("project")
+    pr_threads_azdo.add_argument("repo")
+    pr_threads_azdo.add_argument("id", type=int)
+    _add_output_format(pr_threads_azdo)
+    _set_handler(pr_threads_azdo, handle_pr_threads, "pr.threads", primary_path="pr threads")
+
+    pr_threads_github = _add_parser(pr_threads_provider, "github", help_text="Get GitHub PR threads")
+    pr_threads_github.add_argument("repo")
+    pr_threads_github.add_argument("id", type=int)
+    pr_threads_github.set_defaults(project=None)
+    _add_output_format(pr_threads_github)
+    _set_handler(pr_threads_github, handle_pr_threads, "pr.threads", primary_path="pr threads")
+
+
+def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    ci = _add_parser(root_subparsers, "ci", help_text="CI run and log read")
+    ci_sub = ci.add_subparsers(dest="action", required=True)
+
+    ci_logs = _add_parser(ci_sub, "logs", help_text="Inspect CI logs")
+    ci_logs_sub = ci_logs.add_subparsers(dest="log_action", required=True)
+
+    ci_logs_list = _add_parser(ci_logs_sub, "list", help_text="List logs for a CI run")
+    ci_logs_list_provider = ci_logs_list.add_subparsers(dest="provider", required=True)
+
+    ci_logs_list_azdo = _add_parser(
+        ci_logs_list_provider,
+        "azdo",
+        help_text="List Azure DevOps build logs",
+    )
+    ci_logs_list_azdo.add_argument("project")
+    ci_logs_list_azdo.add_argument("id", type=int, help="Build ID")
+    ci_logs_list_azdo.set_defaults(repo=None)
+    _add_output_format(ci_logs_list_azdo)
+    _set_handler(
+        ci_logs_list_azdo,
+        handle_ci_logs,
+        "ci.logs.list",
+        primary_path="ci logs list",
+    )
+
+    ci_logs_list_github = _add_parser(
+        ci_logs_list_provider,
+        "github",
+        help_text="List GitHub Actions run logs",
+    )
+    ci_logs_list_github.add_argument("repo")
+    ci_logs_list_github.add_argument("id", type=int, help="Run ID")
+    ci_logs_list_github.set_defaults(project=None)
+    _add_output_format(ci_logs_list_github)
+    _set_handler(
+        ci_logs_list_github,
+        handle_ci_logs,
+        "ci.logs.list",
+        primary_path="ci logs list",
+    )
+
+    ci_logs_grep = _add_parser(ci_logs_sub, "grep", help_text="Search or read CI logs")
+    ci_logs_grep_provider = ci_logs_grep.add_subparsers(dest="provider", required=True)
+
+    ci_logs_grep_azdo = _add_parser(
+        ci_logs_grep_provider,
+        "azdo",
+        help_text="Search Azure DevOps build logs",
+    )
+    ci_logs_grep_azdo.add_argument("project")
+    ci_logs_grep_azdo.add_argument("id", type=int, help="Build ID")
+    ci_logs_grep_azdo.set_defaults(repo=None)
+    _add_ci_grep_options(ci_logs_grep_azdo)
+    _add_output_format(ci_logs_grep_azdo)
+    _set_handler(
+        ci_logs_grep_azdo,
+        handle_ci_grep,
+        "ci.logs.grep",
+        primary_path="ci logs grep",
+    )
+
+    ci_logs_grep_github = _add_parser(
+        ci_logs_grep_provider,
+        "github",
+        help_text="Search GitHub Actions run logs",
+    )
+    ci_logs_grep_github.add_argument("repo")
+    ci_logs_grep_github.add_argument("id", type=int, help="Run ID")
+    ci_logs_grep_github.set_defaults(project=None)
+    _add_ci_grep_options(ci_logs_grep_github)
+    _add_output_format(ci_logs_grep_github)
+    _set_handler(
+        ci_logs_grep_github,
+        handle_ci_grep,
+        "ci.logs.grep",
+        primary_path="ci logs grep",
+    )
+
+
+def _add_stories_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    stories = _add_parser(
+        root_subparsers,
+        "stories",
+        help_text="Story, work item, and issue read",
+    )
+    stories_sub = stories.add_subparsers(dest="action", required=True)
+
+    stories_get = _add_parser(stories_sub, "get", help_text="Get work item or issue by ID")
+    stories_get_provider = stories_get.add_subparsers(dest="provider", required=True)
+
+    stories_get_azdo = _add_parser(stories_get_provider, "azdo", help_text="Azure DevOps work item")
+    stories_get_azdo.add_argument("project")
+    stories_get_azdo.add_argument("id", type=int)
+    stories_get_azdo.set_defaults(repo=None)
+    _add_output_format(stories_get_azdo)
+    _set_handler(
+        stories_get_azdo,
+        handle_work_get,
+        "stories.get",
+        primary_path="stories get",
+    )
+
+    stories_get_github = _add_parser(stories_get_provider, "github", help_text="GitHub issue")
+    stories_get_github.add_argument("repo")
+    stories_get_github.add_argument("id", type=int)
+    stories_get_github.set_defaults(project=None)
+    _add_output_format(stories_get_github)
+    _set_handler(
+        stories_get_github,
+        handle_work_get,
+        "stories.get",
+        primary_path="stories get",
+    )
+
+    stories_query = _add_parser(stories_sub, "query", help_text="Run WIQL query (AZDO only)")
+    stories_query_provider = stories_query.add_subparsers(dest="provider", required=True)
+
+    stories_query_azdo = _add_parser(stories_query_provider, "azdo", help_text="Azure DevOps WIQL query")
+    stories_query_azdo.add_argument("project")
+    stories_query_azdo.add_argument("--wiql", required=True)
+    stories_query_azdo.add_argument("--skip", type=int, default=0)
+    stories_query_azdo.add_argument("--take", type=int, default=20)
+    _add_output_format(stories_query_azdo)
+    _set_handler(
+        stories_query_azdo,
+        handle_work_query,
+        "stories.query",
+        primary_path="stories query",
+    )
+
+    stories_search = _add_parser(stories_sub, "search", help_text="Search work items and issues")
+    stories_search_provider = stories_search.add_subparsers(dest="provider", required=True)
+
+    stories_search_azdo = _add_parser(stories_search_provider, "azdo", help_text="Azure DevOps work item search")
+    stories_search_azdo.add_argument("project")
+    stories_search_azdo.add_argument("--query", required=True)
+    stories_search_azdo.set_defaults(repo=None)
+    _add_work_search_filters(stories_search_azdo)
+    _add_output_format(stories_search_azdo)
+    _set_handler(
+        stories_search_azdo,
+        handle_work_search,
+        "stories.search",
+        primary_path="stories search",
+    )
+
+    stories_search_github = _add_parser(stories_search_provider, "github", help_text="GitHub issue search")
+    stories_search_github.add_argument("repo")
+    stories_search_github.add_argument("--query", required=True)
+    stories_search_github.set_defaults(project=None)
+    _add_work_search_filters(stories_search_github)
+    _add_output_format(stories_search_github)
+    _set_handler(
+        stories_search_github,
+        handle_work_search,
+        "stories.search",
+        primary_path="stories search",
+    )
+
+    stories_mine = _add_parser(stories_sub, "mine", help_text="Get my assigned work items and issues")
+    stories_mine_provider = stories_mine.add_subparsers(dest="provider", required=True)
+
+    stories_mine_azdo = _add_parser(stories_mine_provider, "azdo", help_text="Azure DevOps assigned work items")
+    stories_mine_azdo.add_argument("project")
+    stories_mine_azdo.add_argument("--include-closed", action="store_true")
+    stories_mine_azdo.add_argument("--skip", type=int, default=0)
+    stories_mine_azdo.add_argument("--take", type=int, default=20)
+    stories_mine_azdo.set_defaults(repo=None)
+    _add_output_format(stories_mine_azdo)
+    _set_handler(
+        stories_mine_azdo,
+        handle_work_mine,
+        "stories.mine",
+        primary_path="stories mine",
+    )
+
+    stories_mine_github = _add_parser(stories_mine_provider, "github", help_text="GitHub assigned issues")
+    stories_mine_github.add_argument("repo")
+    stories_mine_github.add_argument("--include-closed", action="store_true")
+    stories_mine_github.add_argument("--skip", type=int, default=0)
+    stories_mine_github.add_argument("--take", type=int, default=20)
+    stories_mine_github.set_defaults(project=None)
+    _add_output_format(stories_mine_github)
+    _set_handler(
+        stories_mine_github,
+        handle_work_mine,
+        "stories.mine",
+        primary_path="stories mine",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -214,159 +541,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable verbose (DEBUG) logging to stderr.",
     )
 
-    root_subparsers = parser.add_subparsers(dest="group", required=True)
+    root_subparsers = parser.add_subparsers(
+        dest="group",
+        required=True,
+        metavar="{repos,organizations,code,pr,ci,stories}",
+    )
 
-    projects = root_subparsers.add_parser("projects", help="Project discovery commands")
-    projects_sub = projects.add_subparsers(dest="action", required=True)
-    projects_list = projects_sub.add_parser("list", help="List projects by provider")
-    projects_list_provider = projects_list.add_subparsers(dest="provider", required=True)
-
-    projects_list_azdo = projects_list_provider.add_parser("azdo", help="List Azure DevOps projects")
-    _add_output_format(projects_list_azdo)
-    _set_handler(projects_list_azdo, handle_projects_list, "projects.list")
-
-    projects_list_github = projects_list_provider.add_parser("github", help="List GitHub org project entry")
-    _add_output_format(projects_list_github)
-    _set_handler(projects_list_github, handle_projects_list, "projects.list")
-
-    repos = root_subparsers.add_parser("repos", help="Repository discovery commands")
-    repos_sub = repos.add_subparsers(dest="action", required=True)
-    repos_list = repos_sub.add_parser("list", help="List repositories by provider")
-    repos_list_provider = repos_list.add_subparsers(dest="provider", required=True)
-
-    repos_list_azdo = repos_list_provider.add_parser("azdo", help="List Azure DevOps project repositories")
-    repos_list_azdo.add_argument("project", help="Azure DevOps project name")
-    _add_output_format(repos_list_azdo)
-    _set_handler(repos_list_azdo, handle_repos_list, "repos.list")
-
-    repos_list_github = repos_list_provider.add_parser("github", help="List GitHub org repositories")
-    repos_list_github.set_defaults(project=None)
-    _add_output_format(repos_list_github)
-    _set_handler(repos_list_github, handle_repos_list, "repos.list")
-
-    code = root_subparsers.add_parser("code", help="Code search and grep commands")
-    code_sub = code.add_subparsers(dest="action", required=True)
-
-    code_search = code_sub.add_parser("search", help="Broad code search across configured providers")
-    code_search.add_argument("query", nargs="?", help="Search query text")
-    code_search.add_argument("--project", help="Project filter")
-    code_search.add_argument("--repos", type=_csv_list, help="Comma-separated repository names")
-    code_search.add_argument("--skip", type=int, default=0, help="Results offset")
-    code_search.add_argument("--take", type=int, default=20, help="Results count")
-    _add_search_provider_option(code_search)
-    _add_output_format(code_search)
-    _set_handler(code_search, handle_code_search, "code.search")
-
-    code_grep = code_sub.add_parser("grep", help="Targeted grep in a provider-specific repository")
-    code_grep_provider = code_grep.add_subparsers(dest="provider", required=True)
-
-    code_grep_azdo = code_grep_provider.add_parser("azdo", help="Grep Azure DevOps repository")
-    code_grep_azdo.add_argument("project", help="Azure DevOps project name")
-    code_grep_azdo.add_argument("repo", help="Repository name")
-    _add_grep_options(code_grep_azdo)
-    _add_output_format(code_grep_azdo)
-    _set_handler(code_grep_azdo, handle_code_grep, "code.grep")
-
-    code_grep_github = code_grep_provider.add_parser("github", help="Grep GitHub repository")
-    code_grep_github.add_argument("repo", help="Repository name")
-    code_grep_github.set_defaults(project=None)
-    _add_grep_options(code_grep_github)
-    _add_output_format(code_grep_github)
-    _set_handler(code_grep_github, handle_code_grep, "code.grep")
-
-    pr = root_subparsers.add_parser("pr", help="Pull request read commands")
-    pr_sub = pr.add_subparsers(dest="action", required=True)
-
-    pr_list = pr_sub.add_parser("list", help="List pull requests")
-    pr_list_provider = pr_list.add_subparsers(dest="provider", required=True)
-
-    pr_list_azdo = pr_list_provider.add_parser("azdo", help="List Azure DevOps pull requests")
-    pr_list_azdo.add_argument("project", help="Azure DevOps project name")
-    pr_list_azdo.add_argument("repo", help="Repository name")
-    _add_pr_list_filters(pr_list_azdo)
-    _add_output_format(pr_list_azdo)
-    _set_handler(pr_list_azdo, handle_pr_list, "pr.list")
-
-    pr_list_github = pr_list_provider.add_parser("github", help="List GitHub pull requests")
-    pr_list_github.add_argument("repo", help="Repository name")
-    _add_pr_list_filters(pr_list_github)
-    _add_output_format(pr_list_github)
-    _set_handler(pr_list_github, handle_pr_list, "pr.list")
-
-    pr_get = pr_sub.add_parser("get", help="Get pull request details")
-    pr_get_provider = pr_get.add_subparsers(dest="provider", required=True)
-
-    pr_get_azdo = pr_get_provider.add_parser("azdo", help="Get Azure DevOps pull request details")
-    pr_get_azdo.add_argument("project")
-    pr_get_azdo.add_argument("repo")
-    pr_get_azdo.add_argument("id", type=int)
-    _add_output_format(pr_get_azdo)
-    _set_handler(pr_get_azdo, handle_pr_get, "pr.get")
-
-    pr_get_github = pr_get_provider.add_parser("github", help="Get GitHub pull request details")
-    pr_get_github.add_argument("repo")
-    pr_get_github.add_argument("id", type=int)
-    pr_get_github.set_defaults(project=None)
-    _add_output_format(pr_get_github)
-    _set_handler(pr_get_github, handle_pr_get, "pr.get")
-
-    pr_threads = pr_sub.add_parser("threads", help="Get pull request comment threads")
-    pr_threads_provider = pr_threads.add_subparsers(dest="provider", required=True)
-
-    pr_threads_azdo = pr_threads_provider.add_parser("azdo", help="Get Azure DevOps PR threads")
-    pr_threads_azdo.add_argument("project")
-    pr_threads_azdo.add_argument("repo")
-    pr_threads_azdo.add_argument("id", type=int)
-    _add_output_format(pr_threads_azdo)
-    _set_handler(pr_threads_azdo, handle_pr_threads, "pr.threads")
-
-    pr_threads_github = pr_threads_provider.add_parser("github", help="Get GitHub PR threads")
-    pr_threads_github.add_argument("repo")
-    pr_threads_github.add_argument("id", type=int)
-    pr_threads_github.set_defaults(project=None)
-    _add_output_format(pr_threads_github)
-    _set_handler(pr_threads_github, handle_pr_threads, "pr.threads")
-
-    build = root_subparsers.add_parser("build", help="Build log read commands")
-    build_sub = build.add_subparsers(dest="action", required=True)
-
-    build_logs = build_sub.add_parser("logs", help="List logs for a build")
-    build_logs_provider = build_logs.add_subparsers(dest="provider", required=True)
-
-    build_logs_azdo = build_logs_provider.add_parser("azdo", help="List Azure DevOps build logs")
-    build_logs_azdo.add_argument("project")
-    build_logs_azdo.add_argument("id", type=int, help="Build ID")
-    build_logs_azdo.set_defaults(repo=None)
-    _add_output_format(build_logs_azdo)
-    _set_handler(build_logs_azdo, handle_build_logs, "build.logs")
-
-    build_logs_github = build_logs_provider.add_parser("github", help="List GitHub Actions run logs")
-    build_logs_github.add_argument("repo")
-    build_logs_github.add_argument("id", type=int, help="Run ID")
-    build_logs_github.set_defaults(project=None)
-    _add_output_format(build_logs_github)
-    _set_handler(build_logs_github, handle_build_logs, "build.logs")
-
-    build_grep = build_sub.add_parser("grep", help="Search or read build logs")
-    build_grep_provider = build_grep.add_subparsers(dest="provider", required=True)
-
-    build_grep_azdo = build_grep_provider.add_parser("azdo", help="Search Azure DevOps build logs")
-    build_grep_azdo.add_argument("project")
-    build_grep_azdo.add_argument("id", type=int, help="Build ID")
-    build_grep_azdo.set_defaults(repo=None)
-    _add_build_grep_options(build_grep_azdo)
-    _add_output_format(build_grep_azdo)
-    _set_handler(build_grep_azdo, handle_build_grep, "build.grep")
-
-    build_grep_github = build_grep_provider.add_parser("github", help="Search GitHub Actions run logs")
-    build_grep_github.add_argument("repo")
-    build_grep_github.add_argument("id", type=int, help="Run ID")
-    build_grep_github.set_defaults(project=None)
-    _add_build_grep_options(build_grep_github)
-    _add_output_format(build_grep_github)
-    _set_handler(build_grep_github, handle_build_grep, "build.grep")
-
-    _add_board_group(root_subparsers, "board")
-    _add_board_group(root_subparsers, "stories")
+    _add_repos_group(root_subparsers)
+    _add_organizations_group(root_subparsers)
+    _add_code_group(root_subparsers)
+    _add_pr_group(root_subparsers)
+    _add_ci_group(root_subparsers)
+    _add_stories_group(root_subparsers)
 
     return parser

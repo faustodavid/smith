@@ -60,13 +60,14 @@ smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --context-
 - Include exact `project/repository:path` sources.
 - If unresolved, state "not enough evidence" and provide the next narrowing command.
 
-## Discover projects and repos
+## List organizations and repos
 
 ```bash
-smith projects list azdo
-smith projects list github
-smith repos list azdo SRE
-smith repos list github
+smith organizations azdo
+smith organizations github
+smith repos azdo SRE
+smith repos azdo
+smith repos github
 ```
 
 ## Broad search, then targeted grep
@@ -89,28 +90,27 @@ smith pr get github rtl-devops-gitops 12345
 smith pr threads github rtl-devops-gitops 12345
 ```
 
-## Build log investigation
+## CI log investigation
 
 ```bash
-smith build logs azdo SRE 942510
-smith build grep azdo SRE 942510 --pattern "ERROR|Exception" --output-mode logs_with_matches
-smith build grep azdo SRE 942510 --log-id 18 --from-line 380
-smith build logs github rtl-devops-gitops <run_id>
-smith build grep github rtl-devops-gitops <run_id> --pattern "ERROR|Exception"
+smith ci logs list azdo SRE 942510
+smith ci logs grep azdo SRE 942510 --pattern "ERROR|Exception" --output-mode logs_with_matches
+smith ci logs grep azdo SRE 942510 --log-id 18 --from-line 380
+smith ci logs list github rtl-devops-gitops <run_id>
+smith ci logs grep github rtl-devops-gitops <run_id> --pattern "ERROR|Exception"
 ```
 
-## Board and stories read workflows
+## Work item and issue read workflows
 
 ```bash
-smith board ticket azdo SRE 123456
-smith board list azdo SRE --wiql "Select [System.Id], [System.Title] From WorkItems Where [System.WorkItemType] = 'Bug'"
-smith board search azdo SRE --query "login error" --state Active
-smith board mine azdo SRE
-smith board ticket github rtl-devops-gitops 123
-smith board search github rtl-devops-gitops --query "retention"
-smith board mine github rtl-devops-gitops
-smith stories ticket azdo SRE 123456
-# GitHub does not support board list in smith v2; use board search instead.
+smith stories get azdo SRE 123456
+smith stories query azdo SRE --wiql "Select [System.Id], [System.Title] From WorkItems Where [System.WorkItemType] = 'Bug'"
+smith stories search azdo SRE --query "login error" --state Active
+smith stories mine azdo SRE
+smith stories get github rtl-devops-gitops 123
+smith stories search github rtl-devops-gitops --query "retention"
+smith stories mine github rtl-devops-gitops
+# GitHub does not support stories query in smith vNext; use stories search instead.
 ```
 
 ## JSON output for automation

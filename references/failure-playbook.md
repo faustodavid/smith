@@ -51,4 +51,4 @@ smith code search "<broader query>"
 
 If a command is unsupported for a selected provider, use the explicit fallback:
 
-- GitHub `board list` => run `board search` with equivalent query terms.
+- GitHub `work query` => run `work search` with equivalent query terms.

@@ -13,7 +13,10 @@ def _make_args(**overrides: Any) -> Namespace:
     defaults = {
         "output_format": "text",
         "provider": "azdo",
-        "command_id": "projects.list",
+        "command_id": "organizations",
+        "primary_path": "organizations",
+        "alias_used": None,
+        "deprecated_flags": [],
         "query": "grafana",
         "github_org": None,
         "azdo_org": None,
@@ -99,11 +102,18 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (_make_args(command_id="repos.list", provider="all"), "does not support provider 'all'"),
+        (_make_args(command_id="repos", provider="all"), "does not support provider 'all'"),
         (_make_args(command_id="code.search", query="   "), "code search requires a query"),
-        (_make_args(command_id="repos.list", provider="github"), "Missing GITHUB_ORG"),
-        (_make_args(command_id="repos.list", provider="azdo"), "Missing AZURE_DEVOPS_ORG"),
-        (_make_args(command_id="board.list", provider="github", github_org="gh-org"), "GitHub does not support `board list`"),
+        (_make_args(command_id="repos", provider="github"), "Missing GITHUB_ORG"),
+        (_make_args(command_id="repos", provider="azdo"), "Missing AZURE_DEVOPS_ORG"),
+        (
+            _make_args(command_id="stories.query", provider="github", github_org="gh-org"),
+            "GitHub does not support `stories query`",
+        ),
+        (
+            _make_args(command_id="code.search", provider="github", project="proj-a", github_org="gh-org"),
+            "GitHub code search does not support `--project`",
+        ),
     ],
 )
 def test_validate_args_for_provider_rejects_invalid_inputs(
@@ -126,16 +136,16 @@ def test_validate_args_for_provider_allows_cli_overrides(monkeypatch: Any) -> No
     handlers.validate_args_for_provider(args)
 
 
-def test_emit_success_supports_text_and_json(capsys: Any, monkeypatch: Any) -> None:
+def test_emit_success_supports_text_and_json_and_metadata(capsys: Any, monkeypatch: Any) -> None:
     monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['name']}")
-    json_args = _make_args(output_format="json")
+    json_args = _make_args(output_format="json", deprecated_flags=["--repos"])
     text_args = _make_args(output_format="text")
 
-    exit_text = handlers._emit_success(args=text_args, command="projects.list", data={"name": "repo-a"})
+    exit_text = handlers._emit_success(args=text_args, command="organizations", data={"name": "repo-a"})
     text_output = capsys.readouterr()
     exit_json = handlers._emit_success(
         args=json_args,
-        command="projects.list",
+        command="organizations",
         data={"name": "repo-a"},
         meta={"provider": "azdo"},
         partial=True,
@@ -143,19 +153,20 @@ def test_emit_success_supports_text_and_json(capsys: Any, monkeypatch: Any) -> N
     json_output = capsys.readouterr()
 
     assert exit_text == handlers.EXIT_OK
-    assert text_output.out.strip() == "projects.list:repo-a"
+    assert text_output.out.strip() == "organizations:repo-a"
     assert exit_json == handlers.EXIT_PARTIAL
     assert '"ok": true' in json_output.out
     assert '"provider": "azdo"' in json_output.out
+    assert '"deprecated_flags": [' in json_output.out
 
 
-def test_emit_error_supports_text_and_json(capsys: Any) -> None:
-    text_args = _make_args(output_format="text")
+def test_emit_error_supports_text_and_json_with_cli_warnings(capsys: Any) -> None:
+    text_args = _make_args(output_format="text", deprecated_flags=["--repos"])
     json_args = _make_args(output_format="json")
 
     exit_text = handlers._emit_error(
         args=text_args,
-        command="projects.list",
+        command="organizations",
         code="invalid_args",
         message="bad args",
         exit_code=handlers.EXIT_INVALID_ARGS,
@@ -163,7 +174,7 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
     text_output = capsys.readouterr()
     exit_json = handlers._emit_error(
         args=json_args,
-        command="projects.list",
+        command="organizations",
         code="invalid_args",
         message="bad args",
         exit_code=handlers.EXIT_INVALID_ARGS,
@@ -171,7 +182,8 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
     json_output = capsys.readouterr()
 
     assert exit_text == handlers.EXIT_INVALID_ARGS
-    assert text_output.err.strip() == "bad args"
+    assert "warning: `--repos` is deprecated; repeat `--repo` instead." in text_output.err
+    assert text_output.err.rstrip().endswith("bad args")
     assert exit_json == handlers.EXIT_INVALID_ARGS
     assert '"ok": false' in json_output.out
     assert '"code": "invalid_args"' in json_output.out
@@ -180,11 +192,16 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
 @pytest.mark.parametrize(
     ("handler_name", "args", "expected_method", "expected_kwargs"),
     [
-        ("handle_projects_list", _make_args(command_id="projects.list"), "execute_projects_list", {"provider": "azdo"}),
         (
-            "handle_repos_list",
-            _make_args(command_id="repos.list"),
-            "execute_repos_list",
+            "handle_discover_projects",
+            _make_args(command_id="organizations"),
+            "execute_discover_projects",
+            {"provider": "azdo"},
+        ),
+        (
+            "handle_discover_repos",
+            _make_args(command_id="repos"),
+            "execute_discover_repos",
             {"provider": "azdo", "project": "proj-a"},
         ),
         (
@@ -232,15 +249,15 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "pull_request_id": 42},
         ),
         (
-            "handle_build_logs",
-            _make_args(command_id="build.logs"),
-            "execute_build_logs",
+            "handle_ci_logs",
+            _make_args(command_id="ci.logs.list"),
+            "execute_ci_logs",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "build_id": 42},
         ),
         (
-            "handle_build_grep",
-            _make_args(command_id="build.grep"),
-            "execute_build_grep",
+            "handle_ci_grep",
+            _make_args(command_id="ci.logs.grep"),
+            "execute_ci_grep",
             {
                 "provider": "azdo",
                 "project": "proj-a",
@@ -256,21 +273,21 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
             },
         ),
         (
-            "handle_board_ticket",
-            _make_args(command_id="board.ticket"),
-            "execute_board_ticket",
+            "handle_work_get",
+            _make_args(command_id="stories.get"),
+            "execute_work_get",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "work_item_id": 42},
         ),
         (
-            "handle_board_list",
-            _make_args(command_id="board.list"),
-            "execute_board_list",
+            "handle_work_query",
+            _make_args(command_id="stories.query"),
+            "execute_work_query",
             {"provider": "azdo", "project": "proj-a", "wiql": "SELECT [System.Id] FROM WorkItems", "skip": 3, "take": 7},
         ),
         (
-            "handle_board_search",
-            _make_args(command_id="board.search"),
-            "execute_board_search",
+            "handle_work_search",
+            _make_args(command_id="stories.search"),
+            "execute_work_search",
             {
                 "provider": "azdo",
                 "query": "grafana",
@@ -285,9 +302,9 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
             },
         ),
         (
-            "handle_board_mine",
-            _make_args(command_id="board.mine"),
-            "execute_board_mine",
+            "handle_work_mine",
+            _make_args(command_id="stories.mine"),
+            "execute_work_mine",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 3, "take": 7},
         ),
     ],

@@ -14,11 +14,11 @@ A hardened run is acceptable only if all gates pass.
   1. `code search`
   2. `code grep --output-mode files_with_matches` when structure is needed
   3. focused `code grep --output-mode content`
-- PR/build/board tools are used only when needed to corroborate.
+- PR/CI/work tools are used only when needed to corroborate.
 - Provider selection is explicit via positional syntax for deep commands.
   - `code grep azdo <project> <repo>`
   - `code grep github <repo>`
-  - `build logs github <repo> <id>`
+  - `ci logs github <repo> <id>`
 
 ## Gate 3: Evidence output quality
 

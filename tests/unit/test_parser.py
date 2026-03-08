@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from smith.cli.parser import build_parser
 
 
@@ -13,19 +15,74 @@ def test_code_search_parser_defaults() -> None:
     assert args.query == "grafana"
 
 
-def test_board_alias_group_stories_parses() -> None:
+def test_stories_group_parses_to_stories_command() -> None:
     parser = build_parser()
-    args = parser.parse_args(["stories", "ticket", "azdo", "SRE", "123"])
+    args = parser.parse_args(["stories", "get", "azdo", "SRE", "123"])
 
-    assert args.command_id == "board.ticket"
+    assert args.command_id == "stories.get"
     assert args.provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 123
 
 
+def test_organizations_parser_uses_canonical_command_id() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["organizations", "azdo"])
+
+    assert args.command_id == "organizations"
+    assert args.provider == "azdo"
+
+
+def test_repos_parser_uses_canonical_command_id() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["repos", "github"])
+
+    assert args.command_id == "repos"
+    assert args.provider == "github"
+    assert args.project is None
+
+
+def test_ci_logs_list_parser_uses_canonical_command_id() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["ci", "logs", "list", "azdo", "SRE", "42"])
+
+    assert args.command_id == "ci.logs.list"
+    assert args.provider == "azdo"
+    assert args.project == "SRE"
+    assert args.id == 42
+
+
+def test_ci_logs_grep_parser_uses_canonical_command_id() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["ci", "logs", "grep", "github", "repo-a", "42", "--pattern", "error"])
+
+    assert args.command_id == "ci.logs.grep"
+    assert args.provider == "github"
+    assert args.repo == "repo-a"
+    assert args.id == 42
+    assert args.pattern == "error"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["discover", "projects", "azdo"],
+        ["work", "get", "azdo", "SRE", "123"],
+        ["ci", "grep", "azdo", "SRE", "42"],
+        ["ci", "logs", "azdo", "SRE", "42"],
+        ["stories", "ticket", "azdo", "SRE", "123"],
+    ],
+)
+def test_legacy_paths_fail_to_parse(argv: list[str]) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(argv)
+
+
 def test_azdo_org_flag_parses() -> None:
     parser = build_parser()
-    args = parser.parse_args(["--azdo-org", "my-azdo", "projects", "list", "azdo"])
+    args = parser.parse_args(["--azdo-org", "my-azdo", "organizations", "azdo"])
 
     assert args.azdo_org == "my-azdo"
     assert args.github_org is None
@@ -33,7 +90,7 @@ def test_azdo_org_flag_parses() -> None:
 
 def test_github_org_flag_parses() -> None:
     parser = build_parser()
-    args = parser.parse_args(["--github-org", "my-gh", "repos", "list", "github"])
+    args = parser.parse_args(["--github-org", "my-gh", "repos", "github"])
 
     assert args.github_org == "my-gh"
     assert args.azdo_org is None
@@ -45,3 +102,45 @@ def test_both_org_flags_parse_independently() -> None:
 
     assert args.azdo_org == "a-org"
     assert args.github_org == "g-org"
+
+
+def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--help"])
+
+    output = capsys.readouterr().out
+    assert "repos" in output
+    assert "organizations" in output
+    assert "stories" in output
+    assert "discover" not in output
+    assert "\n    work" not in output
+    assert "Code search and grep" in output
+    assert "Pull request read" in output
+    assert "CI run and log read" in output
+
+
+def test_ci_help_lists_only_logs(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["ci", "--help"])
+
+    output = capsys.readouterr().out
+    assert "logs" in output
+    assert "Inspect CI logs" in output
+    assert "grep" not in output
+
+
+def test_ci_logs_help_lists_list_and_grep(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["ci", "logs", "--help"])
+
+    output = capsys.readouterr().out
+    assert "list" in output
+    assert "grep" in output
+    assert "List logs for a CI run" in output
+    assert "Search or read CI logs" in output

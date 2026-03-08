@@ -66,8 +66,6 @@ class GitHubCodeMixin:
     ) -> dict[str, Any]:
         org = self._require_github_org()
         effective_repos = [item for item in (repos or []) if item]
-        if project and not effective_repos:
-            effective_repos = [project]
 
         search_targets: list[str | None] = list(effective_repos) if effective_repos else [None]
         desired = max(1, skip + take)

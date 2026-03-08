@@ -142,6 +142,31 @@ def _render_name_list(data: Any) -> str:
     )
 
 
+def _render_discover_repos(data: Any) -> str:
+    rows = data if isinstance(data, list) else []
+    project_names = {
+        str(row.get("projectName", "")).strip()
+        for row in rows
+        if isinstance(row, dict) and str(row.get("projectName", "")).strip()
+    }
+    if not project_names:
+        return _render_name_list(data)
+
+    if len(project_names) == 1:
+        return _render_name_list(data)
+
+    lines = [_fmt_table_line(["project", "repo"])]
+    lines.extend(
+        _fmt_table_line([
+            str(row.get("projectName", "")),
+            str(row.get("name", "")),
+        ])
+        for row in rows
+        if isinstance(row, dict)
+    )
+    return "\n".join(lines)
+
+
 def _render_code_search(data: Any) -> str:
     matches_count = int(data.get("matchesCount", 0))
     result_lines = data.get("results", [])
@@ -278,19 +303,19 @@ def _render_board_table(data: Any) -> str:
 
 
 _RENDER_DISPATCH: dict[str, Any] = {
-    "projects.list": _render_name_list,
-    "repos.list": _render_name_list,
+    "organizations": _render_name_list,
+    "repos": _render_discover_repos,
     "code.search": _render_code_search,
     "code.grep": _render_grep,
-    "build.grep": _render_grep,
+    "ci.logs.grep": _render_grep,
     "pr.list": _render_pr_list,
     "pr.get": _render_pr_get,
     "pr.threads": _render_pr_threads,
-    "build.logs": _render_build_logs,
-    "board.ticket": _render_board_ticket,
-    "board.list": _render_board_table,
-    "board.search": _render_board_table,
-    "board.mine": _render_board_table,
+    "ci.logs.list": _render_build_logs,
+    "stories.get": _render_board_ticket,
+    "stories.query": _render_board_table,
+    "stories.search": _render_board_table,
+    "stories.mine": _render_board_table,
 }
 
 
@@ -329,7 +354,7 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
             lines.append(rendered)
 
         warnings = entry.get("warnings") or []
-        if command not in {"code.grep", "build.grep"}:
+        if command not in {"code.grep", "ci.logs.grep"}:
             for warning in warnings if isinstance(warnings, list) else []:
                 lines.append(f"warning: {warning}")
         if bool(entry.get("partial", False)):
@@ -373,7 +398,7 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
                 output_lines.append(rendered)
 
         warnings = entry.get("warnings") or []
-        if command not in {"code.grep", "build.grep"}:
+        if command not in {"code.grep", "ci.logs.grep"}:
             for warning in warnings if isinstance(warnings, list) else []:
                 output_lines.append(f"warning: {warning}")
         if bool(entry.get("partial", False)):

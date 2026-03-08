@@ -18,6 +18,7 @@ python -m pip install .
 ```bash
 export AZURE_DEVOPS_ORG="<org>"
 export GITHUB_ORG="<org>"
+smith repos github
 smith code search "grafana" --provider all
 ```
 

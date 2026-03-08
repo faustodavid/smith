@@ -56,6 +56,55 @@ def _is_partial_result(data: Any) -> bool:
     return False
 
 
+def _cli_warnings(args: argparse.Namespace) -> list[str]:
+    warnings: list[str] = []
+    alias_used = str(getattr(args, "alias_used", "") or "").strip()
+    primary_path = str(getattr(args, "primary_path", "") or "").strip()
+    if alias_used:
+        if primary_path:
+            warnings.append(f"`{alias_used}` is deprecated; use `{primary_path}`.")
+        else:
+            warnings.append(f"`{alias_used}` is deprecated.")
+
+    deprecated_flags = getattr(args, "deprecated_flags", None) or []
+    if isinstance(deprecated_flags, list):
+        for flag in deprecated_flags:
+            flag_name = str(flag or "").strip()
+            if not flag_name:
+                continue
+            if flag_name == "--repos":
+                warnings.append("`--repos` is deprecated; repeat `--repo` instead.")
+            else:
+                warnings.append(f"`{flag_name}` is deprecated.")
+    return warnings
+
+
+def _command_meta(
+    args: argparse.Namespace,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload_meta = dict(meta or {})
+    alias_used = str(getattr(args, "alias_used", "") or "").strip()
+    if alias_used:
+        payload_meta["alias_used"] = alias_used
+
+    deprecated_flags = getattr(args, "deprecated_flags", None) or []
+    if isinstance(deprecated_flags, list) and deprecated_flags:
+        payload_meta["deprecated_flags"] = [str(flag) for flag in deprecated_flags if str(flag).strip()]
+
+    warnings = _cli_warnings(args)
+    if warnings:
+        payload_meta["warnings"] = warnings
+    return payload_meta
+
+
+def _emit_cli_warnings(args: argparse.Namespace) -> None:
+    if getattr(args, "output_format", "text") != "text":
+        return
+    for warning in _cli_warnings(args):
+        print(f"warning: {warning}", file=sys.stderr)
+
+
 def validate_args_for_provider(args: argparse.Namespace) -> None:
     command = str(getattr(args, "command_id", ""))
     provider = str(getattr(args, "provider", "") or "").strip().lower()
@@ -67,7 +116,7 @@ def validate_args_for_provider(args: argparse.Namespace) -> None:
         raise ValueError(f"{command} does not support provider 'all'. Use azdo or github.")
 
     if command == "code.search" and not str(getattr(args, "query", "") or "").strip():
-        raise ValueError("code search requires a query. Example: smith code search \"grafana.*\"")
+        raise ValueError('code search requires a query. Example: smith code search "grafana.*"')
 
     selected = _selected_providers(provider)
     github_org = str(getattr(args, "github_org", "") or "").strip()
@@ -80,8 +129,11 @@ def validate_args_for_provider(args: argparse.Namespace) -> None:
             "Example: export AZURE_DEVOPS_ORG=<your-org>  (or use --azdo-org)"
         )
 
-    if command == "board.list" and provider == "github":
-        raise ValueError("GitHub does not support `board list`. Use `board search` instead.")
+    if command == "code.search" and provider == "github" and str(getattr(args, "project", "") or "").strip():
+        raise ValueError("GitHub code search does not support `--project`. Use `--repo` instead.")
+
+    if command == "stories.query" and provider == "github":
+        raise ValueError("GitHub does not support `stories query`. Use `stories search` instead.")
 
 
 def _emit_success(
@@ -92,10 +144,12 @@ def _emit_success(
     meta: dict[str, Any] | None = None,
     partial: bool = False,
 ) -> int:
+    payload_meta = _command_meta(args, meta)
     if args.output_format == "json":
-        payload = make_envelope(ok=True, command=command, data=data, meta=meta or {}, error=None)
+        payload = make_envelope(ok=True, command=command, data=data, meta=payload_meta, error=None)
         print(dumps_json(payload))
     else:
+        _emit_cli_warnings(args)
         print(render_text(command, data))
 
     if partial:
@@ -111,16 +165,18 @@ def _emit_error(
     message: str,
     exit_code: int,
 ) -> int:
+    payload_meta = _command_meta(args)
     if args.output_format == "json":
         payload = make_envelope(
             ok=False,
             command=command,
             data=None,
-            meta={},
+            meta=payload_meta,
             error={"code": code, "message": message},
         )
         print(dumps_json(payload))
     else:
+        _emit_cli_warnings(args)
         print(message, file=sys.stderr)
     return exit_code
 
@@ -132,8 +188,8 @@ def _client_from_args(args: argparse.Namespace) -> SmithClient:
     )
 
 
-def handle_projects_list(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_projects_list(provider=args.provider)
+def handle_discover_projects(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_discover_projects(provider=args.provider)
     return _emit_success(
         args=args,
         command=args.command_id,
@@ -142,8 +198,8 @@ def handle_projects_list(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
-def handle_repos_list(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_repos_list(provider=args.provider, project=getattr(args, "project", None))
+def handle_discover_repos(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_discover_repos(provider=args.provider, project=getattr(args, "project", None))
     return _emit_success(
         args=args,
         command=args.command_id,
@@ -251,8 +307,8 @@ def handle_pr_threads(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
-def handle_build_logs(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_build_logs(
+def handle_ci_logs(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_ci_logs(
         provider=args.provider,
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
@@ -266,8 +322,8 @@ def handle_build_logs(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
-def handle_build_grep(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_build_grep(
+def handle_ci_grep(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_ci_grep(
         provider=args.provider,
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
@@ -288,8 +344,8 @@ def handle_build_grep(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
-def handle_board_ticket(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_board_ticket(
+def handle_work_get(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_work_get(
         provider=args.provider,
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
@@ -303,8 +359,8 @@ def handle_board_ticket(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
-def handle_board_list(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_board_list(
+def handle_work_query(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_work_query(
         provider=args.provider,
         project=getattr(args, "project", None),
         wiql=args.wiql,
@@ -319,8 +375,8 @@ def handle_board_list(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
-def handle_board_search(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_board_search(
+def handle_work_search(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_work_search(
         provider=args.provider,
         query=args.query,
         project=getattr(args, "project", None),
@@ -340,8 +396,8 @@ def handle_board_search(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
-def handle_board_mine(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_board_mine(
+def handle_work_mine(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_work_mine(
         provider=args.provider,
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),

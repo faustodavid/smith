@@ -40,12 +40,12 @@ class _TestProvider(BaseProvider):
 def test_provider_name_helpers_normalize_and_validate() -> None:
     assert normalize_provider("GITHUB") == "github"
     assert resolve_providers("all") == ["github", "azdo"]
-    assert normalize_single_provider("azdo", command="repos.list") == "azdo"
+    assert normalize_single_provider("azdo", command="repos") == "azdo"
 
     with pytest.raises(ValueError, match="provider must be one of"):
         normalize_provider("gitlab")
-    with pytest.raises(ValueError, match="repos.list does not support provider 'all'"):
-        normalize_single_provider("all", command="repos.list")
+    with pytest.raises(ValueError, match="repos does not support provider 'all'"):
+        normalize_single_provider("all", command="repos")
 
 
 def test_get_http_session_reuses_main_and_worker_sessions(monkeypatch: Any) -> None:

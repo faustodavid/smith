@@ -39,17 +39,17 @@ def test_main_prints_help_when_no_handler(monkeypatch: Any) -> None:
     parser = _Parser(args=Namespace(verbose=False, handler=None, output_format="text"))
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
 
-    assert cli_main.main(["projects"]) == cli_main.EXIT_INVALID_ARGS
+    assert cli_main.main(["organizations"]) == cli_main.EXIT_INVALID_ARGS
     assert parser.help_called is True
 
 
 def test_main_emits_json_for_value_errors(monkeypatch: Any, capsys: Any) -> None:
-    args = Namespace(verbose=False, handler=lambda client, parsed: 0, output_format="json", command_id="repos.list")
+    args = Namespace(verbose=False, handler=lambda client, parsed: 0, output_format="json", command_id="repos")
     parser = _Parser(args=args)
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
     monkeypatch.setattr(cli_main, "validate_args_for_provider", lambda parsed: (_ for _ in ()).throw(ValueError("bad args")))
 
-    assert cli_main.main(["repos", "list", "github"]) == cli_main.EXIT_INVALID_ARGS
+    assert cli_main.main(["repos", "github"]) == cli_main.EXIT_INVALID_ARGS
     captured = capsys.readouterr()
     assert '"code": "invalid_args"' in captured.out
     assert '"message": "bad args"' in captured.out
@@ -60,14 +60,14 @@ def test_main_uses_unexpected_error_fallback(monkeypatch: Any, capsys: Any) -> N
         verbose=False,
         handler=lambda client, parsed: (_ for _ in ()).throw(RuntimeError("boom")),
         output_format="text",
-        command_id="repos.list",
+        command_id="repos",
     )
     parser = _Parser(args=args)
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
     monkeypatch.setattr(cli_main, "validate_args_for_provider", lambda parsed: None)
     monkeypatch.setattr(cli_main, "_client_from_args", lambda parsed: object())
 
-    assert cli_main.main(["repos", "list", "github"]) == cli_main.EXIT_API_FAILURE
+    assert cli_main.main(["repos", "github"]) == cli_main.EXIT_API_FAILURE
     captured = capsys.readouterr()
     assert "Unexpected error: boom" in captured.err
 

@@ -142,8 +142,31 @@ class SmithClient:
             provider_entry_error=self._provider_entry_error,
         )
 
-    def execute_projects_list(self, *, provider: str) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="projects.list")
+    def _list_azdo_repositories(self, *, project: str | None) -> list[dict[str, Any]]:
+        azdo = self._get_azdo()
+
+        def _normalize_repo_rows(payload: Any) -> list[dict[str, Any]]:
+            if isinstance(payload, dict):
+                return [payload]
+            if isinstance(payload, list):
+                return [row for row in payload if isinstance(row, dict)]
+            return []
+
+        if project:
+            repos = _normalize_repo_rows(azdo.list_repositories(project=project))
+            return [{**repo, "projectName": project} for repo in repos]
+
+        results: list[dict[str, Any]] = []
+        for project_row in azdo.list_projects():
+            project_name = str(project_row.get("name") or "").strip()
+            if not project_name:
+                continue
+            repos = _normalize_repo_rows(azdo.list_repositories(project=project_name))
+            results.extend({**repo, "projectName": project_name} for repo in repos)
+        return results
+
+    def execute_discover_projects(self, *, provider: str) -> dict[str, Any]:
+        single_provider = normalize_single_provider(provider, command="organizations")
         return self._fanout(
             provider=single_provider,
             operations={
@@ -152,20 +175,31 @@ class SmithClient:
             },
         )
 
+    def execute_discover_repos(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+    ) -> dict[str, Any]:
+        single_provider = normalize_single_provider(provider, command="repos")
+        return self._fanout(
+            provider=single_provider,
+            operations={
+                "azdo": lambda: self._list_azdo_repositories(project=project),
+                "github": lambda: self._get_github().list_repositories(),
+            },
+        )
+
+    def execute_projects_list(self, *, provider: str) -> dict[str, Any]:
+        return self.execute_discover_projects(provider=provider)
+
     def execute_repos_list(
         self,
         *,
         provider: str,
         project: str | None,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="repos.list")
-        return self._fanout(
-            provider=single_provider,
-            operations={
-                "azdo": lambda: self._get_azdo().list_repositories(project=str(project)),
-                "github": lambda: self._get_github().list_repositories(),
-            },
-        )
+        return self.execute_discover_repos(provider=provider, project=project)
 
     def execute_code_search(
         self,
@@ -338,7 +372,7 @@ class SmithClient:
             },
         )
 
-    def execute_build_logs(
+    def execute_ci_logs(
         self,
         *,
         provider: str,
@@ -346,7 +380,7 @@ class SmithClient:
         repo: str | None,
         build_id: int,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="build.logs")
+        single_provider = normalize_single_provider(provider, command="ci.logs.list")
         effective_repo = repo or project
         return self._fanout(
             provider=single_provider,
@@ -356,7 +390,7 @@ class SmithClient:
             },
         )
 
-    def execute_build_grep(
+    def execute_ci_grep(
         self,
         *,
         provider: str,
@@ -371,7 +405,7 @@ class SmithClient:
         from_line: int | None,
         to_line: int | None,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="build.grep")
+        single_provider = normalize_single_provider(provider, command="ci.logs.grep")
         effective_repo = repo or project
         return self._fanout(
             provider=single_provider,
@@ -401,7 +435,51 @@ class SmithClient:
             },
         )
 
-    def execute_board_ticket(
+    def execute_build_logs(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str | None,
+        build_id: int,
+    ) -> dict[str, Any]:
+        return self.execute_ci_logs(
+            provider=provider,
+            project=project,
+            repo=repo,
+            build_id=build_id,
+        )
+
+    def execute_build_grep(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str | None,
+        build_id: int,
+        log_id: int | None,
+        pattern: str | None,
+        output_mode: Literal["content", "logs_with_matches", "count"],
+        case_insensitive: bool,
+        context_lines: int | None,
+        from_line: int | None,
+        to_line: int | None,
+    ) -> dict[str, Any]:
+        return self.execute_ci_grep(
+            provider=provider,
+            project=project,
+            repo=repo,
+            build_id=build_id,
+            log_id=log_id,
+            pattern=pattern,
+            output_mode=output_mode,
+            case_insensitive=case_insensitive,
+            context_lines=context_lines,
+            from_line=from_line,
+            to_line=to_line,
+        )
+
+    def execute_work_get(
         self,
         *,
         provider: str,
@@ -409,7 +487,7 @@ class SmithClient:
         repo: str | None,
         work_item_id: int,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="board.ticket")
+        single_provider = normalize_single_provider(provider, command="stories.get")
         effective_repo = repo or project
         return self._fanout(
             provider=single_provider,
@@ -419,7 +497,7 @@ class SmithClient:
             },
         )
 
-    def execute_board_list(
+    def execute_work_query(
         self,
         *,
         provider: str,
@@ -428,7 +506,7 @@ class SmithClient:
         skip: int,
         take: int,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="board.list")
+        single_provider = normalize_single_provider(provider, command="stories.query")
         return self._fanout(
             provider=single_provider,
             operations={
@@ -439,12 +517,12 @@ class SmithClient:
                     take=take,
                 ),
                 "github": lambda: (_ for _ in ()).throw(
-                    ValueError("GitHub does not support `board list`. Use `board search` instead.")
+                    ValueError("GitHub does not support `stories query`. Use `stories search` instead.")
                 ),
             },
         )
 
-    def execute_board_search(
+    def execute_work_search(
         self,
         *,
         provider: str,
@@ -458,7 +536,7 @@ class SmithClient:
         skip: int,
         take: int,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="board.search")
+        single_provider = normalize_single_provider(provider, command="stories.search")
         return self._fanout(
             provider=single_provider,
             operations={
@@ -485,7 +563,7 @@ class SmithClient:
             },
         )
 
-    def execute_board_mine(
+    def execute_work_mine(
         self,
         *,
         provider: str,
@@ -495,7 +573,7 @@ class SmithClient:
         skip: int,
         take: int,
     ) -> dict[str, Any]:
-        single_provider = normalize_single_provider(provider, command="board.mine")
+        single_provider = normalize_single_provider(provider, command="stories.mine")
         return self._fanout(
             provider=single_provider,
             operations={
@@ -513,6 +591,84 @@ class SmithClient:
                     take=take,
                 ),
             },
+        )
+
+    def execute_board_ticket(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str | None,
+        work_item_id: int,
+    ) -> dict[str, Any]:
+        return self.execute_work_get(
+            provider=provider,
+            project=project,
+            repo=repo,
+            work_item_id=work_item_id,
+        )
+
+    def execute_board_list(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        wiql: str,
+        skip: int,
+        take: int,
+    ) -> dict[str, Any]:
+        return self.execute_work_query(
+            provider=provider,
+            project=project,
+            wiql=wiql,
+            skip=skip,
+            take=take,
+        )
+
+    def execute_board_search(
+        self,
+        *,
+        provider: str,
+        query: str,
+        project: str | None,
+        repo: str | None,
+        area: str | None,
+        work_item_type: str | None,
+        state: str | None,
+        assigned_to: str | None,
+        skip: int,
+        take: int,
+    ) -> dict[str, Any]:
+        return self.execute_work_search(
+            provider=provider,
+            query=query,
+            project=project,
+            repo=repo,
+            area=area,
+            work_item_type=work_item_type,
+            state=state,
+            assigned_to=assigned_to,
+            skip=skip,
+            take=take,
+        )
+
+    def execute_board_mine(
+        self,
+        *,
+        provider: str,
+        project: str | None,
+        repo: str | None,
+        include_closed: bool,
+        skip: int,
+        take: int,
+    ) -> dict[str, Any]:
+        return self.execute_work_mine(
+            provider=provider,
+            project=project,
+            repo=repo,
+            include_closed=include_closed,
+            skip=skip,
+            take=take,
         )
 
 

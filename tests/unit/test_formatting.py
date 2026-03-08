@@ -4,11 +4,11 @@ from smith.formatting import dumps_json, make_envelope, render_text
 
 
 def test_json_envelope_shape() -> None:
-    payload = make_envelope(ok=True, command="projects.list", data=[{"name": "A"}], meta={}, error=None)
+    payload = make_envelope(ok=True, command="organizations", data=[{"name": "A"}], meta={}, error=None)
     rendered = dumps_json(payload)
 
     assert '"ok": true' in rendered
-    assert '"command": "projects.list"' in rendered
+    assert '"command": "organizations"' in rendered
     assert '"data"' in rendered
     assert '"error": null' in rendered
 
@@ -32,6 +32,6 @@ def test_single_provider_rendering_flattens() -> None:
         },
     }
 
-    text = render_text("repos.list", grouped)
+    text = render_text("repos", grouped)
     assert text.strip() == "repo-a"
     assert "[azdo]" not in text

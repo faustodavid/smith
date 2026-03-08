@@ -54,7 +54,7 @@ def test_truncate_output_reports_character_and_line_counts() -> None:
     )
 
 
-def test_render_text_renders_pr_build_and_board_views() -> None:
+def test_render_text_renders_pr_ci_and_story_views() -> None:
     pr_list = render_text(
         "pr.list",
         {
@@ -95,19 +95,19 @@ def test_render_text_renders_pr_build_and_board_views() -> None:
             ],
         },
     )
-    build_logs = render_text(
-        "build.logs",
+    ci_logs = render_text(
+        "ci.logs.list",
         {
             "metadata": {"build_id": 101, "status": "completed", "result": "failed", "definition_name": "CI"},
             "logs": [{"id": 1, "line_count": 50, "stage_name": "Build", "job_name": "linux", "step_name": "pytest"}],
         },
     )
-    board_ticket = render_text(
-        "board.ticket",
+    work_get = render_text(
+        "stories.get",
         {"id": 9, "fields": {"System.WorkItemType": "Bug", "System.State": "Active", "System.Title": "Fix login"}},
     )
-    board_list = render_text(
-        "board.list",
+    work_query = render_text(
+        "stories.query",
         {
             "results": [{"id": 9, "type": "Bug", "state": "Active", "title": "Fix login"}],
             "returned_count": 1,
@@ -137,7 +137,7 @@ def test_render_text_renders_pr_build_and_board_views() -> None:
         "thread 5 status=active comments=2 file=/src/app.py:18\n"
         "  - alice: Looks good"
     )
-    assert build_logs == (
+    assert ci_logs == (
         "build_id: 101\n"
         "status: completed\n"
         "result: failed\n"
@@ -145,8 +145,8 @@ def test_render_text_renders_pr_build_and_board_views() -> None:
         "logs:\n"
         "1 | 50 | Build | linux | pytest"
     )
-    assert board_ticket == "id: 9\ntype: Bug\nstate: Active\ntitle: Fix login"
-    assert board_list == "id | type | state | title\n9 | Bug | Active | Fix login\nreturned_count: 1\nhas_more: False"
+    assert work_get == "id: 9\ntype: Bug\nstate: Active\ntitle: Fix login"
+    assert work_query == "id | type | state | title\n9 | Bug | Active | Fix login\nreturned_count: 1\nhas_more: False"
 
 
 def test_render_text_grouped_provider_output_preserves_order_warnings_and_errors() -> None:
@@ -193,7 +193,7 @@ def test_render_text_flattens_single_provider_and_omits_duplicate_grep_warnings(
         "summary": {"queried": ["github"]},
     }
 
-    assert render_text("build.grep", payload) == "line one\nwarning: inner warning\npartial: true"
+    assert render_text("ci.logs.grep", payload) == "line one\nwarning: inner warning\npartial: true"
 
 
 def test_render_text_returns_provider_error_for_single_provider_failures() -> None:
@@ -210,7 +210,19 @@ def test_render_text_returns_provider_error_for_single_provider_failures() -> No
         "summary": {"queried": ["azdo"]},
     }
 
-    assert render_text("repos.list", payload) == "error: missing org"
+    assert render_text("repos", payload) == "error: missing org"
+
+
+def test_render_text_repos_uses_project_column_for_cross_project_results() -> None:
+    rendered = render_text(
+        "repos",
+        [
+            {"projectName": "proj-a", "name": "repo-a"},
+            {"projectName": "proj-b", "name": "repo-b"},
+        ],
+    )
+
+    assert rendered == "project | repo\nproj-a | repo-a\nproj-b | repo-b"
 
 
 def test_render_text_falls_back_to_json_for_unknown_commands() -> None:

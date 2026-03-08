@@ -23,7 +23,7 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - The user asks where configuration is defined in Azure DevOps repositories.
 - The user asks to locate Terraform, Helm, YAML, or code keys in Azure DevOps repos.
 - The user asks to locate Terraform, Helm, YAML, or code keys in GitHub repos for a known org.
-- The user asks to inspect pull requests, build logs, or work-item context.
+- The user asks to inspect pull requests, CI logs, or work-item context.
 - The user asks to map an unknown path, module, or service ownership in Azure DevOps code.
 - The user asks to investigate incidents rooted in repository config or CI logs.
 
@@ -50,7 +50,7 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - Run `code grep --output-mode content` with narrowed `--path` or `--glob` to capture concrete evidence lines.
 
 4. Escalate only as needed:
-- If code evidence is insufficient, add targeted `pr`, `build`, or `board` read commands and keep proof paths in output.
+- If code evidence is insufficient, add targeted `pr`, `ci`, or `work` read commands and keep proof paths in output.
 
 ## Rules
 
@@ -77,7 +77,7 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 
 4. Prefer Git evidence over assumptions.
 - Treat repository files as source of truth.
-- Corroborate with PR/build/board data only when needed.
+- Corroborate with PR/CI/work data only when needed.
 
 5. Cite concrete source paths.
 - Always include `project/repository:path` (or equivalent) evidence as source at the end of the answer.
@@ -123,17 +123,16 @@ Stop and report unresolved when all are true:
 
 6. Provider incompatibility.
 - If a command is unsupported for a provider, return a concrete fallback command.
-- Example: for GitHub `board list`, use `board search`.
+- Example: for GitHub `work query`, use `work search`.
 
 ## Commands (Read-Only)
 
 - `code search` is the only fanout command:
-  - `code search <text> [--project <name>] [--repos r1,r2] [--skip N] [--take N] [--provider azdo|github|all] [--format text|json]`
+  - `code search <text> [--project <azdo-project>] [--repo <name> ...] [--skip N] [--take N] [--provider azdo|github|all] [--format text|json]`
 - Discovery:
-  - `projects list azdo [--format text|json]`
-  - `projects list github [--format text|json]`
-  - `repos list azdo <project> [--format text|json]`
-  - `repos list github [--format text|json]`
+  - `discover projects azdo [--format text|json]`
+  - `discover repos azdo [<project>] [--format text|json]`
+  - `discover repos github [--format text|json]`
 - Code:
   - `code grep azdo <project> <repo> [<regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
   - `code grep github <repo> [<regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
@@ -144,20 +143,19 @@ Stop and report unresolved when all are true:
   - `pr get github <repo> <id> [--format text|json]`
   - `pr threads azdo <project> <repo> <id> [--format text|json]`
   - `pr threads github <repo> <id> [--format text|json]`
-- Build logs:
-  - `build logs azdo <project> <id> [--format text|json]`
-  - `build logs github <repo> <id> [--format text|json]`
-  - `build grep azdo <project> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
-  - `build grep github <repo> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
-- Board read (`stories` is an alias of `board`):
-  - `board ticket azdo <project> <id> [--format text|json]`
-  - `board ticket github <repo> <id> [--format text|json]`
-  - `board list azdo <project> --wiql "<query>" [--skip N] [--take N] [--format text|json]`
-  - `board search azdo <project> --query <text> [--area <path>] [--type <work_item_type>] [--state <state>] [--assigned-to <email>] [--skip N] [--take N] [--format text|json]`
-  - `board search github <repo> --query <text> [--type <work_item_type>] [--state <state>] [--assigned-to <email>] [--skip N] [--take N] [--format text|json]`
-  - `board mine azdo <project> [--include-closed] [--skip N] [--take N] [--format text|json]`
-  - `board mine github <repo> [--include-closed] [--skip N] [--take N] [--format text|json]`
-  - `stories ticket azdo <project> <id> [--format text|json]`
+- CI logs:
+  - `ci logs azdo <project> <id> [--format text|json]`
+  - `ci logs github <repo> <id> [--format text|json]`
+  - `ci grep azdo <project> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
+  - `ci grep github <repo> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
+- Work read (`board` and `stories` are hidden legacy aliases):
+  - `work get azdo <project> <id> [--format text|json]`
+  - `work get github <repo> <id> [--format text|json]`
+  - `work query azdo <project> --wiql "<query>" [--skip N] [--take N] [--format text|json]`
+  - `work search azdo <project> --query <text> [--area <path>] [--type <work_item_type>] [--state <state>] [--assigned-to <email>] [--skip N] [--take N] [--format text|json]`
+  - `work search github <repo> --query <text> [--type <work_item_type>] [--state <state>] [--assigned-to <email>] [--skip N] [--take N] [--format text|json]`
+  - `work mine azdo <project> [--include-closed] [--skip N] [--take N] [--format text|json]`
+  - `work mine github <repo> [--include-closed] [--skip N] [--take N] [--format text|json]`
 
 ## Defaults and Tunables
 
@@ -165,10 +163,10 @@ Command defaults:
 - `code search`: default `--provider all`, `--skip 0`, `--take 20`, `--format text`.
 - `code grep`: default pattern `.*`, default path `/`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
 - `pr list`: default statuses `active,completed,abandoned`, default `--skip 0`, default `--take 100`, drafts included unless `--exclude-drafts`.
-- `build grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
-- `board search`: default `--skip 0`, default `--take 20`.
-- `board mine`: default `--skip 0`, default `--take 20`, closed items excluded unless `--include-closed`.
-- `projects list`, `repos list`, `pr get`, `pr threads`, `build logs`, `board ticket`, `board list`: default `--format text`.
+- `ci grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
+- `work search`: default `--skip 0`, default `--take 20`.
+- `work mine`: default `--skip 0`, default `--take 20`, closed items excluded unless `--include-closed`.
+- `discover projects`, `discover repos`, `pr get`, `pr threads`, `ci logs`, `work get`, `work query`: default `--format text`.
 
 Behavior defaults:
 - If `--branch` is omitted, provider default branch is used.
