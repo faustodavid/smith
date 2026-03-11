@@ -33,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="all",
         help="Run only one configuration or both (default: all).",
     )
+    parser.add_argument(
+        "--executor",
+        choices=["openai", "copilot"],
+        default="openai",
+        help="Benchmark executor backend (default: openai).",
+    )
     return parser
 
 
@@ -50,6 +56,7 @@ async def _main() -> int:
         eval_ids=selected_eval_ids,
         workspace=workspace,
         config=args.config,
+        executor=args.executor,
     )
     print(output_path)
     return 0

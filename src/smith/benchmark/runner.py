@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import statistics
-import subprocess
-import sys
 import traceback
 from collections import Counter
 from dataclasses import dataclass
@@ -18,8 +15,17 @@ from agents.items import MessageOutputItem, ReasoningItem, ToolCallItem, ToolCal
 from agents.model_settings import ModelSettings, Reasoning
 from agents.run import RunConfig
 
+from smith.benchmark.copilot_sdk import (
+    build_github_copilot_env,
+    build_github_copilot_payload,
+    build_smith_copilot_payload,
+    render_copilot_transcript,
+    run_copilot_payload,
+    summarize_copilot_events,
+)
 from smith.benchmark.github_mcp import DEFAULT_GITHUB_MCP_URL, build_github_mcp_server
 from smith.benchmark.grading import grade_run_directory
+from smith.benchmark.smith_cli import execute_smith_cli_command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EVALS_PATH = REPO_ROOT / "evals" / "evals.json"
@@ -97,75 +103,6 @@ def normalize_config_selection(raw_config: str) -> list[str]:
     return [raw_config]
 
 
-def validate_smith_cli_command(command: str) -> list[str]:
-    tokens = shlex.split(command)
-    if not tokens:
-        raise ValueError("smith_cli requires a non-empty command.")
-    if tokens[0] == "smith":
-        tokens = tokens[1:]
-    if not tokens:
-        raise ValueError("smith_cli requires Smith subcommand arguments after `smith`.")
-
-    if tokens[:2] == ["code", "search"]:
-        if "--project" in tokens:
-            raise ValueError("smith_cli only supports GitHub code search for this benchmark.")
-        if "--provider" in tokens:
-            provider_index = tokens.index("--provider") + 1
-            if provider_index >= len(tokens) or tokens[provider_index] != "github":
-                raise ValueError("smith_cli only allows --provider github for code search.")
-        else:
-            tokens.extend(["--provider", "github"])
-        return tokens
-
-    if len(tokens) >= 3 and tokens[:3] == ["code", "grep", "github"]:
-        return tokens
-
-    if tokens[:2] == ["repos", "github"]:
-        return tokens
-
-    if tokens[:2] == ["orgs", "github"]:
-        return tokens
-
-    raise ValueError(
-        "smith_cli only allows: `code search`, `code grep github`, `repos github`, and `orgs github`."
-    )
-
-
-def build_smith_cli_subprocess(
-    command: str,
-    *,
-    repo_root: Path = REPO_ROOT,
-    env: dict[str, str] | None = None,
-) -> tuple[list[str], dict[str, str]]:
-    tokens = validate_smith_cli_command(command)
-    run_env = os.environ.copy()
-    if env:
-        run_env.update(env)
-    run_env["GITHUB_ORG"] = "grafana"
-    existing_pythonpath = run_env.get("PYTHONPATH", "")
-    src_path = str(repo_root / "src")
-    run_env["PYTHONPATH"] = src_path if not existing_pythonpath else f"{src_path}{os.pathsep}{existing_pythonpath}"
-    return [sys.executable, "-m", "smith.cli.main", *tokens], run_env
-
-
-def execute_smith_cli_command(command: str) -> str:
-    argv, env = build_smith_cli_subprocess(command)
-    completed = subprocess.run(
-        argv,
-        cwd=str(REPO_ROOT),
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    stdout = completed.stdout.strip()
-    stderr = completed.stderr.strip()
-    if completed.returncode != 0:
-        details = stderr or stdout or f"smith exited with code {completed.returncode}"
-        raise RuntimeError(details)
-    return stdout or "(no output)"
-
-
 def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -190,7 +127,7 @@ def _extract_tool_name(raw_item: Any) -> str:
     return "unknown_tool"
 
 
-def render_transcript(new_items: list[Any]) -> str:
+def render_openai_transcript(new_items: list[Any]) -> str:
     lines = ["# Transcript", ""]
     for index, item in enumerate(new_items, start=1):
         lines.append(f"## Item {index}: {item.type}")
@@ -223,7 +160,7 @@ def render_transcript(new_items: list[Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def build_metrics(result: Any, *, final_answer: str, transcript: str, had_error: bool) -> dict[str, Any]:
+def build_openai_metrics(result: Any, *, final_answer: str, transcript: str, had_error: bool) -> dict[str, Any]:
     tool_counts: Counter[str] = Counter()
     for item in getattr(result, "new_items", []):
         if isinstance(item, ToolCallItem):
@@ -237,6 +174,29 @@ def build_metrics(result: Any, *, final_answer: str, transcript: str, had_error:
         "errors_encountered": 1 if had_error else 0,
         "output_chars": len(final_answer),
         "transcript_chars": len(transcript),
+    }
+
+
+def build_copilot_metrics(
+    events: list[dict[str, Any]],
+    *,
+    final_answer: str,
+    transcript: str,
+    usage_summary: dict[str, Any],
+    had_error: bool,
+) -> dict[str, Any]:
+    return {
+        "tool_calls": dict(sorted((usage_summary.get("tool_calls") or {}).items())),
+        "total_tool_calls": int(usage_summary.get("total_tool_calls", 0) or 0),
+        "total_steps": int(usage_summary.get("total_steps", len(events)) or 0),
+        "files_created": ["final_answer.md", "transcript.md"],
+        "errors_encountered": 1 if had_error else 0,
+        "output_chars": len(final_answer),
+        "transcript_chars": len(transcript),
+        "input_tokens": int(usage_summary.get("input_tokens", 0) or 0),
+        "output_tokens": int(usage_summary.get("output_tokens", 0) or 0),
+        "cache_read_tokens": int(usage_summary.get("cache_read_tokens", 0) or 0),
+        "cache_write_tokens": int(usage_summary.get("cache_write_tokens", 0) or 0),
     }
 
 
@@ -277,7 +237,7 @@ def github_mcp_instructions() -> str:
     )
 
 
-async def run_agent_once(
+async def run_openai_agent_once(
     *,
     config_name: str,
     model: str,
@@ -314,7 +274,7 @@ async def run_agent_once(
             run_config=run_config,
         )
         final_answer = str(result.final_output)
-        transcript = render_transcript(result.new_items)
+        transcript = render_openai_transcript(result.new_items)
     except Exception as exc:
         had_error = True
         final_answer = f"Benchmark run failed: {exc}"
@@ -331,7 +291,7 @@ async def run_agent_once(
             "executor_end": finished.isoformat(),
             "executor_duration_seconds": duration_seconds,
         }
-        metrics = build_metrics(
+        metrics = build_openai_metrics(
             result,
             final_answer=final_answer,
             transcript=transcript,
@@ -345,6 +305,96 @@ async def run_agent_once(
     return final_answer, transcript, metrics, timing
 
 
+async def run_copilot_agent_once(
+    *,
+    config_name: str,
+    model: str,
+    prompt: str,
+) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+    started = datetime.now(timezone.utc)
+    had_error = False
+
+    try:
+        if config_name == "smith_skill":
+            payload = build_smith_copilot_payload(
+                model=model,
+                prompt=prompt,
+                system_message=load_skill_body(),
+                repo_root=REPO_ROOT,
+            )
+            run_env = os.environ.copy()
+        elif config_name == "github_mcp":
+            payload = build_github_copilot_payload(
+                model=model,
+                prompt=prompt,
+                system_message=github_mcp_instructions(),
+                github_mcp_url=os.getenv("GITHUB_MCP_SERVER_URL", DEFAULT_GITHUB_MCP_URL),
+            )
+            run_env = build_github_copilot_env()
+        else:
+            raise ValueError(f"Unsupported benchmark configuration: {config_name}")
+
+        run_result = run_copilot_payload(payload, env=run_env)
+        events = [dict(event) for event in run_result.get("events", [])]
+        usage_summary = summarize_copilot_events(events)
+        final_answer = str(run_result.get("finalAnswer", ""))
+        transcript = render_copilot_transcript(events)
+    except Exception as exc:
+        had_error = True
+        final_answer = f"Benchmark run failed: {exc}"
+        transcript = "# Transcript\n\n```text\n" + traceback.format_exc().rstrip() + "\n```\n"
+        events = []
+        usage_summary = summarize_copilot_events(events)
+        run_result = {}
+
+    finished = datetime.now(timezone.utc)
+    duration_ms = int(run_result.get("wallClockDurationMs") or max(0.0, (finished - started).total_seconds() * 1000))
+    duration_seconds = round(duration_ms / 1000, 3)
+    metrics = build_copilot_metrics(
+        events,
+        final_answer=final_answer,
+        transcript=transcript,
+        usage_summary=usage_summary,
+        had_error=had_error,
+    )
+    timing = {
+        "total_tokens": int(usage_summary.get("total_tokens", 0) or 0),
+        "input_tokens": int(usage_summary.get("input_tokens", 0) or 0),
+        "output_tokens": int(usage_summary.get("output_tokens", 0) or 0),
+        "cache_read_tokens": int(usage_summary.get("cache_read_tokens", 0) or 0),
+        "cache_write_tokens": int(usage_summary.get("cache_write_tokens", 0) or 0),
+        "duration_ms": duration_ms,
+        "total_duration_seconds": duration_seconds,
+        "api_duration_ms": int(usage_summary.get("api_duration_ms", 0) or 0),
+        "executor_start": started.isoformat(),
+        "executor_end": finished.isoformat(),
+        "executor_duration_seconds": duration_seconds,
+    }
+    return final_answer, transcript, metrics, timing
+
+
+async def run_agent_once(
+    *,
+    config_name: str,
+    model: str,
+    prompt: str,
+    executor: str,
+) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+    if executor == "openai":
+        return await run_openai_agent_once(
+            config_name=config_name,
+            model=model,
+            prompt=prompt,
+        )
+    if executor == "copilot":
+        return await run_copilot_agent_once(
+            config_name=config_name,
+            model=model,
+            prompt=prompt,
+        )
+    raise ValueError(f"Unsupported benchmark executor: {executor}")
+
+
 async def execute_eval_run(
     *,
     workspace: Path,
@@ -352,6 +402,7 @@ async def execute_eval_run(
     config_name: str,
     run_number: int,
     model: str,
+    executor: str,
 ) -> None:
     run_dir = workspace / f"eval-{eval_case.id}" / config_name / f"run-{run_number}"
     outputs_dir = run_dir / "outputs"
@@ -361,6 +412,7 @@ async def execute_eval_run(
         config_name=config_name,
         model=model,
         prompt=eval_case.prompt,
+        executor=executor,
     )
 
     (outputs_dir / "final_answer.md").write_text(final_answer.rstrip() + "\n")
@@ -388,6 +440,7 @@ def aggregate_workspace(
     workspace: Path,
     evals_run: list[BenchmarkEval],
     model: str,
+    executor: str,
 ) -> tuple[dict[str, Any], str]:
     runs: list[dict[str, Any]] = []
     by_config: dict[str, list[dict[str, Any]]] = {}
@@ -457,6 +510,7 @@ def aggregate_workspace(
         "metadata": {
             "skill_name": "smith",
             "skill_path": str(SKILL_PATH),
+            "executor_backend": executor,
             "executor_model": model,
             "analyzer_model": "deterministic",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -477,6 +531,7 @@ def aggregate_workspace(
     lines = [
         "# Benchmark Summary",
         "",
+        f"Executor: `{executor}`",
         f"Model: `{model}`",
         f"Workspace: `{workspace}`",
         "",
@@ -505,6 +560,7 @@ async def run_benchmark(
     eval_ids: list[int] | None = None,
     workspace: Path | None = None,
     config: str = "all",
+    executor: str = "openai",
 ) -> Path:
     selected_configs = normalize_config_selection(config)
     all_evals = load_evals()
@@ -534,12 +590,14 @@ async def run_benchmark(
                     config_name=config_name,
                     run_number=run_number,
                     model=model,
+                    executor=executor,
                 )
 
     benchmark, benchmark_markdown = aggregate_workspace(
         workspace=workspace_path,
         evals_run=evals_run,
         model=model,
+        executor=executor,
     )
     (workspace_path / "benchmark.json").write_text(json.dumps(benchmark, indent=2, sort_keys=True) + "\n")
     (workspace_path / "benchmark.md").write_text(benchmark_markdown.rstrip() + "\n")

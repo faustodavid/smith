@@ -41,13 +41,14 @@ pytest tests/integration -q --run-integration
 
 ## Benchmark
 
-Install the benchmark extras and provide an OpenAI API key plus GitHub auth:
+Install the benchmark extras and provide GitHub auth. Use `--executor openai` with an OpenAI API key or `--executor copilot` with a logged-in `copilot` CLI:
 
 ```bash
 python -m pip install -e .[bench]
-export OPENAI_API_KEY="<token>"
 export GITHUB_TOKEN="<token>"  # optional if `gh auth login` is already configured
-python3 scripts/run_skill_benchmark.py --model gpt-5 --runs 1
+export OPENAI_API_KEY="<token>"  # only for --executor openai
+python3 scripts/run_skill_benchmark.py --executor openai --model gpt-5 --runs 1
+python3 scripts/run_skill_benchmark.py --executor copilot --model gpt-5.4 --runs 1
 ```
 
 The benchmark writes tracked inputs to `evals/evals.json` and generated outputs to `benchmarks/workspaces/<timestamp>/`, including `benchmark.json`, `benchmark.md`, per-run transcripts, timing, and grading artifacts.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from smith.benchmark.runner import build_smith_cli_subprocess, validate_smith_cli_command
+from smith.benchmark.smith_cli import build_smith_cli_subprocess, validate_smith_cli_command
 
 
 def test_validate_smith_cli_command_injects_github_provider_for_code_search():
