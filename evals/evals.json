@@ -1,0 +1,21 @@
+{
+  "skill_name": "smith",
+  "evals": [
+    {
+      "id": 0,
+      "name": "grafana-otelcol-exporter-loki-implementations",
+      "prompt": "In the Grafana GitHub organization, identify every repository that contains a real source-code implementation of the `otelcol.exporter.loki` component, ignoring repositories that only mention it in docs or examples. For each implementation repo, report the repository name, the exact source file path, and the exact struct tag used on `Arguments.ForwardTo`. End with a `Sources` section listing `repo:path` entries.",
+      "expected_output": "The answer should identify grafana/alloy and grafana/agent as the only implementation repositories, cite /internal/component/otelcol/exporter/loki/loki.go for both, map the exact ForwardTo struct tags, and end with a Sources section.",
+      "files": [],
+      "expectations": [
+        "includes grafana/alloy",
+        "includes grafana/agent",
+        "includes internal/component/otelcol/exporter/loki/loki.go",
+        "maps grafana/alloy to alloy:\"forward_to,attr\"",
+        "maps grafana/agent to river:\"forward_to,attr\"",
+        "does not present docs-only hits as implementation repos",
+        "includes a Sources section with repo:path"
+      ]
+    }
+  ]
+}
