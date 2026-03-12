@@ -16,6 +16,24 @@
         "does not present docs-only hits as implementation repos",
         "includes a Sources section with repo:path"
       ]
+    },
+    {
+      "id": 1,
+      "name": "grafana-loki-helm-retention-1y",
+      "prompt": "In the Grafana GitHub organization, how do you configure the official Loki Helm chart to retain logs for 1 year? Answer with the exact Helm values keys you would set, the exact 1-year retention value, and any compactor setting that the Loki docs say is required when retention is enabled. Do not recommend the deprecated table_manager path. End with a `Sources` section listing `repo:path` entries.",
+      "expected_output": "The answer should use grafana/loki, set loki.limits_config.retention_period to a one-year duration, enable loki.compactor.retention_enabled, include loki.compactor.delete_request_store as a required setting for retention, avoid recommending table_manager retention, and cite the chart values file plus the retention docs in a Sources section.",
+      "files": [],
+      "expectations": [
+        "includes grafana/loki",
+        "includes loki.limits_config.retention_period",
+        "maps retention_period to 1 year",
+        "includes loki.compactor.retention_enabled",
+        "includes loki.compactor.delete_request_store",
+        "states delete_request_store is required when retention is enabled",
+        "does not recommend deprecated table_manager retention",
+        "includes sources for values.yaml and retention.md",
+        "includes a Sources section with repo:path"
+      ]
     }
   ]
 }

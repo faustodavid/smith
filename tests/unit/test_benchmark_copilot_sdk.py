@@ -6,6 +6,7 @@ from smith.benchmark.copilot_sdk import (
     GITHUB_AUTH_HEADER_ENV,
     GITHUB_MCP_SERVER_NAME,
     SMITH_MCP_SERVER_NAME,
+    build_copilot_auth_env,
     build_github_copilot_env,
     build_github_copilot_payload,
     build_smith_copilot_payload,
@@ -55,6 +56,20 @@ def test_build_github_copilot_env_adds_bearer_header(monkeypatch):
     env = build_github_copilot_env()
 
     assert env[GITHUB_AUTH_HEADER_ENV] == "Bearer secret-token"
+
+
+def test_build_copilot_auth_env_populates_gh_token_from_gh_auth_fallback(monkeypatch):
+    monkeypatch.delenv("COPILOT_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "smith.benchmark.copilot_sdk.resolve_github_mcp_token",
+        lambda _env=None: "secret-token",
+    )
+
+    env = build_copilot_auth_env()
+
+    assert env["GH_TOKEN"] == "secret-token"
 
 
 def test_summarize_copilot_events_aggregates_usage_and_tool_calls():

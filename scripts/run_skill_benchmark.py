@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--executor",
-        choices=["openai", "copilot"],
+        choices=["openai", "copilot", "codex"],
         default="openai",
         help="Benchmark executor backend (default: openai).",
     )

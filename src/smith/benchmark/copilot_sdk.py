@@ -176,9 +176,19 @@ def build_github_copilot_env(
     *,
     env: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    run_env = dict(env or os.environ)
+    run_env = build_copilot_auth_env(env)
     token = resolve_github_mcp_token(run_env)
     run_env[GITHUB_AUTH_HEADER_ENV] = f"Bearer {token}"
+    return run_env
+
+
+def build_copilot_auth_env(
+    env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    run_env = dict(env or os.environ)
+    if any(str(run_env.get(name, "")).strip() for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")):
+        return run_env
+    run_env["GH_TOKEN"] = resolve_github_mcp_token(run_env)
     return run_env
 
 

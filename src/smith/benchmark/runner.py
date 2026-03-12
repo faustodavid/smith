@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import shutil
 import statistics
+import subprocess
 import traceback
 from collections import Counter
 from dataclasses import dataclass
@@ -15,7 +18,21 @@ from agents.items import MessageOutputItem, ReasoningItem, ToolCallItem, ToolCal
 from agents.model_settings import ModelSettings, Reasoning
 from agents.run import RunConfig
 
+from smith.benchmark.codex_cli import (
+    add_github_codex_mcp_server,
+    add_smith_codex_mcp_server,
+    build_github_codex_prompt,
+    build_smith_codex_prompt,
+    create_codex_home,
+    extract_codex_last_agent_message,
+    find_unexpected_codex_tool_usage,
+    parse_codex_jsonl,
+    render_codex_transcript,
+    resolve_codex_cli_path,
+    summarize_codex_events,
+)
 from smith.benchmark.copilot_sdk import (
+    build_copilot_auth_env,
     build_github_copilot_env,
     build_github_copilot_payload,
     build_smith_copilot_payload,
@@ -127,6 +144,269 @@ def _extract_tool_name(raw_item: Any) -> str:
     return "unknown_tool"
 
 
+def _normalize_tool_arguments(value: Any) -> Any:
+    normalized = _jsonable(value)
+    if isinstance(normalized, str):
+        stripped = normalized.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError:
+                return normalized
+    return normalized
+
+
+def _build_result_preview(value: Any, *, max_chars: int = 1200) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, dict):
+        content = value.get("content")
+        if isinstance(content, list):
+            snippets: list[str] = []
+            for item in content:
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    snippets.append(item["text"])
+            if snippets:
+                text = "\n".join(snippets)
+            else:
+                text = json.dumps(_jsonable(value), indent=2, sort_keys=True)
+        else:
+            text = json.dumps(_jsonable(value), indent=2, sort_keys=True)
+    elif isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(_jsonable(value), indent=2, sort_keys=True)
+
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n...[truncated]"
+
+
+def _extract_openai_call_id(payload: dict[str, Any]) -> str | None:
+    for key in ("call_id", "tool_call_id", "id"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def build_openai_tool_trace(new_items: list[Any]) -> list[dict[str, Any]]:
+    trace: list[dict[str, Any]] = []
+    call_index: dict[str, dict[str, Any]] = {}
+
+    for item in new_items:
+        if isinstance(item, ToolCallItem):
+            payload = _jsonable(item.raw_item)
+            if not isinstance(payload, dict):
+                payload = {"raw_item": payload}
+            arguments = None
+            for key in ("arguments", "input", "params"):
+                if key in payload:
+                    arguments = _normalize_tool_arguments(payload[key])
+                    break
+            entry = {
+                "step": len(trace) + 1,
+                "kind": "function_tool_call",
+                "server": None,
+                "tool": _extract_tool_name(item.raw_item),
+                "status": "completed",
+                "arguments": arguments,
+            }
+            trace.append(entry)
+            call_id = _extract_openai_call_id(payload)
+            if call_id:
+                call_index[call_id] = entry
+            continue
+
+        if not isinstance(item, ToolCallOutputItem):
+            continue
+
+        payload = _jsonable(item.raw_item)
+        if not isinstance(payload, dict):
+            payload = {"raw_item": payload}
+        output = _jsonable(item.output)
+        call_id = _extract_openai_call_id(payload)
+        entry = call_index.get(call_id) if call_id else None
+        if entry is None:
+            entry = {
+                "step": len(trace) + 1,
+                "kind": "function_tool_output",
+                "server": None,
+                "tool": _extract_tool_name(payload),
+                "status": "completed",
+                "arguments": None,
+            }
+            trace.append(entry)
+        preview = _build_result_preview(output)
+        if preview:
+            entry["result_preview"] = preview
+        if payload.get("error") is not None:
+            entry["error"] = _jsonable(payload["error"])
+
+    return trace
+
+
+def _split_copilot_tool_name(tool_name: str) -> tuple[str | None, str]:
+    if "-" not in tool_name:
+        return None, tool_name
+    server, tool = tool_name.rsplit("-", 1)
+    return server, tool
+
+
+def build_copilot_tool_trace(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    trace: list[dict[str, Any]] = []
+    pending: dict[str, dict[str, Any]] = {}
+
+    for event in events:
+        event_type = str(event.get("type") or "")
+        data = event.get("data") or {}
+        if not isinstance(data, dict) or not event_type.startswith("tool.execution"):
+            continue
+
+        tool_name = str(data.get("toolName") or "unknown_tool")
+        server, tool = _split_copilot_tool_name(tool_name)
+        key = str(data.get("toolCallId") or data.get("executionId") or f"{tool_name}:{len(trace)}")
+
+        if event_type == "tool.execution_start":
+            entry = {
+                "step": len(trace) + 1,
+                "kind": "tool_execution",
+                "server": server,
+                "tool": tool,
+                "status": "started",
+                "arguments": _normalize_tool_arguments(
+                    data.get("arguments", data.get("input", data.get("params")))
+                ),
+            }
+            trace.append(entry)
+            pending[key] = entry
+            continue
+
+        entry = pending.get(key)
+        if entry is None:
+            entry = {
+                "step": len(trace) + 1,
+                "kind": "tool_execution",
+                "server": server,
+                "tool": tool,
+                "status": event_type.removeprefix("tool.execution_"),
+                "arguments": _normalize_tool_arguments(
+                    data.get("arguments", data.get("input", data.get("params")))
+                ),
+            }
+            trace.append(entry)
+        else:
+            entry["status"] = event_type.removeprefix("tool.execution_")
+            if entry.get("arguments") is None:
+                entry["arguments"] = _normalize_tool_arguments(
+                    data.get("arguments", data.get("input", data.get("params")))
+                )
+
+        if data.get("error") is not None:
+            entry["error"] = _jsonable(data["error"])
+        preview = _build_result_preview(data.get("output", data.get("result")))
+        if preview:
+            entry["result_preview"] = preview
+
+    return trace
+
+
+def build_codex_tool_trace(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    trace: list[dict[str, Any]] = []
+
+    for event in events:
+        if event.get("type") != "item.completed":
+            continue
+        item = event.get("item") or {}
+        if not isinstance(item, dict):
+            continue
+
+        item_type = str(item.get("type") or "")
+        if item_type == "mcp_tool_call":
+            entry = {
+                "step": len(trace) + 1,
+                "kind": "mcp_tool_call",
+                "server": item.get("server"),
+                "tool": item.get("tool"),
+                "status": item.get("status"),
+                "arguments": _normalize_tool_arguments(item.get("arguments")),
+            }
+            if item.get("error") is not None:
+                entry["error"] = _jsonable(item["error"])
+            preview = _build_result_preview(item.get("result"))
+            if preview:
+                entry["result_preview"] = preview
+            trace.append(entry)
+            continue
+
+        if item_type != "command_execution":
+            continue
+
+        entry = {
+            "step": len(trace) + 1,
+            "kind": "command_execution",
+            "server": None,
+            "tool": "command_execution",
+            "status": item.get("status"),
+            "arguments": {
+                "command": item.get("command"),
+            },
+        }
+        if item.get("exit_code") is not None:
+            entry["exit_code"] = item.get("exit_code")
+        preview = _build_result_preview(item.get("aggregated_output"))
+        if preview:
+            entry["result_preview"] = preview
+        trace.append(entry)
+
+    return trace
+
+
+def render_tool_trace_markdown(tool_trace: list[dict[str, Any]]) -> str:
+    lines = [
+        "# Tool Trace",
+        "",
+        "This file records visible tool calls and arguments from the benchmark run.",
+        "It does not include hidden chain-of-thought.",
+        "",
+        "## Summary",
+        f"- Total tool calls: `{len(tool_trace)}`",
+        "",
+        "## Calls",
+    ]
+
+    if not tool_trace:
+        lines.extend(["No tool calls were recorded.", ""])
+        return "\n".join(lines).rstrip() + "\n"
+
+    for entry in tool_trace:
+        server = entry.get("server")
+        tool_label = str(entry.get("tool") or "unknown_tool")
+        if server:
+            tool_label = f"{server}:{tool_label}"
+        lines.append(f"### Step {entry.get('step', '?')}: `{tool_label}` `{entry.get('status', 'unknown')}`")
+        lines.append("Arguments:")
+        lines.append("```json")
+        lines.append(json.dumps(_jsonable(entry.get("arguments")), indent=2, sort_keys=True))
+        lines.append("```")
+        if entry.get("error") is not None:
+            lines.append("Error:")
+            lines.append("```json")
+            lines.append(json.dumps(_jsonable(entry.get("error")), indent=2, sort_keys=True))
+            lines.append("```")
+        preview = str(entry.get("result_preview") or "").strip()
+        if preview:
+            lines.append("Result preview:")
+            lines.append("```text")
+            lines.append(preview)
+            lines.append("```")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def render_openai_transcript(new_items: list[Any]) -> str:
     lines = ["# Transcript", ""]
     for index, item in enumerate(new_items, start=1):
@@ -170,7 +450,7 @@ def build_openai_metrics(result: Any, *, final_answer: str, transcript: str, had
         "tool_calls": dict(sorted(tool_counts.items())),
         "total_tool_calls": sum(tool_counts.values()),
         "total_steps": len(getattr(result, "new_items", [])),
-        "files_created": ["final_answer.md", "transcript.md"],
+        "files_created": ["final_answer.md", "transcript.md", "tool_trace.json", "tool_trace.md"],
         "errors_encountered": 1 if had_error else 0,
         "output_chars": len(final_answer),
         "transcript_chars": len(transcript),
@@ -189,7 +469,7 @@ def build_copilot_metrics(
         "tool_calls": dict(sorted((usage_summary.get("tool_calls") or {}).items())),
         "total_tool_calls": int(usage_summary.get("total_tool_calls", 0) or 0),
         "total_steps": int(usage_summary.get("total_steps", len(events)) or 0),
-        "files_created": ["final_answer.md", "transcript.md"],
+        "files_created": ["final_answer.md", "transcript.md", "tool_trace.json", "tool_trace.md"],
         "errors_encountered": 1 if had_error else 0,
         "output_chars": len(final_answer),
         "transcript_chars": len(transcript),
@@ -232,7 +512,7 @@ def github_mcp_instructions() -> str:
         "Investigate GitHub repositories with the available read-only tools. "
         "Start with search_code to find candidate repositories or files, then use "
         "get_file_contents only on the smallest number of files needed to verify exact evidence. "
-        "Do not guess. Report only real source-code implementations, ignore docs and examples, "
+        "Do not guess. Answer with exact keys, paths, values, or file evidence from the repo, "
         "and finish with a Sources section that lists repo:path entries."
     )
 
@@ -242,12 +522,13 @@ async def run_openai_agent_once(
     config_name: str,
     model: str,
     prompt: str,
-) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+) -> tuple[str, str, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     run_config = RunConfig(tracing_disabled=True)
     server = None
     result = None
     started = datetime.now(timezone.utc)
     had_error = False
+    tool_trace: list[dict[str, Any]] = []
 
     try:
         if config_name == "smith_skill":
@@ -275,6 +556,7 @@ async def run_openai_agent_once(
         )
         final_answer = str(result.final_output)
         transcript = render_openai_transcript(result.new_items)
+        tool_trace = build_openai_tool_trace(result.new_items)
     except Exception as exc:
         had_error = True
         final_answer = f"Benchmark run failed: {exc}"
@@ -302,7 +584,7 @@ async def run_openai_agent_once(
         if server is not None:
             await server.cleanup()
 
-    return final_answer, transcript, metrics, timing
+    return final_answer, transcript, metrics, timing, tool_trace
 
 
 async def run_copilot_agent_once(
@@ -310,9 +592,10 @@ async def run_copilot_agent_once(
     config_name: str,
     model: str,
     prompt: str,
-) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+) -> tuple[str, str, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     started = datetime.now(timezone.utc)
     had_error = False
+    tool_trace: list[dict[str, Any]] = []
 
     try:
         if config_name == "smith_skill":
@@ -322,7 +605,7 @@ async def run_copilot_agent_once(
                 system_message=load_skill_body(),
                 repo_root=REPO_ROOT,
             )
-            run_env = os.environ.copy()
+            run_env = build_copilot_auth_env()
         elif config_name == "github_mcp":
             payload = build_github_copilot_payload(
                 model=model,
@@ -339,6 +622,7 @@ async def run_copilot_agent_once(
         usage_summary = summarize_copilot_events(events)
         final_answer = str(run_result.get("finalAnswer", ""))
         transcript = render_copilot_transcript(events)
+        tool_trace = build_copilot_tool_trace(events)
     except Exception as exc:
         had_error = True
         final_answer = f"Benchmark run failed: {exc}"
@@ -370,7 +654,138 @@ async def run_copilot_agent_once(
         "executor_end": finished.isoformat(),
         "executor_duration_seconds": duration_seconds,
     }
-    return final_answer, transcript, metrics, timing
+    return final_answer, transcript, metrics, timing, tool_trace
+
+
+def build_codex_metrics(
+    events: list[dict[str, Any]],
+    *,
+    final_answer: str,
+    transcript: str,
+    usage_summary: dict[str, Any],
+    unexpected_tools: list[str],
+    had_error: bool,
+) -> dict[str, Any]:
+    return {
+        "tool_calls": dict(sorted((usage_summary.get("tool_calls") or {}).items())),
+        "total_tool_calls": int(usage_summary.get("total_tool_calls", 0) or 0),
+        "total_steps": int(usage_summary.get("total_steps", len(events)) or 0),
+        "files_created": ["final_answer.md", "transcript.md", "tool_trace.json", "tool_trace.md"],
+        "errors_encountered": int(usage_summary.get("errors", 0) or 0) + (1 if had_error else 0),
+        "output_chars": len(final_answer),
+        "transcript_chars": len(transcript),
+        "input_tokens": int(usage_summary.get("input_tokens", 0) or 0),
+        "output_tokens": int(usage_summary.get("output_tokens", 0) or 0),
+        "cached_input_tokens": int(usage_summary.get("cached_input_tokens", 0) or 0),
+        "unexpected_tools": unexpected_tools,
+    }
+
+
+async def run_codex_agent_once(
+    *,
+    config_name: str,
+    model: str,
+    prompt: str,
+) -> tuple[str, str, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    started = datetime.now(timezone.utc)
+    had_error = False
+    codex_home = None
+    events: list[dict[str, Any]] = []
+    usage_summary = summarize_codex_events(events)
+    unexpected_tools: list[str] = []
+    final_answer = ""
+    transcript = "# Transcript\n"
+    tool_trace: list[dict[str, Any]] = []
+
+    try:
+        codex_home = create_codex_home()
+        if config_name == "smith_skill":
+            run_env = add_smith_codex_mcp_server(codex_home, repo_root=REPO_ROOT)
+            codex_prompt = build_smith_codex_prompt(task_prompt=prompt, skill_body=load_skill_body())
+        elif config_name == "github_mcp":
+            run_env = add_github_codex_mcp_server(
+                codex_home,
+                github_mcp_url=os.getenv("GITHUB_MCP_SERVER_URL", DEFAULT_GITHUB_MCP_URL),
+            )
+            codex_prompt = build_github_codex_prompt(
+                task_prompt=prompt,
+                instructions=github_mcp_instructions(),
+            )
+        else:
+            raise ValueError(f"Unsupported benchmark configuration: {config_name}")
+
+        output_path = codex_home / "last_message.md"
+        command = [
+            resolve_codex_cli_path(run_env),
+            "exec",
+            "--json",
+            "--model",
+            model,
+            "--sandbox",
+            "read-only",
+            "-C",
+            str(REPO_ROOT),
+            "-o",
+            str(output_path),
+            codex_prompt,
+        ]
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            command,
+            cwd=str(REPO_ROOT),
+            env=run_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        events = parse_codex_jsonl(completed.stdout)
+        final_answer = output_path.read_text().strip() if output_path.exists() else ""
+        if not final_answer:
+            final_answer = extract_codex_last_agent_message(events)
+        if completed.returncode != 0:
+            had_error = True
+        if not final_answer and completed.returncode != 0:
+            final_answer = completed.stderr.strip() or "Benchmark run failed."
+        usage_summary = summarize_codex_events(events)
+        unexpected_tools = find_unexpected_codex_tool_usage(events, config_name=config_name)
+        if unexpected_tools:
+            usage_summary["errors"] = int(usage_summary.get("errors", 0) or 0) + 1
+        transcript = render_codex_transcript(events, stderr=completed.stderr)
+        tool_trace = build_codex_tool_trace(events)
+    except Exception as exc:
+        had_error = True
+        events = []
+        usage_summary = summarize_codex_events(events)
+        unexpected_tools = []
+        final_answer = f"Benchmark run failed: {exc}"
+        transcript = "# Transcript\n\n```text\n" + traceback.format_exc().rstrip() + "\n```\n"
+    finally:
+        finished = datetime.now(timezone.utc)
+        duration_seconds = round((finished - started).total_seconds(), 3)
+        metrics = build_codex_metrics(
+            events,
+            final_answer=final_answer,
+            transcript=transcript,
+            usage_summary=usage_summary,
+            unexpected_tools=unexpected_tools,
+            had_error=had_error,
+        )
+        timing = {
+            "total_tokens": int(usage_summary.get("total_tokens", 0) or 0),
+            "input_tokens": int(usage_summary.get("input_tokens", 0) or 0),
+            "output_tokens": int(usage_summary.get("output_tokens", 0) or 0),
+            "cached_input_tokens": int(usage_summary.get("cached_input_tokens", 0) or 0),
+            "duration_ms": int(duration_seconds * 1000),
+            "total_duration_seconds": duration_seconds,
+            "executor_start": started.isoformat(),
+            "executor_end": finished.isoformat(),
+            "executor_duration_seconds": duration_seconds,
+            "unexpected_tools": unexpected_tools,
+        }
+        if codex_home is not None:
+            shutil.rmtree(codex_home, ignore_errors=True)
+
+    return final_answer, transcript, metrics, timing, tool_trace
 
 
 async def run_agent_once(
@@ -379,7 +794,7 @@ async def run_agent_once(
     model: str,
     prompt: str,
     executor: str,
-) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+) -> tuple[str, str, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     if executor == "openai":
         return await run_openai_agent_once(
             config_name=config_name,
@@ -388,6 +803,12 @@ async def run_agent_once(
         )
     if executor == "copilot":
         return await run_copilot_agent_once(
+            config_name=config_name,
+            model=model,
+            prompt=prompt,
+        )
+    if executor == "codex":
+        return await run_codex_agent_once(
             config_name=config_name,
             model=model,
             prompt=prompt,
@@ -408,15 +829,18 @@ async def execute_eval_run(
     outputs_dir = run_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    final_answer, transcript, metrics, timing = await run_agent_once(
+    final_answer, transcript, metrics, timing, tool_trace = await run_agent_once(
         config_name=config_name,
         model=model,
         prompt=eval_case.prompt,
         executor=executor,
     )
 
+    metrics["tool_trace_entries"] = len(tool_trace)
     (outputs_dir / "final_answer.md").write_text(final_answer.rstrip() + "\n")
     (outputs_dir / "transcript.md").write_text(transcript)
+    (outputs_dir / "tool_trace.json").write_text(json.dumps(tool_trace, indent=2, sort_keys=True) + "\n")
+    (outputs_dir / "tool_trace.md").write_text(render_tool_trace_markdown(tool_trace))
     (outputs_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n")
     (run_dir / "timing.json").write_text(json.dumps(timing, indent=2, sort_keys=True) + "\n")
     grade_run_directory(run_dir, eval_case.expectations)
