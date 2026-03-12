@@ -1,34 +1,33 @@
 # Trigger Cases
 
-Use this matrix to decide whether `smith` should be used.
+Use `smith` when the request is read-only and the likely source of truth is Azure DevOps or GitHub.
 
-## Positive triggers (should use smith)
+## Positive
 
-- Find where Loki retention is configured in Azure DevOps repos.
-- Find where Loki retention is configured in GitHub repos for a known org.
-- Inspect failing CI logs for a specific build ID.
-- Find which repository contains a Terraform resource or config key.
-- Inspect PR details and changed files for a known project and repo.
-- Find work items related to an incident keyword in Azure DevOps.
+- Find where code or config is defined.
+- Search a repo for a key, resource, regex, or file.
+- Inspect a pull request, changed files, or review context.
+- Inspect a pipeline or build failure.
+- Read work items or GitHub issues.
 
-## Negative triggers (should not use smith)
+## Negative
 
-- Create or update a work item.
-- Post messages to Slack.
-- Review public internet documentation.
-- Non-DevOps creative writing tasks.
+- Create, update, approve, or comment on anything.
+- Post to Slack or another external system.
+- Search public web docs.
+- Do unrelated writing or analysis.
 
-## Ambiguous triggers (use discovery-first)
+## Ambiguous
 
 - "Where is X configured?"
-- "Find the TTL setting"
-- "Investigate this failure"
+- "Find the TTL setting."
+- "Investigate this failure."
 
-When ambiguous, start with `code search` before narrowing to grep or PR/CI/work commands.
+Default: start with `smith code search "<query>"`, then narrow.
 
-## Trigger checklist
+## Quick Check
 
-1. Is the target system Azure DevOps or GitHub?
+1. Is Azure DevOps or GitHub the target?
 2. Is the request read-only?
-3. Does the request involve code/config/PR/CI/work-item investigation?
-4. If any answer is unknown, start broad with discovery and then narrow.
+3. Is repo, PR, pipeline, or story evidence needed?
+4. If unsure, start broad.

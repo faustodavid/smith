@@ -1,42 +1,32 @@
 # Behavioral Quality Gates
 
-A hardened run is acceptable only if all gates pass.
+A `smith` investigation is acceptable only if all gates pass.
 
-## Gate 1: Trigger quality
+## Gate 1: Trigger
 
-- Positive requests route to `smith`.
-- Negative requests are rejected as out of scope.
-- Ambiguous requests start with discovery-first behavior.
+- The request is read-only and Azure DevOps or GitHub backed.
+- Ambiguous requests start with discovery.
+- Out-of-scope requests are not handled with `smith`.
 
-## Gate 2: Investigation discipline
+## Gate 2: Investigation
 
-- Broad-to-narrow sequence is followed:
-  1. `code search`
-  2. `code grep --output-mode files_with_matches` when structure is needed
-  3. focused `code grep --output-mode content`
-- PR/pipeline/work tools are used only when needed to corroborate.
-- Provider selection is explicit via positional syntax for deep commands.
+- Unknown scope starts with `code search`.
+- Unknown structure uses `code grep ... ".*" --output-mode files_with_matches`.
+- Final evidence comes from focused `code grep`.
+- `prs`, `pipelines logs`, and `stories` are used only when primary or corroborating evidence is needed.
+- Provider syntax is explicit:
   - `code grep azdo <project> <repo> "<regex>"`
   - `code grep github <repo> "<regex>"`
   - `pipelines logs list github <repo> <id>`
 
-## Gate 3: Evidence output quality
+## Gate 3: Answer Quality
 
-- Final answer includes source paths in `project/repository:path` format.
-- Results identify source provider (azdo/github) and keep provider sections separate.
-- Single-provider text output is flat (no provider section header); grouped sections are preserved for multi-provider search.
-- If unresolved, answer includes the phrase "not enough evidence" and one explicit next command.
+- The answer cites exact `project/repository:path` or `org/repository:path` sources.
+- Single-provider answers stay flat; multi-provider answers split by provider.
+- Unresolved answers include `not enough evidence` plus one next command.
 
-## Gate 4: Failure-path behavior
+## Gate 4: Recovery
 
-- 401/403 path includes re-auth with `az login`.
-- GitHub auth path includes `GITHUB_TOKEN` or `gh auth login`.
-- 429 path includes narrowing scope and retry.
-- Truncation path includes path/glob/range narrowing.
-- Empty-result path includes broadening query then narrowing again.
-
-## Gate 5: Documentation completeness
-
-- `SKILL.md` includes trigger decisions, anti-triggers, workflow, stop conditions, and failure handling.
-- Recipes, failure playbook, and trigger cases are linked and consistent.
-- Claude templates include preflight, required args, first command, fallback, and evidence output contract.
+- Auth or env blockers use `references/auth-troubleshooting.md`.
+- Empty, rate-limited, truncated, or wrong-repo cases use `references/failure-playbook.md`.
+- Do not stop while another narrowing command could resolve the request.

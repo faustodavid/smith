@@ -1,54 +1,41 @@
 # Failure Playbook
 
-Use this playbook when a command path fails.
+Use this when a read command fails. Use `references/auth-troubleshooting.md` for env or credential setup.
 
-## 401 or 403 authentication rejected
+## 401 Or 403
 
-1. Verify org context:
-```bash
-echo "$AZURE_DEVOPS_ORG"
-```
-2. Re-authenticate:
-```bash
-az login
-```
-3. Retry the exact same command once.
-4. For GitHub provider, ensure one of:
-```bash
-export GITHUB_TOKEN="<token>"
-# or
-gh auth login
-```
+- Confirm `AZURE_DEVOPS_ORG` or `GITHUB_ORG` is set for the target provider.
+- Run `az login`.
+- For GitHub, use `export GITHUB_TOKEN="<token>"` or `gh auth login`.
+- Retry the same command once.
 
-## 429 rate limited
+## 429 Or Slow Grep
 
-1. Reduce breadth: lower `--take`.
-2. Narrow search path or regex.
-3. Retry with scoped command.
+- Lower `--take`.
+- Narrow provider, repo, path, glob, or regex.
+- For GitHub grep, reduce `GITHUB_GREP_MAX_WORKERS` or disable parallel fetch.
 
-## Truncated grep output
+## Truncated Output
 
-1. Narrow with `--path` and `--glob`.
-2. Page with `--from-line` and `--to-line`.
-3. Retry with reduced context lines if needed.
+- Narrow `--path` and `--glob`.
+- Page with `--from-line` and `--to-line`.
+- Reduce `--context-lines`.
 
-## Empty results
+## Empty Results
 
-1. Run broader `code search` terms.
-2. Remove strict filters.
-3. Re-run focused grep once candidate paths are found.
+- Broaden the `code search` query.
+- Remove strict filters.
+- Re-run focused grep on the candidate repo or path.
 
-## Wrong repository selected
+## Wrong Repo
 
-1. Return to discovery:
 ```bash
 smith code search "<broader query>"
 ```
-2. Re-map candidate repo and path.
-3. Continue with focused grep.
 
-## Unsupported provider flow
+Then remap the repo and path, and continue with focused grep.
 
-If a command is unsupported for a selected provider, use the explicit fallback:
+## Unsupported Provider Flow
 
-- Prefer the closest supported read command for that provider and restate the fallback explicitly.
+- Use the closest supported read command for that provider.
+- State the fallback explicitly in the answer.

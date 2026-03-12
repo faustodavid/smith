@@ -1,13 +1,8 @@
 # Usage Recipes
 
-For non-trivial requests, follow this order first:
+Use these patterns after the trigger is confirmed. If a command fails, open `references/failure-playbook.md`.
 
-1. Read `references/trigger-cases.md`.
-2. Read `references/behavioral-quality-gates.md`.
-3. Read `references/failure-playbook.md`.
-4. Then execute commands from this recipe file.
-
-## Prerequisites
+## Preflight
 
 ```bash
 export AZURE_DEVOPS_ORG="<org>"
@@ -15,112 +10,75 @@ export GITHUB_ORG="<org>"
 az login
 ```
 
-## GitHub grep performance tuning
+## Default Loop
 
-For large repos, keep grep exact but reduce wall time with bounded parallel fetch:
-
+1. Discover candidates:
 ```bash
-export GITHUB_GREP_ENABLE_PARALLEL=true
-export GITHUB_GREP_MAX_WORKERS=8
+smith code search "<keywords>" --take 30
 ```
-
-Narrow first to reduce API volume:
-
+2. Map structure:
 ```bash
-smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --branch <branch>
+smith code grep azdo <project> <repo> ".*" --output-mode files_with_matches
+smith code grep github <repo> ".*" --output-mode files_with_matches
 ```
-
-If your network or org rate-limits aggressively, lower workers or force sequential:
-
-```bash
-export GITHUB_GREP_MAX_WORKERS=1
-# or
-export GITHUB_GREP_ENABLE_PARALLEL=false
-```
-
-## Investigation pattern (QueryAgent-inspired)
-
-1. Broad discovery:
-```bash
-smith code search "<topic keywords>" --take 30
-```
-
-2. Structure mapping:
-```bash
-smith code grep azdo <project> <repo> ".*" --path / --output-mode files_with_matches
-```
-
-3. Focused extraction:
+3. Extract proof:
 ```bash
 smith code grep azdo <project> <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
 smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
 ```
+4. Report exact `project/repository:path` or `org/repository:path` sources. If unresolved, say `not enough evidence` and give one next command.
 
-4. Report with evidence:
-- Include exact `project/repository:path` sources.
-- If unresolved, state "not enough evidence" and provide the next narrowing command.
-
-## List orgs and repos
+## Discovery Helpers
 
 ```bash
 smith orgs azdo
 smith orgs github
-smith repos azdo SRE
 smith repos azdo
+smith repos azdo <project>
 smith repos github
 ```
 
-## Broad search, then targeted grep
+## Pull Requests
 
 ```bash
-smith code search "grafana AND path:*alerts*"
-smith code search "grafana" --provider github
-smith code grep azdo SRE rtl-devops-gitops "severity" --path /alerts --glob "*.yaml" --context-lines 2
-smith code grep github rtl-devops-gitops "severity" --glob "*.yaml" --context-lines 2
+smith prs list azdo <project> <repo> --status active,completed --take 25
+smith prs get azdo <project> <repo> <id>
+smith prs threads azdo <project> <repo> <id>
+smith prs list github <repo> --status active,completed
+smith prs get github <repo> <id>
+smith prs threads github <repo> <id>
 ```
 
-## Pull request investigation
+## Pipeline Logs
 
 ```bash
-smith prs list azdo SRE rtl-devops-gitops --status active,completed --take 25
-smith prs get azdo SRE rtl-devops-gitops 12345
-smith prs threads azdo SRE rtl-devops-gitops 12345
-smith prs list github rtl-devops-gitops --status active,completed
-smith prs get github rtl-devops-gitops 12345
-smith prs threads github rtl-devops-gitops 12345
+smith pipelines logs list azdo <project> <build_id>
+smith pipelines logs grep azdo <project> <build_id> "ERROR|Exception" --output-mode logs_with_matches
+smith pipelines logs grep azdo <project> <build_id> ".*" --log-id <log_id> --from-line <n>
+smith pipelines logs list github <repo> <run_id>
+smith pipelines logs grep github <repo> <run_id> "ERROR|Exception"
 ```
 
-## Pipeline log investigation
+## Stories And Issues
 
 ```bash
-smith pipelines logs list azdo SRE 942510
-smith pipelines logs grep azdo SRE 942510 "ERROR|Exception" --output-mode logs_with_matches
-smith pipelines logs grep azdo SRE 942510 ".*" --log-id 18 --from-line 380
-smith pipelines logs list github rtl-devops-gitops <run_id>
-smith pipelines logs grep github rtl-devops-gitops <run_id> "ERROR|Exception"
+smith stories get azdo <project> <id>
+smith stories search azdo <project> --query "<text>" [--state <state>] [--type <type>]
+smith stories mine azdo <project>
+smith stories get github <repo> <id>
+smith stories search github <repo> --query "<text>"
+smith stories mine github <repo>
 ```
 
-## Work item and issue read workflows
+## Utilities
 
 ```bash
-smith stories get azdo SRE 123456
-smith stories search azdo SRE --query "login error" --state Active
-smith stories search azdo SRE --query "Bug login error" --type Bug
-smith stories mine azdo SRE
-smith stories get github rtl-devops-gitops 123
-smith stories search github rtl-devops-gitops --query "retention"
-smith stories mine github rtl-devops-gitops
+smith code search "<query>" --format json
+smith code grep github <repo> "<regex>" --format json
+export GITHUB_GREP_ENABLE_PARALLEL=true
+export GITHUB_GREP_MAX_WORKERS=8
+smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --branch <branch>
+bash scripts/install_claude_commands.sh . copy
 ```
 
-## JSON output for automation
-
-```bash
-smith code search "terraform" --format json
-smith code grep github rtl-devops-gitops "grafana.*" --format json
-```
-
-## Re-sync Claude commands after template updates
-
-```bash
-bash skills/smith/scripts/install_claude_commands.sh . copy
-```
+If rate-limited or slow, lower workers or disable parallel fetch.
