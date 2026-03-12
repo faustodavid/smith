@@ -1,56 +1,28 @@
 ---
 name: smith
-description: Read-only Azure DevOps and GitHub investigation skill for code search, grep, pull request review context, build-log analysis, and work-item discovery using local single-user credentials. Use when prompts ask to find where configuration lives, trace infrastructure keys, inspect PR or pipeline failures, or map unknown paths in Azure DevOps or GitHub repositories. Do not use for write actions (create, update, approve, post), generic internet research, or non-DevOps creative tasks.
+description: Read-only GitHub and Azure DevOps crossed provider and repo investigation skill for code search, grep, pull request review context, build-log analysis, and work-item discovery using local single-user credentials.
 ---
 
 # Smith
 
 Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow workflow and evidence-first outputs.
 
-## CLI Invocation
-
-- Use `smith` from `PATH` as the default command entrypoint.
-- Treat every command in this file as arguments to `smith`.
-  - Example: `smith code search "grafana"`
-- Only if `smith` is unavailable in the shell, fallback to:
-  - `python3 /Users/fsuarezrosario/.codex/skills/smith/scripts/smith_cli.py ...`
-- Do not use script-path invocation when `smith` is available.
-
 ## Trigger Decision
 
 ### Use smith when
 
-- The user asks where configuration is defined in Azure DevOps repositories.
-- The user asks to locate Terraform, Helm, YAML, or code keys in Azure DevOps repos.
-- The user asks to locate Terraform, Helm, YAML, or code keys in GitHub repos for a known org.
-- The user asks to inspect pull requests, pipeline logs, or work-item context.
-- The user asks to map an unknown path, module, or service ownership in Azure DevOps code.
-- The user asks to investigate incidents rooted in repository config or pipeline logs.
+- The user asks to search, locate, or grep code/config across Azure DevOps and/or GitHub repos.
+- The user asks to review pull requests, pipeline logs, or build failures.
+- The user asks to find, list, or inspect work items / stories.
 
 ### Do not use smith when
 
-- The task requires write operations (create or update work items, PR comments, approvals, Slack posting).
-- The task is generic internet research.
-- The task is non-DevOps creative writing or unrelated productivity work.
+- for write operations.
 
 ### Ambiguous request fallback
 
 - Start with `code search` to discover candidate repositories and paths.
 - If query intent is still unclear, return findings plus the best next narrowing command.
-
-## Investigation Algorithm
-
-1. Start broad:
-- Run `code search` with the user query to identify candidate repositories.
-
-2. Map repository structure before deep extraction:
-- Run `code grep --output-mode files_with_matches` in the best candidate repo to identify likely files and folders.
-
-3. Extract proof with focused matching:
-- Run `code grep --output-mode content` with narrowed `--path` or `--glob` to capture concrete evidence lines.
-
-4. Escalate only as needed:
-- If code evidence is insufficient, add targeted `prs`, `pipelines`, or `work` read commands and keep proof paths in output.
 
 ## Rules
 
@@ -80,141 +52,5 @@ Run Azure DevOps and GitHub investigations with a deterministic broad-to-narrow 
 - Corroborate with pull-request/pipeline/work data only when needed.
 
 5. Cite concrete source paths.
-- Always include `project/repository:path` (or equivalent) evidence as source at the end of the answer.
+- Always include `(org|project)/repository:path` evidence as source at the end of the answer.
 - For requested changes, identify exact files and keys.
-
-## Stop Conditions
-
-### Enough evidence
-
-Stop and answer when all are true:
-- At least one direct source path supports the conclusion.
-- The conclusion is specific enough to act on.
-- Any uncertainty is explicitly called out.
-
-### No evidence
-
-Stop and report unresolved when all are true:
-- Broad search returns no relevant candidates.
-- At least one narrowing attempt was executed.
-- The output includes a concrete next command the user can run.
-
-## Failure Handling Flow
-
-1. 401 or 403 authentication rejected.
-- Re-authenticate with `az login`.
-- For GitHub, set `GITHUB_TOKEN` or run `gh auth login`.
-- Retry the same command once.
-
-2. 429 rate limited.
-- Reduce breadth (`--take`, path scope, regex breadth).
-- Retry with narrower scope.
-
-3. Truncation.
-- Narrow with `--path` and `--glob`.
-- Page with `--from-line` and `--to-line`.
-
-4. Empty results.
-- Broaden search terms in `code search`.
-- Remove restrictive filters, then narrow again.
-
-5. Wrong repository scope.
-- Return to `code search` and remap candidate repositories before deeper grep.
-
-6. Provider incompatibility.
-- If a command is unsupported for a provider, return a concrete fallback command.
-- Prefer the closest supported read command and say exactly what to run next.
-
-## Commands (Read-Only)
-
-- `code search` is the only fanout command:
-  - `code search <text> [--project <azdo-project>] [--repo <name> ...] [--skip N] [--take N] [--provider azdo|github|all] [--format text|json]`
-- Discovery:
-  - `discover projects azdo [--format text|json]`
-  - `discover repos azdo [<project>] [--format text|json]`
-  - `discover repos github [--format text|json]`
-- Code:
-  - `code grep azdo <project> <repo> [<regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
-  - `code grep github <repo> [<regex>] [--path <path>] [--branch <branch>] [--glob <glob>] [--output-mode content|files_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
-- Pull requests:
-  - `prs list azdo <project> <repo> [--status active,completed,abandoned] [--creator user1,user2] [--date-from ISO] [--date-to ISO] [--skip N] [--take N] [--exclude-drafts] [--include-labels] [--format text|json]`
-  - `prs list github <repo> [--status active,completed,abandoned] [--creator user1,user2] [--date-from ISO] [--date-to ISO] [--skip N] [--take N] [--exclude-drafts] [--include-labels] [--format text|json]`
-  - `prs get azdo <project> <repo> <id> [--format text|json]`
-  - `prs get github <repo> <id> [--format text|json]`
-  - `prs threads azdo <project> <repo> <id> [--format text|json]`
-  - `prs threads github <repo> <id> [--format text|json]`
-- Pipeline logs:
-  - `pipelines logs list azdo <project> <id> [--format text|json]`
-  - `pipelines logs list github <repo> <id> [--format text|json]`
-  - `pipelines logs grep azdo <project> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
-  - `pipelines logs grep github <repo> <id> [--log-id N] [--pattern <regex>] [--output-mode content|logs_with_matches|count] [--context-lines N] [--from-line N] [--to-line N] [--case-sensitive] [--format text|json]`
-- Work read (`board` and `stories` are hidden legacy aliases):
-  - `work get azdo <project> <id> [--format text|json]`
-  - `work get github <repo> <id> [--format text|json]`
-  - `work search azdo <project> --query <text> [--area <path>] [--type <work_item_type>] [--state <state>] [--assigned-to <email>] [--skip N] [--take N] [--format text|json]`
-  - `work search github <repo> --query <text> [--type <work_item_type>] [--state <state>] [--assigned-to <email>] [--skip N] [--take N] [--format text|json]`
-  - `work mine azdo <project> [--include-closed] [--skip N] [--take N] [--format text|json]`
-  - `work mine github <repo> [--include-closed] [--skip N] [--take N] [--format text|json]`
-
-## Defaults and Tunables
-
-Command defaults:
-- `code search`: default `--provider all`, `--skip 0`, `--take 20`, `--format text`.
-- `code grep`: default pattern `.*`, default path `/`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
-- `prs list`: default statuses `active,completed,abandoned`, default `--skip 0`, default `--take 100`, drafts included unless `--exclude-drafts`.
-- `pipelines logs grep`: default pattern `.*`, default `--output-mode content`, default `--context-lines 3`, case-insensitive unless `--case-sensitive`.
-- `work search`: default `--skip 0`, default `--take 20`.
-- `work mine`: default `--skip 0`, default `--take 20`, closed items excluded unless `--include-closed`.
-- `discover projects`, `discover repos`, `prs get`, `prs threads`, `pipelines logs list`, `work get`: default `--format text`.
-
-Behavior defaults:
-- If `--branch` is omitted, provider default branch is used.
-- If `from_line` and `to_line` are omitted, full content range is used.
-- Single-provider commands are provider-positional; only `code search` supports fanout (`--provider all`).
-
-## Auth and Config
-
-- At least one provider must be configured:
-  - `AZURE_DEVOPS_ORG` — Azure DevOps org name (example `my-org`)
-  - `GITHUB_ORG` — GitHub org name (example `my-org`)
-- Per-provider org overrides for a single invocation:
-  - `--azdo-org <name>` overrides `AZURE_DEVOPS_ORG`
-  - `--github-org <name>` overrides `GITHUB_ORG`
-- Optional env vars:
-  - `AZURE_DEVOPS_API_VERSION` (default `7.1`)
-  - `AZURE_DEVOPS_TIMEOUT_SECONDS` (default `30`)
-  - `THANOS_LOCAL_MAX_OUTPUT_CHARS` (default `10240`)
-  - `GITHUB_TOKEN` (preferred GitHub auth token)
-  - `GITHUB_API_URL` (default `https://api.github.com`)
-  - `GITHUB_API_VERSION` (default `2022-11-28`)
-  - `GITHUB_TIMEOUT_SECONDS` (default follows runtime timeout)
-  - `SMITH_HTTP_POOL_MAXSIZE` (default `32`)
-  - `SMITH_HTTP_POOL_CONNECTIONS` (default `16`)
-  - `SMITH_HTTP_RETRY_MAX_ATTEMPTS` (default `2`; GET-only retry path)
-  - `SMITH_HTTP_RETRY_BACKOFF_SECONDS` (default `0.4`)
-  - `GITHUB_GREP_ENABLE_PARALLEL` (default `true`)
-  - `GITHUB_GREP_MAX_WORKERS` (default adaptive by candidate file count; clamped `1..32`)
-
-Auth model is single-user only:
-- Acquire token with `DefaultAzureCredential(exclude_interactive_browser_credential=True)`.
-- Scope `499b84ac-1321-427f-aa17-267ca6975798/.default`.
-- Retry once on 401/403 with a fresh token.
-- If auth still fails, run `az login` and retry.
-- For GitHub, use `GITHUB_TOKEN` first and fallback to `gh auth token`.
-
-## Integrations
-
-- Codex skill install or update:
-  - `bash scripts/install_codex_skill.sh`
-- Claude commands install or update:
-  - `bash scripts/install_claude_commands.sh`
-  - `bash scripts/install_claude_commands.sh /path/to/repo`
-- After template updates, re-sync Claude commands in target repos using the install script.
-
-## References
-
-- `references/usage-recipes.md`
-- `references/auth-troubleshooting.md`
-- `references/trigger-cases.md`
-- `references/behavioral-quality-gates.md`
-- `references/failure-playbook.md`
