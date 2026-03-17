@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -64,7 +66,7 @@ def build_smith_cli_subprocess(
     run_env = os.environ.copy()
     if env:
         run_env.update(env)
-    run_env["GITHUB_ORG"] = "grafana"
+    run_env["GITHUB_ORG"] = BENCHMARK_GITHUB_ORG
     run_env["PYTHONPATH"] = build_smith_pythonpath(
         repo_root=repo_root,
         existing_pythonpath=run_env.get("PYTHONPATH"),

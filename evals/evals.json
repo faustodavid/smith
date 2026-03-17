@@ -3,36 +3,38 @@
   "evals": [
     {
       "id": 0,
-      "name": "grafana-otelcol-exporter-loki-implementations",
-      "prompt": "In the Grafana GitHub organization, identify every repository that contains a real source-code implementation of the `otelcol.exporter.loki` component, ignoring repositories that only mention it in docs or examples. For each implementation repo, report the repository name, the exact source file path, and the exact struct tag used on `Arguments.ForwardTo`. End with a `Sources` section listing `repo:path` entries.",
-      "expected_output": "The answer should identify grafana/alloy and grafana/agent as the only implementation repositories, cite /internal/component/otelcol/exporter/loki/loki.go for both, map the exact ForwardTo struct tags, and end with a Sources section.",
+      "name": "openai-webhook-verification-implementations",
+      "prompt": "In the OpenAI GitHub organization, collect every official SDK repository whose source code both reads `OPENAI_WEBHOOK_SECRET` by default and exposes webhook signature verification helpers. For each qualifying repo, report the repo name, the exact source file path that loads the env var, the exact helper file path that performs the verification, the helper that both parses and verifies (`unwrap` style), and the helper that only verifies the signature. Ignore README/docs-only hits and do not include non-qualifying SDK repos such as `openai/openai-dotnet`. Answer clearly per repo and finish with a Sources section listing `repo:path` entries for the helper files.",
+      "expected_output": "The answer should mention each qualifying official OpenAI SDK repo (python, node, go, ruby, java), cite the env-reading file plus the helper file that runs webhook verification, name the parse-and-verify helper and the verify-only helper, avoid non-qualifying repos such as openai/openai-dotnet, and end with a Sources section that lists each helper file path under repo:path entries.",
       "files": [],
       "expectations": [
-        "includes grafana/alloy",
-        "includes grafana/agent",
-        "includes internal/component/otelcol/exporter/loki/loki.go",
-        "maps grafana/alloy to alloy:\"forward_to,attr\"",
-        "maps grafana/agent to river:\"forward_to,attr\"",
-        "does not present docs-only hits as implementation repos",
-        "includes a Sources section with repo:path"
-      ]
-    },
-    {
-      "id": 1,
-      "name": "grafana-loki-helm-retention-1y",
-      "prompt": "In the Grafana GitHub organization, how do you configure the official Loki Helm chart to retain logs for 1 year? Answer with the exact Helm values keys you would set, the exact 1-year retention value, and any compactor setting that the Loki docs say is required when retention is enabled. Do not recommend the deprecated table_manager path. End with a `Sources` section listing `repo:path` entries.",
-      "expected_output": "The answer should use grafana/loki, set loki.limits_config.retention_period to a one-year duration, enable loki.compactor.retention_enabled, include loki.compactor.delete_request_store as a required setting for retention, avoid recommending table_manager retention, and cite the chart values file plus the retention docs in a Sources section.",
-      "files": [],
-      "expectations": [
-        "includes grafana/loki",
-        "includes loki.limits_config.retention_period",
-        "maps retention_period to 1 year",
-        "includes loki.compactor.retention_enabled",
-        "includes loki.compactor.delete_request_store",
-        "states delete_request_store is required when retention is enabled",
-        "does not recommend deprecated table_manager retention",
-        "includes sources for values.yaml and retention.md",
-        "includes a Sources section with repo:path"
+        "includes openai/openai-python",
+        "includes openai/openai-python env path /src/openai/_client.py",
+        "includes openai/openai-python helper path /src/openai/resources/webhooks/webhooks.py",
+        "openai/openai-python helper names unwrap + verify_signature",
+        "Sources list openai/openai-python",
+        "includes openai/openai-node",
+        "includes openai/openai-node env path /src/client.ts",
+        "includes openai/openai-node helper path /src/resources/webhooks/webhooks.ts",
+        "openai/openai-node helper names unwrap + verifySignature",
+        "Sources list openai/openai-node",
+        "includes openai/openai-go",
+        "includes openai/openai-go env path /client.go",
+        "includes openai/openai-go helper path /webhooks/webhook.go",
+        "openai/openai-go helper names Unwrap + VerifySignature",
+        "Sources list openai/openai-go",
+        "includes openai/openai-ruby",
+        "includes openai/openai-ruby env path /lib/openai/client.rb",
+        "includes openai/openai-ruby helper path /lib/openai/resources/webhooks.rb",
+        "openai/openai-ruby helper names unwrap + verify_signature",
+        "Sources list openai/openai-ruby",
+        "includes openai/openai-java",
+        "includes openai/openai-java env path /openai-java-core/src/main/kotlin/com/openai/core/ClientOptions.kt",
+        "includes openai/openai-java helper path /openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt",
+        "openai/openai-java helper names unwrap + verifySignature",
+        "Sources list openai/openai-java",
+        "includes a Sources section with repo:path entries",
+        "Sources include only qualifying repos"
       ]
     }
   ]

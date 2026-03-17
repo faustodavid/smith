@@ -21,12 +21,12 @@ def test_build_codex_tool_trace_captures_arguments_and_result_preview():
                 "server": "github-benchmark",
                 "tool": "search_code",
                 "status": "completed",
-                "arguments": {"query": 'org:grafana "retention_enabled"'},
+                "arguments": {"query": 'org:openai "OPENAI_WEBHOOK_SECRET"'},
                 "result": {
                     "content": [
                         {
                             "type": "text",
-                            "text": '{"total_count":1,"items":[{"path":"production/helm/loki/values.yaml"}]}',
+                            "text": '{"total_count":5,"items":[{"path":"src/client.ts"}]}',
                         }
                     ]
                 },
@@ -38,9 +38,9 @@ def test_build_codex_tool_trace_captures_arguments_and_result_preview():
 
     assert trace == [
         {
-            "arguments": {"query": 'org:grafana "retention_enabled"'},
+            "arguments": {"query": 'org:openai "OPENAI_WEBHOOK_SECRET"'},
             "kind": "mcp_tool_call",
-            "result_preview": '{"total_count":1,"items":[{"path":"production/helm/loki/values.yaml"}]}',
+            "result_preview": '{"total_count":5,"items":[{"path":"src/client.ts"}]}',
             "server": "github-benchmark",
             "status": "completed",
             "step": 1,

@@ -11,6 +11,7 @@ from mcp.client.streamable_http import StreamableHTTPTransport
 
 DEFAULT_GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
 ALLOWED_GITHUB_MCP_TOOLS = frozenset({"search_code", "get_file_contents"})
+GITHUB_TOKEN_ENV_VARS = ("GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN")
 POST_ONLY_GITHUB_MCP_URLS: set[str] = set()
 
 
@@ -54,13 +55,18 @@ def github_mcp_tool_filter(_context_wrapper: Any, tool: Any) -> bool:
 
 def resolve_github_mcp_token(env: Mapping[str, str] | None = None) -> str:
     source_env = env or os.environ
-    explicit = str(source_env.get("GITHUB_TOKEN", "")).strip()
-    if explicit:
-        return explicit
+    for env_var in GITHUB_TOKEN_ENV_VARS:
+        explicit = str(source_env.get(env_var, "")).strip()
+        if explicit:
+            return explicit
+
+    gh_env = os.environ.copy()
+    gh_env.update(dict(source_env))
 
     result = subprocess.run(
         ["gh", "auth", "token"],
         capture_output=True,
+        env=gh_env,
         text=True,
         check=False,
     )
@@ -69,7 +75,8 @@ def resolve_github_mcp_token(env: Mapping[str, str] | None = None) -> str:
         return fallback
 
     raise RuntimeError(
-        "GitHub MCP authentication is unavailable. Set GITHUB_TOKEN or run `gh auth login`."
+        "GitHub MCP authentication is unavailable. Set GITHUB_TOKEN, GH_TOKEN, or "
+        "COPILOT_GITHUB_TOKEN, or run `gh auth login`."
     )
 
 

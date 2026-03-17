@@ -13,6 +13,7 @@ from smith.benchmark.copilot_sdk import (
     copilot_tool_name,
     summarize_copilot_events,
 )
+from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 
 
 def test_build_smith_copilot_payload_uses_local_mcp_and_single_tool():
@@ -28,7 +29,9 @@ def test_build_smith_copilot_payload_uses_local_mcp_and_single_tool():
 
     assert payload["availableTools"] == [expected_tool]
     assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["tools"] == ["smith_cli"]
-    assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["GITHUB_ORG"] == "grafana"
+    assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["GITHUB_ORG"] == BENCHMARK_GITHUB_ORG
+    assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["GH_TOKEN"] == "__ENV__:GH_TOKEN"
+    assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["GITHUB_TOKEN"] == "__ENV__:GITHUB_TOKEN"
     assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["PYTHONPATH"] == "/tmp/smith/src:/existing/path"
 
 
@@ -50,12 +53,19 @@ def test_build_github_copilot_payload_uses_remote_mcp_and_expected_tools():
     )
 
 
-def test_build_github_copilot_env_adds_bearer_header(monkeypatch):
-    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
-
-    env = build_github_copilot_env()
+def test_build_github_copilot_env_adds_bearer_header_from_gh_token():
+    env = build_github_copilot_env(env={"GH_TOKEN": "secret-token"})
 
     assert env[GITHUB_AUTH_HEADER_ENV] == "Bearer secret-token"
+    assert env["GH_TOKEN"] == "secret-token"
+    assert env["GITHUB_TOKEN"] == "secret-token"
+
+
+def test_build_copilot_auth_env_promotes_copilot_github_token():
+    env = build_copilot_auth_env(env={"COPILOT_GITHUB_TOKEN": "secret-token"})
+
+    assert env["GH_TOKEN"] == "secret-token"
+    assert env["GITHUB_TOKEN"] == "secret-token"
 
 
 def test_build_copilot_auth_env_populates_gh_token_from_gh_auth_fallback(monkeypatch):

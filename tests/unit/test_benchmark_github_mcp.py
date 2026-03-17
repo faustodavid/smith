@@ -7,6 +7,7 @@ from smith.benchmark.github_mcp import (
     build_github_mcp_server,
     github_mcp_tool_filter,
     normalize_github_mcp_url,
+    resolve_github_mcp_token,
 )
 
 
@@ -28,3 +29,11 @@ def test_github_mcp_tool_filter_only_allows_search_and_get_file_contents():
     assert github_mcp_tool_filter(None, allowed_tool) is True
     assert github_mcp_tool_filter(None, file_tool) is True
     assert github_mcp_tool_filter(None, blocked_tool) is False
+
+
+def test_resolve_github_mcp_token_accepts_gh_token():
+    assert resolve_github_mcp_token({"GH_TOKEN": "ghs_test_token"}) == "ghs_test_token"
+
+
+def test_resolve_github_mcp_token_accepts_copilot_github_token():
+    assert resolve_github_mcp_token({"COPILOT_GITHUB_TOKEN": "ghs_test_token"}) == "ghs_test_token"

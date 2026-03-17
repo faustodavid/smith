@@ -494,7 +494,7 @@ def default_model_settings() -> ModelSettings:
 def build_smith_agent(model: str) -> Agent[Any]:
     @function_tool
     def smith_cli(command: str) -> str:
-        """Run a read-only Smith command against GitHub repositories in the Grafana org."""
+        """Run a read-only Smith command against GitHub repositories in the OpenAI org."""
 
         return execute_smith_cli_command(command)
 
@@ -599,21 +599,22 @@ async def run_copilot_agent_once(
 
     try:
         if config_name == "smith_skill":
+            run_env = build_copilot_auth_env()
             payload = build_smith_copilot_payload(
                 model=model,
                 prompt=prompt,
                 system_message=load_skill_body(),
                 repo_root=REPO_ROOT,
+                env=run_env,
             )
-            run_env = build_copilot_auth_env()
         elif config_name == "github_mcp":
+            run_env = build_github_copilot_env()
             payload = build_github_copilot_payload(
                 model=model,
                 prompt=prompt,
                 system_message=github_mcp_instructions(),
                 github_mcp_url=os.getenv("GITHUB_MCP_SERVER_URL", DEFAULT_GITHUB_MCP_URL),
             )
-            run_env = build_github_copilot_env()
         else:
             raise ValueError(f"Unsupported benchmark configuration: {config_name}")
 
@@ -865,13 +866,15 @@ def aggregate_workspace(
     evals_run: list[BenchmarkEval],
     model: str,
     executor: str,
+    selected_configs: list[str] | None = None,
 ) -> tuple[dict[str, Any], str]:
     runs: list[dict[str, Any]] = []
     by_config: dict[str, list[dict[str, Any]]] = {}
+    requested_configs = list(selected_configs or CONFIG_ORDER)
 
     for eval_case in evals_run:
         eval_dir = workspace / f"eval-{eval_case.id}"
-        for config_name in CONFIG_ORDER:
+        for config_name in requested_configs:
             config_dir = eval_dir / config_name
             if not config_dir.exists():
                 continue
@@ -902,8 +905,12 @@ def aggregate_workspace(
                 runs.append(entry)
                 by_config[config_name].append(entry)
 
+    configs_to_summarize = [config_name for config_name in requested_configs if by_config.get(config_name)]
+    if not configs_to_summarize:
+        raise ValueError(f"No benchmark runs found in {workspace}.")
+
     run_summary: dict[str, Any] = {}
-    for config_name in CONFIG_ORDER:
+    for config_name in configs_to_summarize:
         entries = by_config.get(config_name, [])
         run_summary[config_name] = {
             "pass_rate": _calculate_stats([entry["result"]["pass_rate"] for entry in entries]),
@@ -911,29 +918,34 @@ def aggregate_workspace(
             "tokens": _calculate_stats([float(entry["result"]["tokens"]) for entry in entries]),
         }
 
-    primary = run_summary.get(CONFIG_ORDER[0], {})
-    baseline = run_summary.get(CONFIG_ORDER[1], {})
-    run_summary["delta"] = {
-        "pass_rate": f"{primary.get('pass_rate', {}).get('mean', 0.0) - baseline.get('pass_rate', {}).get('mean', 0.0):+.2f}",
-        "time_seconds": f"{primary.get('time_seconds', {}).get('mean', 0.0) - baseline.get('time_seconds', {}).get('mean', 0.0):+.1f}",
-        "tokens": f"{primary.get('tokens', {}).get('mean', 0.0) - baseline.get('tokens', {}).get('mean', 0.0):+.0f}",
-    }
-
     notes = [
         "Single-eval baseline benchmark; treat variance and generalization cautiously.",
     ]
-    smith_tokens = run_summary["smith_skill"]["tokens"]["mean"]
-    mcp_tokens = run_summary["github_mcp"]["tokens"]["mean"]
-    if smith_tokens or mcp_tokens:
-        direction = "lower" if smith_tokens < mcp_tokens else "higher"
-        notes.append(
-            f"Smith token usage is {direction} than GitHub MCP on average ({smith_tokens:.0f} vs {mcp_tokens:.0f})."
-        )
+    comparison_available = all(config_name in configs_to_summarize for config_name in CONFIG_ORDER)
+    if comparison_available:
+        primary = run_summary[CONFIG_ORDER[0]]
+        baseline = run_summary[CONFIG_ORDER[1]]
+        run_summary["delta"] = {
+            "pass_rate": f"{primary['pass_rate']['mean'] - baseline['pass_rate']['mean']:+.2f}",
+            "time_seconds": f"{primary['time_seconds']['mean'] - baseline['time_seconds']['mean']:+.1f}",
+            "tokens": f"{primary['tokens']['mean'] - baseline['tokens']['mean']:+.0f}",
+        }
+
+        smith_tokens = run_summary["smith_skill"]["tokens"]["mean"]
+        mcp_tokens = run_summary["github_mcp"]["tokens"]["mean"]
+        if smith_tokens or mcp_tokens:
+            direction = "lower" if smith_tokens < mcp_tokens else "higher"
+            notes.append(
+                f"Smith token usage is {direction} than GitHub MCP on average ({smith_tokens:.0f} vs {mcp_tokens:.0f})."
+            )
+    elif len(configs_to_summarize) == 1:
+        notes.append(f"Only `{configs_to_summarize[0]}` runs are included in this workspace.")
 
     benchmark = {
         "metadata": {
             "skill_name": "smith",
             "skill_path": str(SKILL_PATH),
+            "configurations_run": configs_to_summarize,
             "executor_backend": executor,
             "executor_model": model,
             "analyzer_model": "deterministic",
@@ -962,7 +974,7 @@ def aggregate_workspace(
         "| Configuration | Mean Pass Rate | Mean Time (s) | Mean Tokens |",
         "| --- | ---: | ---: | ---: |",
     ]
-    for config_name in CONFIG_ORDER:
+    for config_name in configs_to_summarize:
         summary = run_summary[config_name]
         lines.append(
             "| "
@@ -1022,6 +1034,7 @@ async def run_benchmark(
         evals_run=evals_run,
         model=model,
         executor=executor,
+        selected_configs=selected_configs,
     )
     (workspace_path / "benchmark.json").write_text(json.dumps(benchmark, indent=2, sort_keys=True) + "\n")
     (workspace_path / "benchmark.md").write_text(benchmark_markdown.rstrip() + "\n")

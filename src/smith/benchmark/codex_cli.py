@@ -12,12 +12,17 @@ from typing import Any
 
 from smith.benchmark.github_mcp import DEFAULT_GITHUB_MCP_URL, resolve_github_mcp_token
 from smith.benchmark.smith_cli import REPO_ROOT, build_smith_pythonpath
+from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 
 CODEX_INTERNAL_SERVER = "codex"
 CODEX_ALLOWED_DISCOVERY_TOOLS = frozenset({"list_mcp_resources", "list_mcp_resource_templates"})
 CODEX_AUTH_FILENAME = "auth.json"
 CODEX_CONFIG_FILENAME = "config.toml"
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
+MACOS_CODEX_CLI_CANDIDATES = (
+    Path("/Applications/Codex.app/Contents/Resources/codex"),
+    Path.home() / "Applications" / "Codex.app" / "Contents" / "Resources" / "codex",
+)
 SMITH_CODEX_SERVER_NAME = "smith-benchmark"
 SMITH_CODEX_TOOL_NAME = "smith_cli"
 GITHUB_CODEX_SERVER_NAME = "github-benchmark"
@@ -29,9 +34,12 @@ def resolve_codex_cli_path(env: dict[str, str] | None = None) -> str:
     configured = run_env.get("CODEX_CLI_PATH")
     if configured:
         return configured
-    resolved = shutil.which("codex")
+    resolved = shutil.which("codex", path=run_env.get("PATH"))
     if resolved:
         return resolved
+    for candidate in MACOS_CODEX_CLI_CANDIDATES:
+        if candidate.is_file():
+            return str(candidate)
     raise FileNotFoundError("Could not find the `codex` CLI. Set CODEX_CLI_PATH or add `codex` to PATH.")
 
 
@@ -84,7 +92,7 @@ def add_smith_codex_mcp_server(
             "add",
             SMITH_CODEX_SERVER_NAME,
             "--env",
-            "GITHUB_ORG=grafana",
+            f"GITHUB_ORG={BENCHMARK_GITHUB_ORG}",
             "--env",
             f"GITHUB_TOKEN={github_token}",
             "--env",

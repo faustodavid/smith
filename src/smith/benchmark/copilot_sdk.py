@@ -11,6 +11,7 @@ from typing import Any
 
 from smith.benchmark.github_mcp import DEFAULT_GITHUB_MCP_URL, resolve_github_mcp_token
 from smith.benchmark.smith_cli import REPO_ROOT, build_smith_pythonpath
+from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 
 COPILOT_SESSION_SCRIPT = REPO_ROOT / "scripts" / "copilot_benchmark_session.mjs"
 COPILOT_DEFAULT_TIMEOUT_MS = 600_000
@@ -78,20 +79,18 @@ def build_smith_copilot_payload(
 ) -> dict[str, Any]:
     run_env = env or os.environ
     mcp_env: dict[str, str] = {
-        "GITHUB_ORG": "grafana",
+        "GITHUB_ORG": BENCHMARK_GITHUB_ORG,
         "HOME": _env_placeholder("HOME"),
         "PATH": _env_placeholder("PATH"),
         "PYTHONPATH": build_smith_pythonpath(
             repo_root=repo_root,
             existing_pythonpath=run_env.get("PYTHONPATH"),
         ),
+        "GH_TOKEN": _env_placeholder("GH_TOKEN"),
+        "GITHUB_TOKEN": _env_placeholder("GITHUB_TOKEN"),
     }
     if run_env.get("GH_CONFIG_DIR"):
         mcp_env["GH_CONFIG_DIR"] = _env_placeholder("GH_CONFIG_DIR")
-    if run_env.get("GH_TOKEN"):
-        mcp_env["GH_TOKEN"] = _env_placeholder("GH_TOKEN")
-    if run_env.get("GITHUB_TOKEN"):
-        mcp_env["GITHUB_TOKEN"] = _env_placeholder("GITHUB_TOKEN")
 
     return {
         "cliArgs": list(COPILOT_DEFAULT_CLI_ARGS),
@@ -177,8 +176,7 @@ def build_github_copilot_env(
     env: dict[str, str] | None = None,
 ) -> dict[str, str]:
     run_env = build_copilot_auth_env(env)
-    token = resolve_github_mcp_token(run_env)
-    run_env[GITHUB_AUTH_HEADER_ENV] = f"Bearer {token}"
+    run_env[GITHUB_AUTH_HEADER_ENV] = f"Bearer {run_env['GITHUB_TOKEN']}"
     return run_env
 
 
@@ -186,9 +184,10 @@ def build_copilot_auth_env(
     env: dict[str, str] | None = None,
 ) -> dict[str, str]:
     run_env = dict(env or os.environ)
-    if any(str(run_env.get(name, "")).strip() for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")):
-        return run_env
-    run_env["GH_TOKEN"] = resolve_github_mcp_token(run_env)
+    token = resolve_github_mcp_token(run_env)
+    # Normalize the benchmark env so Copilot, Smith, and GitHub MCP all use the same token source.
+    run_env["GH_TOKEN"] = token
+    run_env["GITHUB_TOKEN"] = token
     return run_env
 
 

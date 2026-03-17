@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from smith.benchmark.codex_cli import (
     build_github_codex_prompt,
     build_smith_codex_prompt,
     extract_codex_last_agent_message,
     find_unexpected_codex_tool_usage,
     parse_codex_jsonl,
+    resolve_codex_cli_path,
     summarize_codex_events,
 )
 
@@ -27,6 +30,35 @@ def test_build_github_codex_prompt_mentions_server_and_allowed_tools():
     assert "get_file_contents" in prompt
     assert "Do not use local shell commands" in prompt
     assert "Find the config." in prompt
+
+
+def test_resolve_codex_cli_path_honors_provided_path_env(monkeypatch):
+    monkeypatch.setattr("smith.benchmark.codex_cli.MACOS_CODEX_CLI_CANDIDATES", ())
+
+    resolved = resolve_codex_cli_path(
+        env={"PATH": "/Applications/Codex.app/Contents/Resources:/usr/bin:/bin"}
+    )
+
+    assert resolved == "/Applications/Codex.app/Contents/Resources/codex"
+
+
+def test_resolve_codex_cli_path_falls_back_to_known_app_bundle(tmp_path, monkeypatch):
+    codex_path = tmp_path / "Codex.app" / "Contents" / "Resources" / "codex"
+    codex_path.parent.mkdir(parents=True)
+    codex_path.write_text("#!/bin/sh\n")
+    codex_path.chmod(0o755)
+    monkeypatch.setattr("smith.benchmark.codex_cli.MACOS_CODEX_CLI_CANDIDATES", (codex_path,))
+
+    resolved = resolve_codex_cli_path(env={"PATH": "/usr/bin:/bin"})
+
+    assert resolved == str(codex_path)
+
+
+def test_resolve_codex_cli_path_raises_when_missing(monkeypatch):
+    monkeypatch.setattr("smith.benchmark.codex_cli.MACOS_CODEX_CLI_CANDIDATES", ())
+
+    with pytest.raises(FileNotFoundError):
+        resolve_codex_cli_path(env={"PATH": "/usr/bin:/bin"})
 
 
 def test_parse_codex_jsonl_skips_non_json_lines():
