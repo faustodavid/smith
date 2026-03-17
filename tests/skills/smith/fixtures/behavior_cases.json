@@ -1,0 +1,40 @@
+[
+  {
+    "name": "default_loop",
+    "expected_sequence": [
+      "smith code search",
+      "smith code grep github <repo> \".*\" --output-mode files_with_matches",
+      "smith code grep github <repo> \"<regex>\""
+    ],
+    "required_phrase": "not enough evidence",
+    "requires_evidence_paths": true
+  },
+  {
+    "name": "discovery_helpers",
+    "expected_sequence": [
+      "smith orgs github",
+      "smith repos github",
+      "smith repos azdo <project>"
+    ],
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "github_repo_shape_rule",
+    "required_phrase": "bare `<repo>`",
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "github_repo_shape_negative_example",
+    "required_phrase": "not `org/repo`",
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "read_only_followups",
+    "expected_sequence": [
+      "smith prs list github <repo>",
+      "smith pipelines logs list github <repo> <id>",
+      "smith stories search azdo <project> --query"
+    ],
+    "requires_evidence_paths": true
+  }
+]

@@ -93,11 +93,24 @@ def classify_trigger(prompt: str) -> str:
 
     negative_terms = [
         "create work item",
+        "create a work item",
+        "create issue",
+        "create a github issue",
+        "create github issue",
         "update work item",
+        "update a work item",
+        "update issue",
+        "comment on",
         "approve",
+        "approve pr",
+        "approve pull request",
         "post slack",
+        "slack",
         "public internet",
+        "public web",
+        "search the web",
         "internet docs",
+        "web docs",
         "creative",
     ]
     if any(term in text for term in negative_terms):
@@ -108,19 +121,31 @@ def classify_trigger(prompt: str) -> str:
         "where is",
         "find the ttl setting",
         "investigate this failure",
+        "investigate why",
     ]
     if any(term in text for term in ambiguous_terms):
         return "ambiguous"
 
     positive_terms = [
+        "repo",
+        "repository",
+        "search code",
+        "grep",
         "loki",
         "github",
+        "build failure",
+        "build log",
         "build logs",
+        "pipeline log",
+        "pipeline failure",
+        "pipeline",
         "pipeline logs",
         "pipelines logs",
         "pr ",
         "prs ",
         "pull request",
+        "issue",
+        "stories",
         "work items",
         "azure devops",
         "configured",
@@ -161,12 +186,14 @@ def run_trigger_checks() -> list[str]:
             errors.append(f"SKILL.md missing section: {section}")
 
     explicit_invocation_markers = [
-        "code search <text>",
+        "smith code search",
+        "smith orgs github",
+        "smith repos github",
         "code grep github <repo>",
         "code grep azdo <project> <repo>",
         "prs list github <repo>",
         "pipelines logs list github <repo> <id>",
-        "board search azdo <project> --query",
+        "stories search azdo <project> --query",
     ]
     for marker in explicit_invocation_markers:
         if marker not in skill_text:
@@ -227,23 +254,21 @@ def run_behavior_checks() -> list[str]:
             errors.append(f"Recovery flow missing term: {term}")
 
     command_markers = [
-        "projects list azdo",
-        "projects list github",
-        "repos list azdo <project>",
-        "repos list github",
-        "code search",
-        "code grep azdo <project> <repo>",
-        "code grep github <repo>",
-        "prs list azdo <project> <repo>",
-        "prs get github <repo> <id>",
-        "prs threads azdo <project> <repo> <id>",
-        "pipelines logs list azdo <project> <id>",
-        "pipelines logs grep github <repo> <id>",
-        "board ticket azdo <project> <id>",
-        "board list azdo <project>",
-        "board search github <repo> --query",
-        "board mine azdo <project>",
-        "stories ticket azdo <project> <id>",
+        "smith orgs azdo",
+        "smith orgs github",
+        "smith repos azdo <project>",
+        "smith repos github",
+        "smith code search",
+        "smith code grep azdo <project> <repo>",
+        "smith code grep github <repo>",
+        "smith prs list azdo <project> <repo>",
+        "smith prs get github <repo> <id>",
+        "smith prs threads azdo <project> <repo> <id>",
+        "smith pipelines logs list azdo <project> <id>",
+        "smith pipelines logs grep github <repo> <id>",
+        "smith stories get azdo <project> <id>",
+        "smith stories search github <repo> --query",
+        "smith stories mine azdo <project>",
     ]
     for marker in command_markers:
         if marker not in recipes_text and marker not in skill_text:
@@ -266,7 +291,7 @@ def run_behavior_checks() -> list[str]:
         for term in required_template_terms:
             if term not in content:
                 errors.append(f"Template {template.name} missing '{term}'")
-        if "project/repository:path" not in content:
+        if not _has_evidence_path_contract(content):
             errors.append(f"Template {template.name} missing evidence-path requirement")
 
     behavior_cases = _load_json(BEHAVIOR_FIXTURE)
@@ -299,12 +324,23 @@ def run_behavior_checks() -> list[str]:
                 )
 
         requires_evidence_paths = case.get("requires_evidence_paths")
-        if requires_evidence_paths is True and "project/repository:path" not in combined_text:
+        if requires_evidence_paths is True and not _has_evidence_path_contract(combined_text):
             errors.append(
                 f"Behavior case '{case_name}' requires evidence path contract, but contract not found"
             )
 
     return errors
+
+
+def _has_evidence_path_contract(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "project/repository:path",
+            "org/repository:path",
+            "repo:path",
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

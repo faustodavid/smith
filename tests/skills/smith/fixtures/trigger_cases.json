@@ -1,0 +1,30 @@
+[
+  {
+    "prompt": "Find where Grafana Loki retention is configured in GitHub repositories.",
+    "expected": "positive"
+  },
+  {
+    "prompt": "Review Azure DevOps pipeline logs for build 42.",
+    "expected": "positive"
+  },
+  {
+    "prompt": "Inspect pull request 123 in repo-a.",
+    "expected": "positive"
+  },
+  {
+    "prompt": "Where is the webhook secret configured?",
+    "expected": "ambiguous"
+  },
+  {
+    "prompt": "Investigate this failure in production.",
+    "expected": "ambiguous"
+  },
+  {
+    "prompt": "Create a work item for this regression.",
+    "expected": "negative"
+  },
+  {
+    "prompt": "Search public web docs for the Azure login flow.",
+    "expected": "negative"
+  }
+]

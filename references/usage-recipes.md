@@ -8,7 +8,14 @@ Use these patterns after the trigger is confirmed. If a command fails, open `ref
 export AZURE_DEVOPS_ORG="<org>"
 export GITHUB_ORG="<org>"
 az login
+gh auth status
 ```
+
+GitHub repo-shape rule:
+
+- Search results look like `org/repo:path`.
+- GitHub command arguments use bare `<repo>`, not `org/repo`.
+- Example: `smith code grep github openai-python "OPENAI_WEBHOOK_SECRET"`
 
 ## Default Loop
 
@@ -16,17 +23,25 @@ az login
 ```bash
 smith code search "<keywords>" --take 30
 ```
-2. Map structure:
+2. Map structure only when repo is known but file scope is not:
 ```bash
 smith code grep azdo <project> <repo> ".*" --output-mode files_with_matches
 smith code grep github <repo> ".*" --output-mode files_with_matches
 ```
-3. Extract proof:
+3. Extract proof from the smallest useful scope:
 ```bash
 smith code grep azdo <project> <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
 smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
 ```
-4. Report exact `project/repository:path` or `org/repository:path` sources. If unresolved, say `not enough evidence` and give one next command.
+4. Corroborate with `prs`, `pipelines logs`, or `stories` only when code evidence is not enough on its own.
+5. Report exact `project/repository:path` or `org/repository:path` evidence. If unresolved, say `not enough evidence` and give one next command.
+
+## Query Discipline
+
+- Start with plain, high-signal search terms.
+- Prefer another simple search over one overloaded query string.
+- Do not assume wildcard repo qualifiers such as `org:openai/openai-*`.
+- If search already returned the target file, skip repo-wide `".*"` dumps and go straight to focused grep.
 
 ## Discovery Helpers
 
@@ -52,11 +67,11 @@ smith prs threads github <repo> <id>
 ## Pipeline Logs
 
 ```bash
-smith pipelines logs list azdo <project> <build_id>
-smith pipelines logs grep azdo <project> <build_id> "ERROR|Exception" --output-mode logs_with_matches
-smith pipelines logs grep azdo <project> <build_id> ".*" --log-id <log_id> --from-line <n>
-smith pipelines logs list github <repo> <run_id>
-smith pipelines logs grep github <repo> <run_id> "ERROR|Exception"
+smith pipelines logs list azdo <project> <id>
+smith pipelines logs grep azdo <project> <id> "ERROR|Exception" --output-mode logs_with_matches
+smith pipelines logs grep azdo <project> <id> ".*" --log-id <log_id> --from-line <n>
+smith pipelines logs list github <repo> <id>
+smith pipelines logs grep github <repo> <id> "ERROR|Exception"
 ```
 
 ## Stories And Issues
