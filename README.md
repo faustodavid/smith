@@ -39,6 +39,24 @@ Run the live provider smoke lane explicitly when credentials and fixture IDs are
 pytest tests/integration -q --run-integration
 ```
 
+## Benchmark
+
+Install the benchmark extras and provide GitHub auth. Use `--executor openai` with an OpenAI API key, `--executor copilot` with a logged-in `copilot` CLI, or `--executor codex` with a logged-in `codex` CLI backed by ChatGPT:
+
+```bash
+python -m pip install -e .[bench]
+export GITHUB_TOKEN="<token>"  # optional if `gh auth login` is already configured
+export OPENAI_API_KEY="<token>"  # only for --executor openai
+codex login  # only for --executor codex
+python3 scripts/run_skill_benchmark.py --executor openai --model gpt-5 --runs 1
+python3 scripts/run_skill_benchmark.py --executor copilot --model gpt-5.4 --runs 1
+python3 scripts/run_skill_benchmark.py --executor codex --model gpt-5.4 --runs 1
+```
+
+The benchmark writes tracked inputs to `evals/evals.json` and generated outputs to `benchmarks/workspaces/<timestamp>/`, including `benchmark.json`, `benchmark.md`, per-run transcripts, timing, grading artifacts, and auditable tool traces in `outputs/tool_trace.json` and `outputs/tool_trace.md`.
+
+The Codex executor creates a scratch `CODEX_HOME`, copies your existing `auth.json` from `~/.codex` (or `CODEX_AUTH_HOME`), and registers the benchmark MCP servers there so it does not modify your real Codex desktop configuration.
+
 Integration smoke tests read these environment variables when present:
 
 - GitHub: `GITHUB_ORG`, `GITHUB_TOKEN`, `SMITH_TEST_GITHUB_REPO`, `SMITH_TEST_GITHUB_PR_ID`, `SMITH_TEST_GITHUB_RUN_ID`, `SMITH_TEST_GITHUB_ISSUE_ID`
