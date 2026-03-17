@@ -228,9 +228,9 @@ def build_openai_tool_trace(new_items: list[Any]) -> list[dict[str, Any]]:
             payload = {"raw_item": payload}
         output = _jsonable(item.output)
         call_id = _extract_openai_call_id(payload)
-        entry = call_index.get(call_id) if call_id else None
-        if entry is None:
-            entry = {
+        output_entry: dict[str, Any] | None = call_index.get(call_id) if call_id else None
+        if output_entry is None:
+            output_entry = {
                 "step": len(trace) + 1,
                 "kind": "function_tool_output",
                 "server": None,
@@ -238,12 +238,12 @@ def build_openai_tool_trace(new_items: list[Any]) -> list[dict[str, Any]]:
                 "status": "completed",
                 "arguments": None,
             }
-            trace.append(entry)
+            trace.append(output_entry)
         preview = _build_result_preview(output)
         if preview:
-            entry["result_preview"] = preview
+            output_entry["result_preview"] = preview
         if payload.get("error") is not None:
-            entry["error"] = _jsonable(payload["error"])
+            output_entry["error"] = _jsonable(payload["error"])
 
     return trace
 
@@ -284,9 +284,9 @@ def build_copilot_tool_trace(events: list[dict[str, Any]]) -> list[dict[str, Any
             pending[key] = entry
             continue
 
-        entry = pending.get(key)
-        if entry is None:
-            entry = {
+        execution_entry: dict[str, Any] | None = pending.get(key)
+        if execution_entry is None:
+            execution_entry = {
                 "step": len(trace) + 1,
                 "kind": "tool_execution",
                 "server": server,
@@ -296,19 +296,19 @@ def build_copilot_tool_trace(events: list[dict[str, Any]]) -> list[dict[str, Any
                     data.get("arguments", data.get("input", data.get("params")))
                 ),
             }
-            trace.append(entry)
+            trace.append(execution_entry)
         else:
-            entry["status"] = event_type.removeprefix("tool.execution_")
-            if entry.get("arguments") is None:
-                entry["arguments"] = _normalize_tool_arguments(
+            execution_entry["status"] = event_type.removeprefix("tool.execution_")
+            if execution_entry.get("arguments") is None:
+                execution_entry["arguments"] = _normalize_tool_arguments(
                     data.get("arguments", data.get("input", data.get("params")))
                 )
 
         if data.get("error") is not None:
-            entry["error"] = _jsonable(data["error"])
+            execution_entry["error"] = _jsonable(data["error"])
         preview = _build_result_preview(data.get("output", data.get("result")))
         if preview:
-            entry["result_preview"] = preview
+            execution_entry["result_preview"] = preview
 
     return trace
 

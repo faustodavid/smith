@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import argparse
-from typing import Callable
+from collections.abc import Sequence
+from typing import Any, Callable
 
 from smith.cli.handlers import (
     _csv_list,
@@ -27,11 +28,18 @@ class _DeprecatedCsvAppendAction(argparse.Action):
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values: str,
+        values: str | Sequence[Any] | None,
         option_string: str | None = None,
     ) -> None:
+        if values is None:
+            raw_values = ""
+        elif isinstance(values, str):
+            raw_values = values
+        else:
+            raw_values = ",".join(str(item) for item in values)
+
         items = list(getattr(namespace, self.dest, None) or [])
-        items.extend(_csv_list(values))
+        items.extend(_csv_list(raw_values))
         setattr(namespace, self.dest, items)
 
         deprecated_flags = list(getattr(namespace, "deprecated_flags", None) or [])

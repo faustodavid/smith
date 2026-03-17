@@ -9,9 +9,9 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.github_mcp import DEFAULT_GITHUB_MCP_URL, resolve_github_mcp_token
 from smith.benchmark.smith_cli import REPO_ROOT, build_smith_pythonpath
-from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 
 COPILOT_SESSION_SCRIPT = REPO_ROOT / "scripts" / "copilot_benchmark_session.mjs"
 COPILOT_DEFAULT_TIMEOUT_MS = 600_000

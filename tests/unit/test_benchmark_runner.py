@@ -4,9 +4,9 @@ import json
 
 import pytest
 
+from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.runner import BenchmarkEval, aggregate_workspace
 from smith.benchmark.smith_cli import build_smith_cli_subprocess, validate_smith_cli_command
-from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 
 
 def _write_benchmark_run(

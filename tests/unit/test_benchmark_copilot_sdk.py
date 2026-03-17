@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.copilot_sdk import (
     GITHUB_AUTH_HEADER_ENV,
     GITHUB_MCP_SERVER_NAME,
@@ -13,7 +14,6 @@ from smith.benchmark.copilot_sdk import (
     copilot_tool_name,
     summarize_copilot_events,
 )
-from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 
 
 def test_build_smith_copilot_payload_uses_local_mcp_and_single_tool():

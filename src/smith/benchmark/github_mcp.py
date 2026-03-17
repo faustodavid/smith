@@ -4,7 +4,7 @@ import functools
 import os
 import subprocess
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from agents.mcp import MCPServerStreamableHttp
 from mcp.client.streamable_http import StreamableHTTPTransport
@@ -32,7 +32,7 @@ def patch_post_only_streamable_http() -> None:
             return None
         return await original(self, client, read_stream_writer)
 
-    StreamableHTTPTransport.handle_get_stream = _patched
+    cast(Any, StreamableHTTPTransport).handle_get_stream = _patched
 
 
 def register_post_only_github_mcp_url(url: str | None) -> str:

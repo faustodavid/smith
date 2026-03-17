@@ -2,60 +2,96 @@ from __future__ import annotations
 
 from smith.benchmark.grading import BENCHMARK_EXPECTATIONS, build_grading_result
 
+GOOD_ANSWER = "\n".join(
+    [
+        "# Findings",
+        "",
+        (
+            "- openai/openai-python reads `OPENAI_WEBHOOK_SECRET` in `/src/openai/_client.py`. "
+            "The webhook verifier lives in `/src/openai/resources/webhooks/webhooks.py`, where "
+            "`unwrap` parses and verifies the payload and `verify_signature` performs "
+            "signature-only verification."
+        ),
+        (
+            "- openai/openai-node reads `OPENAI_WEBHOOK_SECRET` in `/src/client.ts`. "
+            "The webhook verifier lives in `/src/resources/webhooks/webhooks.ts`, where "
+            "`unwrap` parses and verifies the payload and `verifySignature` performs "
+            "signature-only verification."
+        ),
+        (
+            "- openai/openai-go reads `OPENAI_WEBHOOK_SECRET` in `/client.go`. "
+            "The webhook verifier lives in `/webhooks/webhook.go`, where `Unwrap` parses "
+            "and verifies the payload and `VerifySignature` performs signature-only "
+            "verification."
+        ),
+        (
+            "- openai/openai-ruby reads `OPENAI_WEBHOOK_SECRET` in `/lib/openai/client.rb`. "
+            "The webhook verifier lives in `/lib/openai/resources/webhooks.rb`, where "
+            "`unwrap` parses and verifies the payload and `verify_signature` performs "
+            "signature-only verification."
+        ),
+        (
+            "- openai/openai-java reads `OPENAI_WEBHOOK_SECRET` in "
+            "`/openai-java-core/src/main/kotlin/com/openai/core/ClientOptions.kt`. "
+            "The webhook verifier lives in "
+            "`/openai-java-core/src/main/kotlin/com/openai/services/blocking/"
+            "WebhookServiceImpl.kt`, where `unwrap` parses and verifies the payload "
+            "and `verifySignature` performs signature-only verification."
+        ),
+        "",
+        "## Sources",
+        "- openai/openai-python:/src/openai/resources/webhooks/webhooks.py",
+        "- openai/openai-node:/src/resources/webhooks/webhooks.ts",
+        "- openai/openai-go:/webhooks/webhook.go",
+        "- openai/openai-ruby:/lib/openai/resources/webhooks.rb",
+        (
+            "- openai/openai-java:/openai-java-core/src/main/kotlin/com/openai/services/"
+            "blocking/WebhookServiceImpl.kt"
+        ),
+    ]
+)
 
-GOOD_ANSWER = """
-# Findings
-
-- openai/openai-python reads `OPENAI_WEBHOOK_SECRET` in `/src/openai/_client.py`. The webhook verifier lives in `/src/openai/resources/webhooks/webhooks.py`, where `unwrap` parses and verifies the payload and `verify_signature` performs signature-only verification.
-- openai/openai-node reads `OPENAI_WEBHOOK_SECRET` in `/src/client.ts`. The webhook verifier lives in `/src/resources/webhooks/webhooks.ts`, where `unwrap` parses and verifies the payload and `verifySignature` performs signature-only verification.
-- openai/openai-go reads `OPENAI_WEBHOOK_SECRET` in `/client.go`. The webhook verifier lives in `/webhooks/webhook.go`, where `Unwrap` parses and verifies the payload and `VerifySignature` performs signature-only verification.
-- openai/openai-ruby reads `OPENAI_WEBHOOK_SECRET` in `/lib/openai/client.rb`. The webhook verifier lives in `/lib/openai/resources/webhooks.rb`, where `unwrap` parses and verifies the payload and `verify_signature` performs signature-only verification.
-- openai/openai-java reads `OPENAI_WEBHOOK_SECRET` in `/openai-java-core/src/main/kotlin/com/openai/core/ClientOptions.kt`. The webhook verifier lives in `/openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt`, where `unwrap` parses and verifies the payload and `verifySignature` performs signature-only verification.
-
-## Sources
-- openai/openai-python:/src/openai/resources/webhooks/webhooks.py
-- openai/openai-node:/src/resources/webhooks/webhooks.ts
-- openai/openai-go:/webhooks/webhook.go
-- openai/openai-ruby:/lib/openai/resources/webhooks.rb
-- openai/openai-java:/openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt
-""".strip()
-
-GOOD_SOURCES_BLOCK = """
-## Sources
-- openai/openai-python:/src/openai/resources/webhooks/webhooks.py
-- openai/openai-node:/src/resources/webhooks/webhooks.ts
-- openai/openai-go:/webhooks/webhook.go
-- openai/openai-ruby:/lib/openai/resources/webhooks.rb
-- openai/openai-java:/openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt
-""".strip()
-
-GOOD_BARE_SOURCES_BLOCK = """
-## Sources
-- openai-python:/src/openai/resources/webhooks/webhooks.py
-- openai-node:/src/resources/webhooks/webhooks.ts
-- openai-go:/webhooks/webhook.go
-- openai-ruby:/lib/openai/resources/webhooks.rb
-- openai-java:/openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt
-""".strip()
-
-GOOD_ANSWER_WITH_BARE_REPO_SOURCES = GOOD_ANSWER.replace(GOOD_SOURCES_BLOCK, GOOD_BARE_SOURCES_BLOCK, 1)
-
-GOOD_ANSWER_WITH_BARE_REPO_SOURCES = """
-# Findings
-
-- openai/openai-python reads `OPENAI_WEBHOOK_SECRET` in `/src/openai/_client.py`. The helper file is `/src/openai/resources/webhooks/webhooks.py`, with `unwrap` and `verify_signature`.
-- openai/openai-node reads `OPENAI_WEBHOOK_SECRET` in `/src/client.ts`. The helper file is `/src/resources/webhooks/webhooks.ts`, with `unwrap` and `verifySignature`.
-- openai/openai-go reads `OPENAI_WEBHOOK_SECRET` in `/client.go`. The helper file is `/webhooks/webhook.go`, with `Unwrap` and `VerifySignature`.
-- openai/openai-ruby reads `OPENAI_WEBHOOK_SECRET` in `/lib/openai/client.rb`. The helper file is `/lib/openai/resources/webhooks.rb`, with `unwrap` and `verify_signature`.
-- openai/openai-java reads `OPENAI_WEBHOOK_SECRET` in `/openai-java-core/src/main/kotlin/com/openai/core/ClientOptions.kt`. The helper file is `/openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt`, with `unwrap` and `verifySignature`.
-
-**Sources**
-- openai-python:/src/openai/resources/webhooks/webhooks.py
-- openai-node:/src/resources/webhooks/webhooks.ts
-- openai-go:/webhooks/webhook.go
-- openai-ruby:/lib/openai/resources/webhooks.rb
-- openai-java:/openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt
-""".strip()
+GOOD_ANSWER_WITH_BARE_REPO_SOURCES = "\n".join(
+    [
+        "# Findings",
+        "",
+        (
+            "- openai/openai-python reads `OPENAI_WEBHOOK_SECRET` in `/src/openai/_client.py`. "
+            "The helper file is `/src/openai/resources/webhooks/webhooks.py`, with `unwrap` "
+            "and `verify_signature`."
+        ),
+        (
+            "- openai/openai-node reads `OPENAI_WEBHOOK_SECRET` in `/src/client.ts`. "
+            "The helper file is `/src/resources/webhooks/webhooks.ts`, with `unwrap` "
+            "and `verifySignature`."
+        ),
+        (
+            "- openai/openai-go reads `OPENAI_WEBHOOK_SECRET` in `/client.go`. "
+            "The helper file is `/webhooks/webhook.go`, with `Unwrap` and `VerifySignature`."
+        ),
+        (
+            "- openai/openai-ruby reads `OPENAI_WEBHOOK_SECRET` in `/lib/openai/client.rb`. "
+            "The helper file is `/lib/openai/resources/webhooks.rb`, with `unwrap` "
+            "and `verify_signature`."
+        ),
+        (
+            "- openai/openai-java reads `OPENAI_WEBHOOK_SECRET` in "
+            "`/openai-java-core/src/main/kotlin/com/openai/core/ClientOptions.kt`. "
+            "The helper file is `/openai-java-core/src/main/kotlin/com/openai/services/"
+            "blocking/WebhookServiceImpl.kt`, with `unwrap` and `verifySignature`."
+        ),
+        "",
+        "**Sources**",
+        "- openai-python:/src/openai/resources/webhooks/webhooks.py",
+        "- openai-node:/src/resources/webhooks/webhooks.ts",
+        "- openai-go:/webhooks/webhook.go",
+        "- openai-ruby:/lib/openai/resources/webhooks.rb",
+        (
+            "- openai-java:/openai-java-core/src/main/kotlin/com/openai/services/blocking/"
+            "WebhookServiceImpl.kt"
+        ),
+    ]
+)
 
 
 def test_full_answer_passes_all_expectations():
