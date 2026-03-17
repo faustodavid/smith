@@ -76,6 +76,7 @@ class GitHubPullRequestMixin:
                     if not isinstance(pulls_data, list):
                         break
                     pulls = [item for item in pulls_data if isinstance(item, dict)]
+                    page_oldest_created: datetime | None = None
                     if not pulls:
                         break
 
@@ -92,6 +93,8 @@ class GitHubPullRequestMixin:
                             continue
 
                         created_dt = parse_iso_datetime(item.get("created_at"))
+                        if created_dt and (page_oldest_created is None or created_dt < page_oldest_created):
+                            page_oldest_created = created_dt
                         closed_dt = parse_iso_datetime(item.get("closed_at"))
                         reference_dt = closed_dt if status in {"completed", "abandoned"} else created_dt
                         if from_dt and reference_dt and reference_dt < from_dt:
@@ -130,6 +133,13 @@ class GitHubPullRequestMixin:
                         )
 
                     if single_repo_mode and len(output) >= desired_count:
+                        break
+                    if (
+                        github_state == "open"
+                        and from_dt
+                        and page_oldest_created
+                        and page_oldest_created < from_dt
+                    ):
                         break
                     if len(pulls) < per_page:
                         break

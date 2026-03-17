@@ -37,6 +37,17 @@ class _TestProvider(BaseProvider):
         self.status_calls.append((int(response.status_code), resolved_url))
 
 
+class _Retryable403Provider(_TestProvider):
+    def _should_refresh_auth_response(self, response: Any) -> bool:
+        return False
+
+    def _is_retryable_response(self, response: Any) -> bool:
+        return int(getattr(response, "status_code", 0)) == 403 or super()._is_retryable_response(response)
+
+    def _is_auth_failure_response(self, response: Any) -> bool:
+        return False
+
+
 def test_provider_name_helpers_normalize_and_validate() -> None:
     assert normalize_provider("GITHUB") == "github"
     assert resolve_providers("all") == ["github", "azdo"]
@@ -103,6 +114,23 @@ def test_request_refreshes_auth_token_after_401() -> None:
     assert session.calls[1]["headers"]["Authorization"] == "Bearer refresh-token"
 
 
+def test_request_uses_perform_http_request_for_initial_and_auth_retry(monkeypatch: Any) -> None:
+    session = RecordingSession([FakeResponse(401, text="nope"), FakeResponse(200, text='{"ok": true}', json_data={"ok": True})])
+    provider = _TestProvider(config=make_runtime_config(), session=session)
+    performed_calls: list[str] = []
+
+    def _perform_http_request(http_session: Any, **kwargs: Any) -> Any:
+        performed_calls.append(kwargs["headers"]["Authorization"])
+        return BaseProvider._perform_http_request(provider, http_session, **kwargs)
+
+    monkeypatch.setattr(provider, "_perform_http_request", _perform_http_request)
+
+    result = provider._request_json("GET", "/items")
+
+    assert result == {"ok": True}
+    assert performed_calls == ["Bearer token", "Bearer refresh-token"]
+
+
 def test_request_retries_retryable_get_statuses(monkeypatch: Any) -> None:
     session = RecordingSession(
         [
@@ -118,6 +146,24 @@ def test_request_retries_retryable_get_statuses(monkeypatch: Any) -> None:
 
     assert result == {"ok": True}
     assert sleeps == [12.0]
+
+
+def test_request_can_retry_provider_marked_403_without_auth_refresh(monkeypatch: Any) -> None:
+    session = RecordingSession(
+        [
+            FakeResponse(403, text="secondary rate limit", headers={"Retry-After": "7"}),
+            FakeResponse(200, text='{"ok": true}', json_data={"ok": True}),
+        ]
+    )
+    provider = _Retryable403Provider(config=make_runtime_config(http_retry_max_attempts=2), session=session)
+    sleeps: list[float] = []
+    monkeypatch.setattr("smith.providers.base.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    result = provider._request_json("GET", "/items")
+
+    assert result == {"ok": True}
+    assert sleeps == [7.0]
+    assert provider.token_calls == [False, False]
 
 
 def test_request_does_not_retry_non_get_exceptions() -> None:

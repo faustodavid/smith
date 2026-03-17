@@ -6,7 +6,12 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from smith.http import configure_http_session, is_retryable_get_status, parse_retry_after_seconds
+from smith.http import (
+    configure_http_session,
+    is_retryable_get_status,
+    parse_rate_limit_reset_seconds,
+    parse_retry_after_seconds,
+)
 
 
 def test_configure_http_session_mounts_adapter_for_real_requests_session() -> None:
@@ -82,3 +87,37 @@ def test_parse_retry_after_seconds_parses_date_header() -> None:
         seconds = parse_retry_after_seconds(response)
 
     assert seconds == 10.0
+
+
+def test_parse_rate_limit_reset_seconds_returns_none_for_missing_header() -> None:
+    response = Mock(headers={})
+
+    assert parse_rate_limit_reset_seconds(response) is None
+
+
+def test_parse_rate_limit_reset_seconds_returns_none_for_invalid_header() -> None:
+    response = Mock(headers={"X-RateLimit-Reset": "not-a-number"})
+
+    assert parse_rate_limit_reset_seconds(response) is None
+
+
+def test_parse_rate_limit_reset_seconds_parses_future_epoch() -> None:
+    response = Mock(headers={"X-RateLimit-Reset": "1735689610"})
+    now = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
+
+    with patch("smith.http.datetime") as mocked_datetime:
+        mocked_datetime.now.return_value = now
+        seconds = parse_rate_limit_reset_seconds(response)
+
+    assert seconds == 10.0
+
+
+def test_parse_rate_limit_reset_seconds_clamps_past_epoch_to_zero() -> None:
+    response = Mock(headers={"X-RateLimit-Reset": "1735689590"})
+    now = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
+
+    with patch("smith.http.datetime") as mocked_datetime:
+        mocked_datetime.now.return_value = now
+        seconds = parse_rate_limit_reset_seconds(response)
+
+    assert seconds == 0.0

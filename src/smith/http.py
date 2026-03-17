@@ -48,3 +48,20 @@ def parse_retry_after_seconds(response: Any) -> float | None:
         retry_at = retry_at.replace(tzinfo=UTC)
     now = datetime.now(UTC)
     return max(0.0, (retry_at - now).total_seconds())
+
+
+def parse_rate_limit_reset_seconds(response: Any) -> float | None:
+    headers = getattr(response, "headers", {}) or {}
+    raw = headers.get("X-RateLimit-Reset")
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        reset_epoch = float(text)
+    except (TypeError, ValueError) as exc:
+        logger.debug("Could not parse X-RateLimit-Reset header %r: %s", text, exc)
+        return None
+    now_epoch = datetime.now(UTC).timestamp()
+    return max(0.0, reset_epoch - now_epoch)

@@ -4,7 +4,12 @@ import base64
 import logging
 import os
 import re
+import shutil
+import subprocess
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote
 
@@ -28,6 +33,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_CACHE_LOCKS: dict[str, threading.Lock] = {}
+_CACHE_LOCKS_GUARD = threading.Lock()
+
 
 class GitHubCodeMixin:
     def list_projects(self: Any) -> list[dict[str, Any]]:
@@ -42,9 +50,13 @@ class GitHubCodeMixin:
         ]
 
     def list_repositories(self: Any) -> list[dict[str, Any]]:
+        cache = getattr(self, "_repository_list_cache", None)
+        if cache is not None:
+            return [dict(entry) for entry in cache]
+
         org = self._require_github_org()
         repos = self._get_paginated_list(f"/orgs/{quote(org, safe='')}/repos")
-        return [
+        mapped = [
             {
                 "id": item.get("id"),
                 "name": item.get("name"),
@@ -54,6 +66,8 @@ class GitHubCodeMixin:
             for item in repos
             if isinstance(item, dict)
         ]
+        self._repository_list_cache = mapped
+        return [dict(entry) for entry in mapped]
 
     def search_code(
         self: Any,
@@ -271,9 +285,146 @@ class GitHubCodeMixin:
             return 4
         if candidate_files <= 32:
             return 8
-        if candidate_files <= 96:
-            return 16
-        return 20
+        return 8
+
+    @staticmethod
+    def _sanitize_cache_component(value: str) -> str:
+        sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
+        return sanitized or "_"
+
+    @staticmethod
+    def _cache_lock(path: str) -> threading.Lock:
+        with _CACHE_LOCKS_GUARD:
+            lock = _CACHE_LOCKS.get(path)
+            if lock is None:
+                lock = threading.Lock()
+                _CACHE_LOCKS[path] = lock
+            return lock
+
+    def _git_subprocess(self: Any, args: list[str], *, cwd: str | None = None) -> None:
+        subprocess.run(
+            args,
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def _github_grep_cache_root(self: Any) -> str:
+        configured = (os.getenv("SMITH_GITHUB_GREP_CACHE_DIR") or "").strip()
+        if configured:
+            return configured
+        return str(Path.home() / ".cache" / "smith" / "github-grep")
+
+    def _github_grep_cache_max_age_seconds(self: Any) -> int:
+        return parse_int_env(
+            "GITHUB_GREP_CACHE_MAX_AGE_SECONDS",
+            default=300,
+            min_value=1,
+            max_value=86_400,
+        )
+
+    def _local_checkout_path(self: Any, *, org: str, repo: str, branch: str) -> str:
+        root = self._github_grep_cache_root()
+        return os.path.join(
+            root,
+            self._sanitize_cache_component(org),
+            self._sanitize_cache_component(repo),
+            self._sanitize_cache_component(branch),
+        )
+
+    def _local_checkout_remote_url(self: Any, *, org: str, repo: str) -> str:
+        return f"https://github.com/{quote(org, safe='')}/{quote(repo, safe='')}.git"
+
+    def _local_checkout_needs_refresh(self: Any, checkout_dir: str) -> bool:
+        marker = os.path.join(checkout_dir, ".smith_last_fetch")
+        if not os.path.isfile(marker):
+            return True
+        max_age = self._github_grep_cache_max_age_seconds()
+        age_seconds = time.time() - os.path.getmtime(marker)
+        return age_seconds >= max_age
+
+    def _mark_local_checkout_refreshed(self: Any, checkout_dir: str) -> None:
+        marker = os.path.join(checkout_dir, ".smith_last_fetch")
+        Path(marker).touch()
+
+    def _ensure_local_checkout(
+        self: Any,
+        *,
+        repo: str,
+        branch: str,
+    ) -> str | None:
+        if not parse_bool_env("GITHUB_GREP_USE_LOCAL_CACHE", default=True):
+            return None
+
+        org = self._require_github_org()
+        checkout_dir = self._local_checkout_path(org=org, repo=repo, branch=branch)
+        checkout_lock = self._cache_lock(checkout_dir)
+        remote_url = self._local_checkout_remote_url(org=org, repo=repo)
+        git_dir = os.path.join(checkout_dir, ".git")
+
+        with checkout_lock:
+            try:
+                if not os.path.isdir(git_dir):
+                    if os.path.exists(checkout_dir):
+                        shutil.rmtree(checkout_dir)
+                    os.makedirs(os.path.dirname(checkout_dir), exist_ok=True)
+                    self._git_subprocess(
+                        ["git", "clone", "--depth", "1", "--branch", branch, remote_url, checkout_dir]
+                    )
+                    self._mark_local_checkout_refreshed(checkout_dir)
+                    return checkout_dir
+
+                if self._local_checkout_needs_refresh(checkout_dir):
+                    self._git_subprocess(["git", "-C", checkout_dir, "fetch", "--depth", "1", "origin", branch])
+                    self._git_subprocess(["git", "-C", checkout_dir, "checkout", "--force", "FETCH_HEAD"])
+                    self._mark_local_checkout_refreshed(checkout_dir)
+                return checkout_dir
+            except Exception as exc:
+                logger.debug("Local checkout unavailable for %s@%s, using API fallback: %s", repo, branch, exc)
+                return None
+
+    def _get_local_repository_files(
+        self: Any,
+        *,
+        checkout_dir: str,
+        path: str | None,
+    ) -> list[dict[str, Any]]:
+        normalized_path = normalize_path(path)
+        prefix = normalized_path.strip("/")
+
+        if prefix:
+            target = os.path.join(checkout_dir, prefix)
+            if os.path.isfile(target):
+                rel = prefix.replace(os.sep, "/")
+                return [{"path": f"/{rel.lstrip('/')}", "is_binary": False, "sha": None, "local_path": target}]
+            if not os.path.isdir(target):
+                return []
+            roots = [target]
+        else:
+            roots = [checkout_dir]
+
+        output: list[dict[str, Any]] = []
+        for root in roots:
+            for current_root, dirnames, filenames in os.walk(root):
+                dirnames[:] = [dirname for dirname in dirnames if dirname != ".git"]
+                for filename in filenames:
+                    full_path = os.path.join(current_root, filename)
+                    rel = os.path.relpath(full_path, checkout_dir).replace(os.sep, "/")
+                    output.append(
+                        {
+                            "path": f"/{rel.lstrip('/')}",
+                            "is_binary": False,
+                            "sha": None,
+                            "local_path": full_path,
+                        }
+                    )
+        return output
+
+    @staticmethod
+    def _read_local_file_text(local_path: str) -> str:
+        with open(local_path, "rb") as file_handle:
+            return file_handle.read().decode("utf-8", errors="replace")
 
     def grep(
         self: Any,
@@ -294,7 +445,11 @@ class GitHubCodeMixin:
         file_regex = glob_to_regex(glob) if glob else ".*"
         filename_filter = re.compile(file_regex)
         resolved_branch = normalize_branch_name(branch) or self._get_repository_default_branch(repo)
-        files = self._get_repository_files(repo=repo, path=path, branch=resolved_branch)
+        checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
+        if checkout_dir:
+            files = self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
+        else:
+            files = self._get_repository_files(repo=repo, path=path, branch=resolved_branch)
         matching = [
             item
             for item in files
@@ -336,22 +491,25 @@ class GitHubCodeMixin:
             min_value=1,
             max_value=32,
         )
-        use_parallel = grep_parallel_enabled and grep_max_workers > 1 and len(matching) > 1
 
         def _process_file(
             file_path: str,
             blob_sha: str | None,
+            local_path: str | None,
             *,
             session: requests.Session | None = None,
         ) -> tuple[list[str], int, str | None]:
             try:
-                content = self._get_file_text(
-                    repo=repo,
-                    file_path=file_path,
-                    branch=resolved_branch,
-                    blob_sha=blob_sha,
-                    session=session,
-                )
+                if local_path:
+                    content = self._read_local_file_text(local_path)
+                else:
+                    content = self._get_file_text(
+                        repo=repo,
+                        file_path=file_path,
+                        branch=resolved_branch,
+                        blob_sha=blob_sha,
+                        session=session,
+                    )
             except Exception as exc:
                 return [], 0, f"failed to read {file_path}: {exc}"
 
@@ -384,10 +542,12 @@ class GitHubCodeMixin:
         def _process_file_in_worker(
             file_path: str,
             blob_sha: str | None,
+            local_path: str | None,
         ) -> tuple[list[str], int, str | None]:
             return _process_file(
                 file_path,
                 blob_sha,
+                local_path,
                 session=self._get_http_session(),
             )
 
@@ -395,17 +555,30 @@ class GitHubCodeMixin:
             (
                 str(item.get("path", "")),
                 str(item.get("sha") or "") or None,
+                str(item.get("local_path") or "") or None,
             )
             for item in matching
         ]
+        if checkout_dir:
+            effective_workers = min(
+                grep_max_workers,
+                len(file_entries) or 1,
+            )
+        else:
+            effective_workers = min(
+                grep_max_workers,
+                self._config.github_max_concurrent_requests,
+                len(file_entries) or 1,
+            )
+        use_parallel = grep_parallel_enabled and effective_workers > 1 and len(matching) > 1
         if use_parallel:
-            max_workers = min(grep_max_workers, len(file_entries))
+            max_workers = max(1, effective_workers)
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [
-                    executor.submit(_process_file_in_worker, file_path, blob_sha)
-                    for file_path, blob_sha in file_entries
+                    executor.submit(_process_file_in_worker, file_path, blob_sha, local_path)
+                    for file_path, blob_sha, local_path in file_entries
                 ]
-                for (file_path, _blob_sha), future in zip(file_entries, futures):
+                for (file_path, _blob_sha, _local_path), future in zip(file_entries, futures):
                     try:
                         lines_out, matched_count, warning = future.result()
                     except Exception as exc:
@@ -417,8 +590,8 @@ class GitHubCodeMixin:
                     files_matched += matched_count
                     output_lines.extend(lines_out)
         else:
-            for file_path, blob_sha in file_entries:
-                lines_out, matched_count, warning = _process_file(file_path, blob_sha)
+            for file_path, blob_sha, local_path in file_entries:
+                lines_out, matched_count, warning = _process_file(file_path, blob_sha, local_path)
                 if warning:
                     warnings.append(warning)
                     continue

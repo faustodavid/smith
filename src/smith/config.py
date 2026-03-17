@@ -17,6 +17,8 @@ class RuntimeConfig:
     github_api_url: str
     github_api_version: str
     github_timeout_seconds: int
+    github_max_concurrent_requests: int
+    github_rate_limit_max_sleep_seconds: int
     http_pool_maxsize: int
     http_pool_connections: int
     http_retry_max_attempts: int
@@ -114,6 +116,18 @@ def parse_runtime_config(
             default=timeout,
             min_value=1,
             max_value=300,
+        ),
+        github_max_concurrent_requests=parse_int_env(
+            "GITHUB_MAX_CONCURRENT_REQUESTS",
+            default=2,
+            min_value=1,
+            max_value=16,
+        ),
+        github_rate_limit_max_sleep_seconds=parse_int_env(
+            "GITHUB_RATE_LIMIT_MAX_SLEEP_SECONDS",
+            default=120,
+            min_value=1,
+            max_value=900,
         ),
         http_pool_maxsize=parse_int_env(
             "SMITH_HTTP_POOL_MAXSIZE",

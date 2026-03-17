@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -71,6 +73,7 @@ def test_github_search_code_builds_repo_qualifier_and_applies_skip_take(monkeypa
 def test_github_grep_supports_match_all_shortcut_compile_errors_and_warning_paths(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
     monkeypatch.setenv("GITHUB_GREP_ENABLE_PARALLEL", "false")
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "false")
     repo_prefix = provider._repo_prefix("repo-a")
 
     def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
@@ -113,6 +116,384 @@ def test_github_grep_supports_match_all_shortcut_compile_errors_and_warning_path
 
     compile_error = provider.grep(repo="repo-a", pattern="[")
     assert compile_error["text"].startswith("Error: Invalid regex pattern")
+
+
+def test_github_grep_respects_global_concurrency_limit_when_parallel_enabled(monkeypatch: Any) -> None:
+    config = make_runtime_config(github_max_concurrent_requests=2)
+    provider = _provider(config=config)
+    monkeypatch.setattr(provider, "_get_repository_default_branch", lambda repo: "main")
+    monkeypatch.setenv("GITHUB_GREP_ENABLE_PARALLEL", "true")
+    monkeypatch.setenv("GITHUB_GREP_MAX_WORKERS", "12")
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "false")
+
+    file_entries = [
+        {"path": f"/file-{index}.txt", "sha": f"sha-{index}"}
+        for index in range(1, 5)
+    ]
+
+    def fake_repository_files(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return file_entries
+
+    def fake_file_text(*args: Any, **kwargs: Any) -> str:
+        return "match\nline"
+
+    executors: list[Any] = []
+
+    class FakeExecutor:
+        def __init__(self, max_workers: int) -> None:
+            self.max_workers = max_workers
+            executors.append(self)
+
+        def submit(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+            class _Future:
+                def __init__(self, result: Any) -> None:
+                    self._result = result
+
+                def result(self) -> Any:
+                    return self._result
+
+            return _Future(fn(*args, **kwargs))
+
+        def __enter__(self) -> "FakeExecutor":
+            return self
+
+        def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:  # pragma: no cover - stub
+            pass
+
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        fake_repository_files,
+    )
+    monkeypatch.setattr(provider, "_get_file_text", fake_file_text)
+    monkeypatch.setattr("smith.providers.github_code.ThreadPoolExecutor", FakeExecutor)
+
+    result = provider.grep(repo="repo-a", pattern="match")
+
+    assert executors
+    assert executors[-1].max_workers == 2
+    assert "match" in result["text"]
+
+
+def test_github_grep_honors_grep_worker_limit_when_lower(monkeypatch: Any) -> None:
+    config = make_runtime_config(github_max_concurrent_requests=8)
+    provider = _provider(config=config)
+    monkeypatch.setattr(provider, "_get_repository_default_branch", lambda repo: "main")
+    monkeypatch.setenv("GITHUB_GREP_ENABLE_PARALLEL", "true")
+    monkeypatch.setenv("GITHUB_GREP_MAX_WORKERS", "3")
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "false")
+
+    def fake_repository_files(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [
+            {"path": f"/error-{index}.txt", "sha": f"sha-error-{index}"}
+            for index in range(1, 5)
+        ]
+
+    def fake_file_text(*args: Any, **kwargs: Any) -> str:
+        return "error\nmatch"
+
+    executors: list[Any] = []
+
+    class FakeExecutor:
+        def __init__(self, max_workers: int) -> None:
+            self.max_workers = max_workers
+            executors.append(self)
+
+        def submit(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+            class _Future:
+                def __init__(self, result: Any) -> None:
+                    self._result = result
+
+                def result(self) -> Any:
+                    return self._result
+
+            return _Future(fn(*args, **kwargs))
+
+        def __enter__(self) -> "FakeExecutor":
+            return self
+
+        def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:  # pragma: no cover - stub
+            pass
+
+    monkeypatch.setattr(provider, "_get_repository_files", fake_repository_files)
+    monkeypatch.setattr(provider, "_get_file_text", fake_file_text)
+    monkeypatch.setattr("smith.providers.github_code.ThreadPoolExecutor", FakeExecutor)
+
+    result = provider.grep(repo="repo-a", pattern="error")
+
+    assert executors
+    assert executors[-1].max_workers == 3
+    assert "error" in result["text"]
+
+
+def test_github_list_pull_requests_reuses_repo_cache(monkeypatch: Any) -> None:
+    config = make_runtime_config()
+    provider = _provider(config=config)
+
+    repo_list_calls: list[str] = []
+
+    def fake_paginated_list(path: str, **kwargs: Any) -> list[dict[str, Any]]:
+        if path.startswith("/orgs/"):
+            repo_list_calls.append(path)
+            return [
+                {
+                    "id": 1,
+                    "name": "repo-a",
+                    "default_branch": "main",
+                    "html_url": "https://github.com/octo-org/repo-a",
+                }
+            ]
+        return []
+
+    def fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> list[dict[str, Any]]:
+        state = (params or {}).get("state")
+        if state == "open":
+            return [
+                {
+                    "number": 1,
+                    "state": "open",
+                    "draft": False,
+                    "user": {"login": "alice"},
+                    "created_at": "2025-01-10T00:00:00Z",
+                    "closed_at": None,
+                    "merged_at": None,
+                    "head": {"ref": "feature/one"},
+                    "base": {"ref": "main"},
+                    "labels": [],
+                    "id": 1001,
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(provider, "_get_paginated_list", fake_paginated_list)
+    monkeypatch.setattr(provider, "_request", fake_request)
+
+    first = provider.list_pull_requests(
+        repos=None,
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=5,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+    second = provider.list_pull_requests(
+        repos=None,
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=5,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert first["returned_count"] == second["returned_count"]
+    assert repo_list_calls.count("/orgs/octo-org/repos") == 1
+
+
+def test_github_grep_uses_local_checkout_cache_when_available(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITHUB_GREP_ENABLE_PARALLEL", "false")
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_repository_default_branch", lambda repo: "main")
+
+    checkout_dir = provider._local_checkout_path(org="octo-org", repo="repo-a", branch="main")
+    os.makedirs(checkout_dir, exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    Path(os.path.join(checkout_dir, ".smith_last_fetch")).touch()
+    os.makedirs(os.path.join(checkout_dir, "src"), exist_ok=True)
+    Path(os.path.join(checkout_dir, "src", "app.py")).write_text("ok\nerror\nerror\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        provider,
+        "_request_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call GitHub API")),
+    )
+
+    result = provider.grep(repo="repo-a", pattern="error", output_mode="count")
+
+    assert result == {
+        "text": "/src/app.py:2",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_github_grep_falls_back_to_api_when_local_checkout_unavailable(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITHUB_GREP_ENABLE_PARALLEL", "false")
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_repository_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        provider,
+        "_git_subprocess",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("git unavailable")),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: [{"path": "/src/app.py", "sha": "sha-app"}],
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_file_text",
+        lambda **kwargs: "error\nok\n",
+    )
+
+    result = provider.grep(repo="repo-a", pattern="error", output_mode="count")
+
+    assert result == {
+        "text": "/src/app.py:1",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_github_list_pull_requests_stops_open_pages_at_date_from_cutoff(monkeypatch: Any) -> None:
+    config = make_runtime_config()
+    provider = _provider(config=config)
+
+    monkeypatch.setattr(
+        provider,
+        "_get_paginated_list",
+        lambda path, **kwargs: [
+            {
+                "id": 1,
+                "name": "repo-a",
+                "default_branch": "main",
+                "html_url": "https://github.com/octo-org/repo-a",
+            }
+        ],
+    )
+
+    open_pages: list[int] = []
+
+    def fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> list[dict[str, Any]]:
+        state = (params or {}).get("state")
+        page = (params or {}).get("page", 1)
+        if state == "open":
+            open_pages.append(page)
+            assert page == 1
+            return [
+                {
+                    "number": 1,
+                    "state": "open",
+                    "draft": False,
+                    "user": {"login": "alice"},
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "closed_at": None,
+                    "merged_at": None,
+                    "head": {"ref": "feature/one"},
+                    "base": {"ref": "main"},
+                    "labels": [],
+                    "id": 1001,
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(provider, "_request", fake_request)
+
+    provider.list_pull_requests(
+        repos=None,
+        statuses=["active"],
+        creators=None,
+        date_from="2025-01-02T00:00:00Z",
+        date_to=None,
+        skip=0,
+        take=5,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert open_pages == [1]
+
+
+def test_github_list_pull_requests_does_not_stop_closed_date_from(monkeypatch: Any) -> None:
+    config = make_runtime_config()
+    provider = _provider(config=config)
+
+    monkeypatch.setattr(
+        provider,
+        "_get_paginated_list",
+        lambda path, **kwargs: [
+            {
+                "id": 1,
+                "name": "repo-a",
+                "default_branch": "main",
+                "html_url": "https://github.com/octo-org/repo-a",
+            }
+        ],
+    )
+
+    closed_pages: list[int] = []
+
+    page_one = [
+        {
+            "number": index,
+            "state": "closed",
+            "draft": False,
+            "user": {"login": "bob"},
+            "created_at": "2025-01-01T00:00:00Z",
+            "closed_at": "2025-01-09T00:00:00Z",
+            "merged_at": "2025-01-09T00:00:00Z",
+            "head": {"ref": f"feature/{index}"},
+            "base": {"ref": "main"},
+            "labels": [],
+            "id": 2000 + index,
+        }
+        for index in range(1, 101)
+    ]
+
+    page_two = [
+        {
+            "number": 101,
+            "state": "closed",
+            "draft": False,
+            "user": {"login": "bob"},
+            "created_at": "2024-12-31T00:00:00Z",
+            "closed_at": "2025-01-06T00:00:00Z",
+            "merged_at": "2025-01-06T00:00:00Z",
+            "head": {"ref": "feature/101"},
+            "base": {"ref": "main"},
+            "labels": [],
+            "id": 9999,
+        }
+    ]
+
+    def fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> list[dict[str, Any]]:
+        state = (params or {}).get("state")
+        page = (params or {}).get("page", 1)
+        if state == "closed":
+            closed_pages.append(page)
+            if page == 1:
+                return page_one
+            if page == 2:
+                return page_two
+        return []
+
+    monkeypatch.setattr(provider, "_request", fake_request)
+
+    provider.list_pull_requests(
+        repos=None,
+        statuses=["completed"],
+        creators=None,
+        date_from="2025-01-08T00:00:00Z",
+        date_to=None,
+        skip=0,
+        take=200,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert closed_pages == [1, 2]
 
 
 def test_github_list_pull_requests_maps_statuses_filters_and_labels(monkeypatch: Any) -> None:

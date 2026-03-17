@@ -49,6 +49,14 @@ def test_validate_smith_cli_command_rejects_non_github_grep():
         validate_smith_cli_command("code grep azdo SRE repo pattern")
 
 
+def test_validate_smith_cli_command_allows_prefixed_smith_global_flags():
+    tokens = validate_smith_cli_command(
+        'smith --github-org openai --verbose --format json code search "otelcol.exporter.loki" --take 5'
+    )
+
+    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--provider", "github"]
+
+
 def test_build_smith_cli_subprocess_injects_benchmark_org_and_local_src_path():
     argv, env = build_smith_cli_subprocess("repos github")
 

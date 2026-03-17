@@ -65,6 +65,38 @@ class BaseProvider(ABC):
     def _handle_response_status(self, response: Any, resolved_url: str) -> None:
         pass
 
+    def _perform_http_request(
+        self,
+        http_session: Any,
+        *,
+        method: str,
+        resolved_url: str,
+        params: dict[str, Any] | None,
+        json_body: dict[str, Any] | None,
+        headers: dict[str, str],
+        timeout: int,
+    ) -> Any:
+        return http_session.request(
+            method,
+            resolved_url,
+            params=params,
+            json=json_body,
+            headers=headers,
+            timeout=timeout,
+        )
+
+    def _should_refresh_auth_response(self, response: Any) -> bool:
+        return int(getattr(response, "status_code", 0)) in (401, 403)
+
+    def _is_retryable_response(self, response: Any) -> bool:
+        return is_retryable_get_status(int(getattr(response, "status_code", 0)))
+
+    def _is_auth_failure_response(self, response: Any) -> bool:
+        return int(getattr(response, "status_code", 0)) in (401, 403)
+
+    def _record_retry_cooldown(self, response: Any, retry_index: int, sleep_seconds: float) -> None:
+        return None
+
     def _get_http_session(self, *, session: requests.Session | None = None) -> requests.Session:
         if session is not None:
             return session
@@ -117,11 +149,12 @@ class BaseProvider(ABC):
             attempt_headers["Authorization"] = f"Bearer {self._get_token()}"
             logger.debug("%s %s (attempt %d/%d)", method_upper, resolved_url, retry_index + 1, max_attempts)
             try:
-                response = http_session.request(
-                    method,
-                    resolved_url,
+                response = self._perform_http_request(
+                    http_session,
+                    method=method,
+                    resolved_url=resolved_url,
                     params=params,
-                    json=json_body,
+                    json_body=json_body,
                     headers=attempt_headers,
                     timeout=timeout,
                 )
@@ -135,16 +168,17 @@ class BaseProvider(ABC):
 
             logger.debug("%s %s -> HTTP %d", method_upper, resolved_url, response.status_code)
 
-            if response.status_code in (401, 403):
+            if self._should_refresh_auth_response(response):
                 logger.debug("HTTP %d, refreshing token and retrying", response.status_code)
                 retry_headers = dict(request_headers)
                 retry_headers["Authorization"] = f"Bearer {self._get_token(force_refresh=True)}"
                 try:
-                    response = http_session.request(
-                        method,
-                        resolved_url,
+                    response = self._perform_http_request(
+                        http_session,
+                        method=method,
+                        resolved_url=resolved_url,
                         params=params,
-                        json=json_body,
+                        json_body=json_body,
                         headers=retry_headers,
                         timeout=timeout,
                     )
@@ -154,10 +188,11 @@ class BaseProvider(ABC):
 
             if (
                 is_retryable_get
-                and is_retryable_get_status(int(response.status_code))
+                and self._is_retryable_response(response)
                 and retry_index < max_attempts - 1
             ):
                 sleep_secs = self._retry_sleep_seconds(response=response, retry_index=retry_index)
+                self._record_retry_cooldown(response, retry_index, sleep_secs)
                 logger.debug("HTTP %d is retryable, sleeping %.1fs", response.status_code, sleep_secs)
                 time.sleep(sleep_secs)
                 continue
@@ -166,7 +201,7 @@ class BaseProvider(ABC):
         if response is None:
             raise SmithApiError(f"No response received for {resolved_url}")
 
-        if response.status_code in (401, 403):
+        if self._is_auth_failure_response(response):
             raise SmithAuthError(self._auth_error_message())
 
         self._handle_response_status(response, resolved_url)

@@ -42,7 +42,7 @@ from smith.benchmark.copilot_sdk import (
 )
 from smith.benchmark.github_mcp import DEFAULT_GITHUB_MCP_URL, build_github_mcp_server
 from smith.benchmark.grading import grade_run_directory
-from smith.benchmark.smith_cli import execute_smith_cli_command
+from smith.benchmark.smith_cli import InProcessSmithCliRunner, execute_smith_cli_command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EVALS_PATH = REPO_ROOT / "evals" / "evals.json"
@@ -492,11 +492,13 @@ def default_model_settings() -> ModelSettings:
 
 
 def build_smith_agent(model: str) -> Agent[Any]:
+    runner = InProcessSmithCliRunner()
+
     @function_tool
     def smith_cli(command: str) -> str:
         """Run a read-only Smith command against GitHub repositories in the OpenAI org."""
 
-        return execute_smith_cli_command(command)
+        return execute_smith_cli_command(command, runner=runner)
 
     return Agent(
         name="smith_skill_benchmark",
