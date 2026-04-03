@@ -38,6 +38,8 @@ _CACHE_LOCKS_GUARD = threading.Lock()
 
 
 class GitHubCodeMixin:
+    _repository_list_cache: list[dict[str, Any]] | None
+
     def list_projects(self: Any) -> list[dict[str, Any]]:
         org = self._require_github_org()
         return [

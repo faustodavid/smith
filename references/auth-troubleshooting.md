@@ -14,6 +14,12 @@ export AZURE_DEVOPS_ORG="<org>"
 export GITHUB_ORG="<org>"
 ```
 
+## Missing `GITLAB_GROUP`
+
+```bash
+export GITLAB_GROUP="<group>"
+```
+
 ## Azure Login Or Token Failure
 
 ```bash
@@ -33,8 +39,18 @@ gh auth login
 gh auth status
 ```
 
+## GitLab Auth Failure
+
+```bash
+export GITLAB_TOKEN="<token>"
+# or
+glab auth login
+glab auth status
+```
+
 ## 401 Or 403 After Login
 
 - Confirm your account can access the target org, project, or repo.
 - Validate the Azure DevOps org URL: `https://dev.azure.com/<org>`.
+- Validate the GitLab group path configured in `GITLAB_GROUP`.
 - Retry once.

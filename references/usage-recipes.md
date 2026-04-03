@@ -7,8 +7,10 @@ Use these patterns after the trigger is confirmed. If a command fails, open `ref
 ```bash
 export AZURE_DEVOPS_ORG="<org>"
 export GITHUB_ORG="<org>"
+export GITLAB_GROUP="<group>"
 az login
 gh auth status
+glab auth status
 ```
 
 GitHub repo-shape rule:
@@ -16,6 +18,12 @@ GitHub repo-shape rule:
 - Search results look like `org/repo:path`.
 - GitHub command arguments use bare `<repo>`, not `org/repo`.
 - Example: `smith code grep github openai-python "OPENAI_WEBHOOK_SECRET"`
+
+GitLab repo-shape rule:
+
+- Search results look like `group/repo:path`.
+- GitLab command arguments use `<repo>` relative to configured `GITLAB_GROUP`, not full `group/repo`.
+- Example: `smith code grep gitlab api "CI_JOB_TOKEN"`
 
 ## Default Loop
 
@@ -27,11 +35,13 @@ smith code search "<keywords>" --take 30
 ```bash
 smith code grep azdo <project> <repo> ".*" --output-mode files_with_matches
 smith code grep github <repo> ".*" --output-mode files_with_matches
+smith code grep gitlab <repo> ".*" --output-mode files_with_matches
 ```
 3. Extract proof from the smallest useful scope:
 ```bash
 smith code grep azdo <project> <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
 smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
+smith code grep gitlab <repo> "<regex>" --path <path> --glob "<glob>" --context-lines 2
 ```
 4. Corroborate with `prs`, `pipelines logs`, or `stories` only when code evidence is not enough on its own.
 5. Report exact `project/repository:path` or `org/repository:path` evidence. If unresolved, say `not enough evidence` and give one next command.
@@ -48,9 +58,11 @@ smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --context-
 ```bash
 smith orgs azdo
 smith orgs github
+smith orgs gitlab
 smith repos azdo
 smith repos azdo <project>
 smith repos github
+smith repos gitlab
 ```
 
 ## Pull Requests
@@ -62,6 +74,9 @@ smith prs threads azdo <project> <repo> <id>
 smith prs list github <repo> --status active,completed
 smith prs get github <repo> <id>
 smith prs threads github <repo> <id>
+smith prs list gitlab <repo> --status active,completed
+smith prs get gitlab <repo> <id>
+smith prs threads gitlab <repo> <id>
 ```
 
 ## Pipeline Logs
@@ -72,6 +87,8 @@ smith pipelines logs grep azdo <project> <id> "ERROR|Exception" --output-mode lo
 smith pipelines logs grep azdo <project> <id> ".*" --log-id <log_id> --from-line <n>
 smith pipelines logs list github <repo> <id>
 smith pipelines logs grep github <repo> <id> "ERROR|Exception"
+smith pipelines logs list gitlab <repo> <id>
+smith pipelines logs grep gitlab <repo> <id> "ERROR|Exception"
 ```
 
 ## Stories And Issues
@@ -83,6 +100,9 @@ smith stories mine azdo <project>
 smith stories get github <repo> <id>
 smith stories search github <repo> --query "<text>"
 smith stories mine github <repo>
+smith stories get gitlab <repo> <id>
+smith stories search gitlab <repo> --query "<text>"
+smith stories mine gitlab <repo>
 ```
 
 ## Utilities
@@ -90,6 +110,7 @@ smith stories mine github <repo>
 ```bash
 smith code search "<query>" --format json
 smith code grep github <repo> "<regex>" --format json
+smith code grep gitlab <repo> "<regex>" --format json
 export GITHUB_GREP_ENABLE_PARALLEL=true
 export GITHUB_GREP_MAX_WORKERS=8
 smith code grep github <repo> "<regex>" --path <path> --glob "<glob>" --branch <branch>

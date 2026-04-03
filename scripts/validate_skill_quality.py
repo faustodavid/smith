@@ -133,6 +133,7 @@ def classify_trigger(prompt: str) -> str:
         "grep",
         "loki",
         "github",
+        "gitlab",
         "build failure",
         "build log",
         "build logs",
@@ -144,6 +145,7 @@ def classify_trigger(prompt: str) -> str:
         "pr ",
         "prs ",
         "pull request",
+        "merge request",
         "issue",
         "stories",
         "work items",
@@ -188,12 +190,18 @@ def run_trigger_checks() -> list[str]:
     explicit_invocation_markers = [
         "smith code search",
         "smith orgs github",
+        "smith orgs gitlab",
         "smith repos github",
+        "smith repos gitlab",
         "code grep github <repo>",
+        "code grep gitlab <repo>",
         "code grep azdo <project> <repo>",
         "prs list github <repo>",
+        "prs list gitlab <repo>",
         "pipelines logs list github <repo> <id>",
+        "pipelines logs list gitlab <repo> <id>",
         "stories search azdo <project> --query",
+        "stories search gitlab <repo> --query",
     ]
     for marker in explicit_invocation_markers:
         if marker not in skill_text:
@@ -256,19 +264,26 @@ def run_behavior_checks() -> list[str]:
     command_markers = [
         "smith orgs azdo",
         "smith orgs github",
+        "smith orgs gitlab",
         "smith repos azdo <project>",
         "smith repos github",
+        "smith repos gitlab",
         "smith code search",
         "smith code grep azdo <project> <repo>",
         "smith code grep github <repo>",
+        "smith code grep gitlab <repo>",
         "smith prs list azdo <project> <repo>",
         "smith prs get github <repo> <id>",
+        "smith prs get gitlab <repo> <id>",
         "smith prs threads azdo <project> <repo> <id>",
         "smith pipelines logs list azdo <project> <id>",
         "smith pipelines logs grep github <repo> <id>",
+        "smith pipelines logs grep gitlab <repo> <id>",
         "smith stories get azdo <project> <id>",
         "smith stories search github <repo> --query",
+        "smith stories search gitlab <repo> --query",
         "smith stories mine azdo <project>",
+        "smith stories mine gitlab <repo>",
     ]
     for marker in command_markers:
         if marker not in recipes_text and marker not in skill_text:
@@ -338,6 +353,7 @@ def _has_evidence_path_contract(text: str) -> bool:
         for marker in (
             "project/repository:path",
             "org/repository:path",
+            "group/repository:path",
             "repo:path",
         )
     )

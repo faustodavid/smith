@@ -4,8 +4,9 @@ import threading
 import time
 from typing import Any
 
-from smith.benchmark import smith_mcp_server
 from tests.support import GitHubApiStubServer, StubRequest, StubResponse
+
+from smith.benchmark import smith_mcp_server
 
 
 def _benchmark_env(*, base_url: str) -> dict[str, str]:

@@ -4,7 +4,7 @@ A `smith` investigation is acceptable only if all gates pass.
 
 ## Gate 1: Trigger
 
-- The request is read-only and GitHub or Azure DevOps backed.
+- The request is read-only and GitHub, GitLab, or Azure DevOps backed.
 - Ambiguous requests start with discovery.
 - Out-of-scope requests are not handled with `smith`.
 
@@ -18,14 +18,18 @@ A `smith` investigation is acceptable only if all gates pass.
 - Provider syntax is explicit:
   - `smith code grep azdo <project> <repo> "<regex>"`
   - `smith code grep github <repo> "<regex>"`
+  - `smith code grep gitlab <repo> "<regex>"`
   - `smith pipelines logs list github <repo> <id>`
 - GitHub repo arguments stay bare:
   - Search results may look like `org/repo:path`
   - Follow-up GitHub commands still take `<repo>`, not `org/repo`
+- GitLab repo arguments stay group-relative:
+  - Search results may look like `group/repo:path`
+  - Follow-up GitLab commands take `<repo>` relative to configured `GITLAB_GROUP`, not full `group/repo`
 
 ## Gate 3: Answer Quality
 
-- The answer cites exact `project/repository:path` or `org/repository:path` evidence.
+- The answer cites exact `project/repository:path`, `org/repository:path`, or `group/repository:path` evidence.
 - The answer ends with a `Sources` section.
 - Single-provider answers stay flat; multi-provider answers split by provider.
 - Unresolved answers include `not enough evidence` plus one next command.

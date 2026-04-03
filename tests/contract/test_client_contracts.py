@@ -43,9 +43,15 @@ class _FakeGitHubProvider(_FakeProvider):
     provider_name = "github"
 
 
+class _FakeGitLabProvider(_FakeProvider):
+    instances: list["_FakeGitLabProvider"] = []
+    provider_name = "gitlab"
+
+
 def _install_client_fakes(monkeypatch: Any, runtime: Any) -> dict[str, Any]:
     _FakeAzdoProvider.instances.clear()
     _FakeGitHubProvider.instances.clear()
+    _FakeGitLabProvider.instances.clear()
     calls: dict[str, Any] = {}
 
     def _fake_run_fanout(
@@ -77,12 +83,13 @@ def _install_client_fakes(monkeypatch: Any, runtime: Any) -> dict[str, Any]:
     monkeypatch.setattr(client_module, "configure_http_session", lambda session, **kwargs: calls.setdefault("session", kwargs))
     monkeypatch.setattr(client_module, "AzdoProvider", _FakeAzdoProvider)
     monkeypatch.setattr(client_module, "GitHubProvider", _FakeGitHubProvider)
+    monkeypatch.setattr(client_module, "GitLabProvider", _FakeGitLabProvider)
     monkeypatch.setattr(client_module, "run_fanout", _fake_run_fanout)
     return calls
 
 
 def test_client_requires_at_least_one_configured_provider(monkeypatch: Any) -> None:
-    runtime = make_runtime_config(azdo_org="", github_org="")
+    runtime = make_runtime_config(azdo_org="", github_org="", gitlab_group="")
     monkeypatch.setattr(client_module, "parse_runtime_config", lambda **kwargs: runtime)
 
     with pytest.raises(ValueError, match="No providers configured"):
@@ -90,7 +97,7 @@ def test_client_requires_at_least_one_configured_provider(monkeypatch: Any) -> N
 
 
 def test_client_initializes_runtime_and_configures_session(monkeypatch: Any) -> None:
-    runtime = make_runtime_config(timeout_seconds=45, github_timeout_seconds=50)
+    runtime = make_runtime_config(timeout_seconds=45, github_timeout_seconds=50, gitlab_timeout_seconds=55)
     session = object()
     calls = _install_client_fakes(monkeypatch, runtime)
 
@@ -100,11 +107,12 @@ def test_client_initializes_runtime_and_configures_session(monkeypatch: Any) -> 
     assert client.azdo_org == "acme"
     assert client.timeout_seconds == 45
     assert client.github_timeout_seconds == 50
+    assert client.gitlab_timeout_seconds == 55
     assert calls["session"] == {"pool_connections": 16, "pool_maxsize": 32}
 
 
 def test_client_lazily_creates_and_caches_provider_instances(monkeypatch: Any) -> None:
-    runtime = make_runtime_config(github_org="")
+    runtime = make_runtime_config(github_org="", gitlab_group="")
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object())
 
@@ -115,6 +123,8 @@ def test_client_lazily_creates_and_caches_provider_instances(monkeypatch: Any) -
     assert len(_FakeAzdoProvider.instances) == 1
     with pytest.raises(ValueError, match="GitHub is not configured"):
         client._get_github()
+    with pytest.raises(ValueError, match="GitLab is not configured"):
+        client._get_gitlab()
 
 
 def test_provider_entry_helpers_extract_warning_and_partial_state() -> None:
@@ -140,11 +150,13 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
         operations={
             "azdo": lambda: {"provider": "azdo"},
             "github": lambda: {"provider": "github"},
+            "gitlab": lambda: {"provider": "gitlab"},
         },
     )
 
-    assert calls["run_fanout"] == {"providers": ["github", "azdo"], "requested_provider": "all"}
+    assert calls["run_fanout"] == {"providers": ["github", "gitlab", "azdo"], "requested_provider": "all"}
     assert result["providers"]["github"]["data"]["provider"] == "github"
+    assert result["providers"]["gitlab"]["data"]["provider"] == "gitlab"
     assert result["providers"]["azdo"]["data"]["provider"] == "azdo"
 
 
@@ -152,6 +164,7 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
     ("method_name", "kwargs", "expected_provider", "expected_method", "expected_kwargs"),
     [
         ("execute_discover_projects", {"provider": "azdo"}, "azdo", "list_projects", {}),
+        ("execute_discover_projects", {"provider": "gitlab"}, "gitlab", "list_projects", {}),
         (
             "execute_code_grep",
             {
@@ -191,6 +204,13 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
             {"repo": "repo-a", "pull_request_id": 17},
         ),
         (
+            "execute_pr_get",
+            {"provider": "gitlab", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
+            "gitlab",
+            "get_pull_request",
+            {"repo": "repo-a", "pull_request_id": 17},
+        ),
+        (
             "execute_pr_threads",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
             "azdo",
@@ -198,9 +218,23 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
             {"project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
         ),
         (
+            "execute_pr_threads",
+            {"provider": "gitlab", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
+            "gitlab",
+            "get_pull_request_threads",
+            {"repo": "repo-a", "pull_request_id": 17},
+        ),
+        (
             "execute_ci_logs",
             {"provider": "github", "project": "proj-a", "repo": None, "build_id": 19},
             "github",
+            "get_build_log",
+            {"repo": "proj-a", "build_id": 19},
+        ),
+        (
+            "execute_ci_logs",
+            {"provider": "gitlab", "project": "proj-a", "repo": None, "build_id": 19},
+            "gitlab",
             "get_build_log",
             {"repo": "proj-a", "build_id": 19},
         ),
@@ -234,9 +268,45 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
             },
         ),
         (
+            "execute_ci_grep",
+            {
+                "provider": "gitlab",
+                "project": "proj-a",
+                "repo": None,
+                "build_id": 19,
+                "log_id": 5,
+                "pattern": "error",
+                "output_mode": "count",
+                "case_insensitive": False,
+                "context_lines": 0,
+                "from_line": 1,
+                "to_line": 2,
+            },
+            "gitlab",
+            "grep_build_log",
+            {
+                "repo": "proj-a",
+                "build_id": 19,
+                "log_id": 5,
+                "pattern": "error",
+                "output_mode": "count",
+                "case_insensitive": False,
+                "context_lines": 0,
+                "from_line": 1,
+                "to_line": 2,
+            },
+        ),
+        (
             "execute_work_get",
             {"provider": "github", "project": "proj-a", "repo": None, "work_item_id": 21},
             "github",
+            "get_ticket_by_id",
+            {"repo": "proj-a", "work_item_id": 21},
+        ),
+        (
+            "execute_work_get",
+            {"provider": "gitlab", "project": "proj-a", "repo": None, "work_item_id": 21},
+            "gitlab",
             "get_ticket_by_id",
             {"repo": "proj-a", "work_item_id": 21},
         ),
@@ -268,11 +338,45 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
             },
         ),
         (
+            "execute_work_search",
+            {
+                "provider": "gitlab",
+                "query": "incident",
+                "project": "proj-a",
+                "repo": "repo-a",
+                "area": None,
+                "work_item_type": None,
+                "state": "Open",
+                "assigned_to": "alice",
+                "skip": 0,
+                "take": 10,
+            },
+            "gitlab",
+            "search_work_items",
+            {
+                "query": "incident",
+                "project": "proj-a",
+                "repo": "repo-a",
+                "state": "Open",
+                "assigned_to": "alice",
+                "skip": 0,
+                "take": 10,
+                "include_closed": True,
+            },
+        ),
+        (
             "execute_work_mine",
             {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
             "azdo",
             "get_my_work_items",
             {"project": "proj-a", "include_closed": False, "skip": 1, "take": 5},
+        ),
+        (
+            "execute_work_mine",
+            {"provider": "gitlab", "project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
+            "gitlab",
+            "get_my_work_items",
+            {"project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
         ),
     ],
 )
@@ -330,7 +434,7 @@ def test_execute_discover_repos_for_azdo_without_project_fans_out_projects(monke
     ]
 
 
-def test_execute_code_search_runs_both_provider_operations(monkeypatch: Any) -> None:
+def test_execute_code_search_runs_all_provider_operations(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object())
@@ -344,18 +448,20 @@ def test_execute_code_search_runs_both_provider_operations(monkeypatch: Any) -> 
         take=5,
     )
 
-    assert result["summary"]["queried"] == ["github", "azdo"]
+    assert result["summary"]["queried"] == ["github", "gitlab", "azdo"]
     assert result["providers"]["github"]["data"]["method"] == "search_code"
+    assert result["providers"]["gitlab"]["data"]["method"] == "search_code"
     assert result["providers"]["azdo"]["data"]["kwargs"]["repos"] == ["repo-a"]
 
 
-def test_execute_pr_list_uses_projects_as_github_repo_fallback(monkeypatch: Any) -> None:
+@pytest.mark.parametrize("provider", ["github", "gitlab"])
+def test_execute_pr_list_uses_projects_as_repo_fallback(monkeypatch: Any, provider: str) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object())
 
     result = client.execute_pr_list(
-        provider="github",
+        provider=provider,
         projects=["repo-from-project"],
         repos=None,
         statuses=["active"],
@@ -368,17 +474,17 @@ def test_execute_pr_list_uses_projects_as_github_repo_fallback(monkeypatch: Any)
         include_labels=False,
     )
 
-    assert result["providers"]["github"]["data"]["kwargs"]["repos"] == ["repo-from-project"]
+    assert result["providers"][provider]["data"]["kwargs"]["repos"] == ["repo-from-project"]
 
 def test_legacy_wrapper_methods_delegate_to_canonical_operations(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object())
 
-    discover_projects = client.execute_projects_list(provider="azdo")
-    ci_logs = client.execute_build_logs(provider="github", project=None, repo="repo-a", build_id=1)
-    work_get = client.execute_board_ticket(provider="github", project=None, repo="repo-a", work_item_id=2)
+    discover_projects = client.execute_projects_list(provider="gitlab")
+    ci_logs = client.execute_build_logs(provider="gitlab", project=None, repo="repo-a", build_id=1)
+    work_get = client.execute_board_ticket(provider="gitlab", project=None, repo="repo-a", work_item_id=2)
 
-    assert discover_projects["providers"]["azdo"]["data"]["method"] == "list_projects"
-    assert ci_logs["providers"]["github"]["data"]["method"] == "get_build_log"
-    assert work_get["providers"]["github"]["data"]["method"] == "get_ticket_by_id"
+    assert discover_projects["providers"]["gitlab"]["data"]["method"] == "list_projects"
+    assert ci_logs["providers"]["gitlab"]["data"]["method"] == "get_build_log"
+    assert work_get["providers"]["gitlab"]["data"]["method"] == "get_ticket_by_id"

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from tests.support import GitHubApiStubServer, StubRequest, StubResponse
+
 from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.smith_cli import execute_smith_cli_command
-from tests.support import GitHubApiStubServer, StubRequest, StubResponse
 
 
 def _benchmark_env(*, base_url: str) -> dict[str, str]:

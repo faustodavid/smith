@@ -19,6 +19,9 @@ class RuntimeConfig:
     github_timeout_seconds: int
     github_max_concurrent_requests: int
     github_rate_limit_max_sleep_seconds: int
+    gitlab_group: str
+    gitlab_api_url: str
+    gitlab_timeout_seconds: int
     http_pool_maxsize: int
     http_pool_connections: int
     http_retry_max_attempts: int
@@ -31,6 +34,10 @@ class RuntimeConfig:
     @property
     def github_configured(self) -> bool:
         return bool(self.github_org)
+
+    @property
+    def gitlab_configured(self) -> bool:
+        return bool(self.gitlab_group)
 
     @property
     def azdo_org_url(self) -> str:
@@ -81,6 +88,8 @@ def parse_runtime_config(
     github_org: str | None = None,
     github_api_url_default: str,
     github_api_version_default: str,
+    gitlab_group: str | None = None,
+    gitlab_api_url_default: str,
 ) -> RuntimeConfig:
     resolved_azdo_org = (azdo_org or os.getenv("AZURE_DEVOPS_ORG", "") or "").strip()
 
@@ -128,6 +137,14 @@ def parse_runtime_config(
             default=120,
             min_value=1,
             max_value=900,
+        ),
+        gitlab_group=(gitlab_group or os.getenv("GITLAB_GROUP", "") or "").strip().strip("/"),
+        gitlab_api_url=os.getenv("GITLAB_API_URL", gitlab_api_url_default).rstrip("/"),
+        gitlab_timeout_seconds=parse_int_env(
+            "GITLAB_TIMEOUT_SECONDS",
+            default=timeout,
+            min_value=1,
+            max_value=300,
         ),
         http_pool_maxsize=parse_int_env(
             "SMITH_HTTP_POOL_MAXSIZE",

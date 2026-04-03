@@ -13,6 +13,7 @@ from smith.http import configure_http_session
 from smith.providers.azdo import AzdoProvider
 from smith.providers.base import normalize_provider, normalize_single_provider, resolve_providers
 from smith.providers.github import GITHUB_DEFAULT_API_URL, GITHUB_DEFAULT_API_VERSION, GitHubProvider
+from smith.providers.gitlab import GITLAB_DEFAULT_API_URL, GitLabProvider
 
 
 class SmithClient:
@@ -21,6 +22,7 @@ class SmithClient:
         *,
         azdo_org: str | None = None,
         github_org: str | None = None,
+        gitlab_group: str | None = None,
         api_version: str | None = None,
         timeout_seconds: int | None = None,
         max_output_chars: int | None = None,
@@ -35,13 +37,16 @@ class SmithClient:
             github_org=github_org,
             github_api_url_default=GITHUB_DEFAULT_API_URL,
             github_api_version_default=GITHUB_DEFAULT_API_VERSION,
+            gitlab_group=gitlab_group,
+            gitlab_api_url_default=GITLAB_DEFAULT_API_URL,
         )
 
-        if not runtime.azdo_configured and not runtime.github_configured:
+        if not runtime.azdo_configured and not runtime.github_configured and not runtime.gitlab_configured:
             raise ValueError(
                 "No providers configured. Set at least one of:\n"
                 "  - AZURE_DEVOPS_ORG (for Azure DevOps)\n"
-                "  - GITHUB_ORG (for GitHub)"
+                "  - GITHUB_ORG (for GitHub)\n"
+                "  - GITLAB_GROUP (for GitLab)"
             )
 
         main_session = session or requests.Session()
@@ -56,6 +61,7 @@ class SmithClient:
         self._main_session = main_session
         self._azdo: AzdoProvider | None = None
         self._github: GitHubProvider | None = None
+        self._gitlab: GitLabProvider | None = None
 
         self.azdo_org = runtime.azdo_org
         self.api_version = runtime.api_version
@@ -65,6 +71,9 @@ class SmithClient:
         self.github_api_url = runtime.github_api_url
         self.github_api_version = runtime.github_api_version
         self.github_timeout_seconds = runtime.github_timeout_seconds
+        self.gitlab_group = runtime.gitlab_group
+        self.gitlab_api_url = runtime.gitlab_api_url
+        self.gitlab_timeout_seconds = runtime.gitlab_timeout_seconds
 
     def _get_azdo(self) -> AzdoProvider:
         if self._azdo is None:
@@ -92,6 +101,19 @@ class SmithClient:
                 session=self._main_session,
             )
         return self._github
+
+    def _get_gitlab(self) -> GitLabProvider:
+        if self._gitlab is None:
+            if not self._runtime.gitlab_configured:
+                raise ValueError(
+                    "GitLab is not configured. "
+                    "Set GITLAB_GROUP to enable this provider."
+                )
+            self._gitlab = GitLabProvider(
+                config=self._runtime,
+                session=self._main_session,
+            )
+        return self._gitlab
 
     @staticmethod
     def _provider_warnings_and_partial(payload: Any) -> tuple[list[str], bool]:
@@ -172,6 +194,7 @@ class SmithClient:
             operations={
                 "azdo": lambda: self._get_azdo().list_projects(),
                 "github": lambda: self._get_github().list_projects(),
+                "gitlab": lambda: self._get_gitlab().list_projects(),
             },
         )
 
@@ -187,6 +210,7 @@ class SmithClient:
             operations={
                 "azdo": lambda: self._list_azdo_repositories(project=project),
                 "github": lambda: self._get_github().list_repositories(),
+                "gitlab": lambda: self._get_gitlab().list_repositories(),
             },
         )
 
@@ -222,6 +246,13 @@ class SmithClient:
                     take=take,
                 ),
                 "github": lambda: self._get_github().search_code(
+                    query=query,
+                    project=project,
+                    repos=repos,
+                    skip=skip,
+                    take=take,
+                ),
+                "gitlab": lambda: self._get_gitlab().search_code(
                     query=query,
                     project=project,
                     repos=repos,
@@ -265,6 +296,18 @@ class SmithClient:
                     to_line=to_line,
                 ),
                 "github": lambda: self._get_github().grep(
+                    repo=repo,
+                    pattern=pattern,
+                    path=path,
+                    branch=branch,
+                    glob=glob,
+                    output_mode=output_mode,
+                    case_insensitive=case_insensitive,
+                    context_lines=context_lines,
+                    from_line=from_line,
+                    to_line=to_line,
+                ),
+                "gitlab": lambda: self._get_gitlab().grep(
                     repo=repo,
                     pattern=pattern,
                     path=path,
@@ -321,6 +364,17 @@ class SmithClient:
                     exclude_drafts=exclude_drafts,
                     include_labels=include_labels,
                 ),
+                "gitlab": lambda: self._get_gitlab().list_pull_requests(
+                    repos=repos or projects,
+                    statuses=statuses,
+                    creators=creators,
+                    date_from=date_from,
+                    date_to=date_to,
+                    skip=skip,
+                    take=take,
+                    exclude_drafts=exclude_drafts,
+                    include_labels=include_labels,
+                ),
             },
         )
 
@@ -342,6 +396,10 @@ class SmithClient:
                     pull_request_id=pull_request_id,
                 ),
                 "github": lambda: self._get_github().get_pull_request(
+                    repo=repo,
+                    pull_request_id=pull_request_id,
+                ),
+                "gitlab": lambda: self._get_gitlab().get_pull_request(
                     repo=repo,
                     pull_request_id=pull_request_id,
                 ),
@@ -369,6 +427,10 @@ class SmithClient:
                     repo=repo,
                     pull_request_id=pull_request_id,
                 ),
+                "gitlab": lambda: self._get_gitlab().get_pull_request_threads(
+                    repo=repo,
+                    pull_request_id=pull_request_id,
+                ),
             },
         )
 
@@ -387,6 +449,7 @@ class SmithClient:
             operations={
                 "azdo": lambda: self._get_azdo().get_build_log(project=str(project), build_id=build_id),
                 "github": lambda: self._get_github().get_build_log(repo=str(effective_repo), build_id=build_id),
+                "gitlab": lambda: self._get_gitlab().get_build_log(repo=str(effective_repo), build_id=build_id),
             },
         )
 
@@ -422,6 +485,17 @@ class SmithClient:
                     to_line=to_line,
                 ),
                 "github": lambda: self._get_github().grep_build_log(
+                    repo=str(effective_repo),
+                    build_id=build_id,
+                    log_id=log_id,
+                    pattern=pattern,
+                    output_mode=output_mode,
+                    case_insensitive=case_insensitive,
+                    context_lines=context_lines,
+                    from_line=from_line,
+                    to_line=to_line,
+                ),
+                "gitlab": lambda: self._get_gitlab().grep_build_log(
                     repo=str(effective_repo),
                     build_id=build_id,
                     log_id=log_id,
@@ -494,6 +568,7 @@ class SmithClient:
             operations={
                 "azdo": lambda: self._get_azdo().get_ticket_by_id(project=str(project), work_item_id=work_item_id),
                 "github": lambda: self._get_github().get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
+                "gitlab": lambda: self._get_gitlab().get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
             },
         )
 
@@ -535,6 +610,16 @@ class SmithClient:
                     take=take,
                     include_closed=True,
                 ),
+                "gitlab": lambda: self._get_gitlab().search_work_items(
+                    query=query,
+                    project=project,
+                    repo=repo,
+                    state=state,
+                    assigned_to=assigned_to,
+                    skip=skip,
+                    take=take,
+                    include_closed=True,
+                ),
             },
         )
 
@@ -559,6 +644,13 @@ class SmithClient:
                     take=take,
                 ),
                 "github": lambda: self._get_github().get_my_work_items(
+                    project=project,
+                    repo=repo,
+                    include_closed=include_closed,
+                    skip=skip,
+                    take=take,
+                ),
+                "gitlab": lambda: self._get_gitlab().get_my_work_items(
                     project=project,
                     repo=repo,
                     include_closed=include_closed,

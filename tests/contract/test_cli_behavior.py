@@ -17,7 +17,7 @@ class _FakeClient:
         self._err = err
 
     def execute_discover_projects(self, *, provider: str) -> Any:
-        assert provider in {"azdo", "github", "all"}
+        assert provider in {"azdo", "github", "gitlab", "all"}
         if self._err is not None:
             raise self._err
         return self._payload

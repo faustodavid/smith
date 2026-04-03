@@ -13,7 +13,9 @@
     "name": "discovery_helpers",
     "expected_sequence": [
       "smith orgs github",
+      "smith orgs gitlab",
       "smith repos github",
+      "smith repos gitlab",
       "smith repos azdo <project>"
     ],
     "requires_evidence_paths": false
@@ -29,11 +31,30 @@
     "requires_evidence_paths": false
   },
   {
+    "name": "gitlab_repo_shape_rule",
+    "required_phrase": "relative to configured `GITLAB_GROUP`",
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "gitlab_repo_shape_negative_example",
+    "required_phrase": "not full `group/repo`",
+    "requires_evidence_paths": false
+  },
+  {
     "name": "read_only_followups",
     "expected_sequence": [
       "smith prs list github <repo>",
       "smith pipelines logs list github <repo> <id>",
       "smith stories search azdo <project> --query"
+    ],
+    "requires_evidence_paths": true
+  },
+  {
+    "name": "gitlab_followups",
+    "expected_sequence": [
+      "smith prs list gitlab <repo>",
+      "smith pipelines logs list gitlab <repo> <id>",
+      "smith stories search gitlab <repo> --query"
     ],
     "requires_evidence_paths": true
   }
