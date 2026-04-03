@@ -105,13 +105,13 @@ def test_gitlab_grep_supports_match_all_shortcut_compile_errors_and_warning_path
     assert compile_error["text"].startswith("Error: Invalid regex pattern")
 
 
-def test_gitlab_list_pull_requests_maps_statuses_filters_and_labels(monkeypatch: Any) -> None:
+def test_gitlab_list_pull_requests_uses_combined_single_repo_stream_for_mixed_statuses(monkeypatch: Any) -> None:
     provider = _provider()
     calls: list[dict[str, Any]] = []
 
-    active_mr = {
+    newest_active_mr = {
         "iid": 1,
-        "title": "Active MR",
+        "title": "Newest active MR",
         "state": "opened",
         "draft": False,
         "author": {"username": "alice"},
@@ -137,16 +137,44 @@ def test_gitlab_list_pull_requests_maps_statuses_filters_and_labels(monkeypatch:
         "labels": ["enhancement"],
         "project_id": 101,
     }
-    closed_mr = {
+    older_active_mr = {
         "iid": 3,
-        "title": "Closed MR",
-        "state": "closed",
+        "title": "Older active MR",
+        "state": "opened",
         "draft": False,
         "author": {"username": "carol"},
         "created_at": "2025-01-08T00:00:00Z",
-        "closed_at": "2025-01-09T00:00:00Z",
+        "closed_at": None,
         "merged_at": None,
         "source_branch": "feature/three",
+        "target_branch": "main",
+        "labels": [],
+        "project_id": 101,
+    }
+    closed_mr = {
+        "iid": 4,
+        "title": "Closed MR",
+        "state": "closed",
+        "draft": False,
+        "author": {"username": "dave"},
+        "created_at": "2025-01-07T00:00:00Z",
+        "closed_at": "2025-01-08T00:00:00Z",
+        "merged_at": None,
+        "source_branch": "feature/four",
+        "target_branch": "main",
+        "labels": [],
+        "project_id": 101,
+    }
+    oldest_active_mr = {
+        "iid": 5,
+        "title": "Oldest active MR",
+        "state": "opened",
+        "draft": False,
+        "author": {"username": "erin"},
+        "created_at": "2025-01-06T00:00:00Z",
+        "closed_at": None,
+        "merged_at": None,
+        "source_branch": "feature/five",
         "target_branch": "main",
         "labels": [],
         "project_id": 101,
@@ -155,8 +183,10 @@ def test_gitlab_list_pull_requests_maps_statuses_filters_and_labels(monkeypatch:
     def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
         calls.append({"method": method, "path": path, "params": params})
         state = (params or {}).get("state")
+        if state == "all":
+            return [newest_active_mr, merged_mr, older_active_mr, closed_mr, oldest_active_mr]
         if state == "opened":
-            return [active_mr]
+            return [newest_active_mr, older_active_mr, oldest_active_mr]
         if state == "merged":
             return [merged_mr]
         if state == "closed":
@@ -172,19 +202,23 @@ def test_gitlab_list_pull_requests_maps_statuses_filters_and_labels(monkeypatch:
         date_from=None,
         date_to=None,
         skip=0,
-        take=10,
+        take=2,
         exclude_drafts=True,
         include_labels=True,
     )
 
-    assert [entry["status"] for entry in result["results"]] == ["active", "completed", "abandoned"]
+    assert [entry["status"] for entry in result["results"]] == ["active", "completed"]
     assert result["results"][0]["labels"] == ["bug"]
     assert result["results"][1]["labels"] == ["enhancement"]
-    assert result["returned_count"] == 3
-    assert result["has_more"] is False
-    assert calls[0]["params"]["state"] == "opened"
-    assert calls[1]["params"]["state"] == "merged"
-    assert calls[2]["params"]["state"] == "closed"
+    assert result["returned_count"] == 2
+    assert result["has_more"] is True
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/merge_requests",
+            "params": {"state": "all", "scope": "all", "per_page": 100, "page": 1},
+        }
+    ]
 
 
 def test_gitlab_merge_request_views_build_logs_and_grep(monkeypatch: Any) -> None:
@@ -311,10 +345,10 @@ def test_gitlab_merge_request_views_build_logs_and_grep(monkeypatch: Any) -> Non
 
 def test_gitlab_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) -> None:
     provider = _provider()
-    captured_params: list[dict[str, Any]] = []
+    captured_calls: list[dict[str, Any]] = []
 
-    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
-        captured_params.append({"path": path, "params": params})
+    def _fake_paginated_list(path: str, *, params: dict[str, Any] | None = None, limit: int | None = None) -> Any:
+        captured_calls.append({"path": path, "params": params, "limit": limit})
         return [
             {
                 "iid": 10,
@@ -329,7 +363,7 @@ def test_gitlab_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
             }
         ]
 
-    monkeypatch.setattr(provider, "_request", _fake_request)
+    monkeypatch.setattr(provider, "_get_paginated_list", _fake_paginated_list)
     monkeypatch.setattr(provider, "_request_json", lambda method, path, **kwargs: {
         "iid": 10,
         "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/10",
@@ -350,15 +384,18 @@ def test_gitlab_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
     )
     ticket = provider.get_ticket_by_id(repo="repo-a", work_item_id=10)
 
-    assert captured_params[0]["path"] == "/projects/gitlab-org%2Frepo-a/issues"
-    assert captured_params[0]["params"] == {
-        "scope": "all",
-        "per_page": 1,
-        "page": 1,
-        "search": "incident",
-        "state": "opened",
-        "assignee_username": "alice",
-    }
+    assert captured_calls == [
+        {
+            "path": "/projects/gitlab-org%2Frepo-a/issues",
+            "params": {
+                "scope": "all",
+                "search": "incident",
+                "state": "opened",
+                "assignee_username": "alice",
+            },
+            "limit": 2,
+        }
+    ]
     assert search == {
         "matchesCount": 1,
         "returned_count": 1,
@@ -413,3 +450,108 @@ def test_gitlab_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
         "results": [{"id": 10}],
         "warnings": [],
     }
+
+
+def test_gitlab_issue_search_matches_count_uses_full_query_total(monkeypatch: Any) -> None:
+    provider = _provider()
+    issues = [
+        {
+            "iid": 1,
+            "title": "Issue 1",
+            "state": "opened",
+            "assignees": [],
+            "labels": [],
+            "created_at": "2025-01-01T00:00:00Z",
+            "updated_at": "2025-01-01T00:00:00Z",
+            "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/1",
+            "project_id": 101,
+        },
+        {
+            "iid": 2,
+            "title": "Issue 2",
+            "state": "opened",
+            "assignees": [],
+            "labels": [],
+            "created_at": "2025-01-02T00:00:00Z",
+            "updated_at": "2025-01-02T00:00:00Z",
+            "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/2",
+            "project_id": 101,
+        },
+        {
+            "iid": 3,
+            "title": "Issue 3",
+            "state": "opened",
+            "assignees": [],
+            "labels": [],
+            "created_at": "2025-01-03T00:00:00Z",
+            "updated_at": "2025-01-03T00:00:00Z",
+            "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/3",
+            "project_id": 101,
+        },
+        {
+            "iid": 4,
+            "title": "Issue 4",
+            "state": "opened",
+            "assignees": [],
+            "labels": [],
+            "created_at": "2025-01-04T00:00:00Z",
+            "updated_at": "2025-01-04T00:00:00Z",
+            "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/4",
+            "project_id": 101,
+        },
+        {
+            "iid": 5,
+            "title": "Issue 5",
+            "state": "opened",
+            "assignees": [],
+            "labels": [],
+            "created_at": "2025-01-05T00:00:00Z",
+            "updated_at": "2025-01-05T00:00:00Z",
+            "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/5",
+            "project_id": 101,
+        },
+        {
+            "iid": 6,
+            "title": "Issue 6",
+            "state": "opened",
+            "assignees": [],
+            "labels": [],
+            "created_at": "2025-01-06T00:00:00Z",
+            "updated_at": "2025-01-06T00:00:00Z",
+            "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/6",
+            "project_id": 101,
+        },
+    ]
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_list(path: str, *, params: dict[str, Any] | None = None, limit: int | None = None) -> Any:
+        calls.append({"path": path, "params": params, "limit": limit})
+        if limit is None:
+            return issues
+        return issues[:limit]
+
+    monkeypatch.setattr(provider, "_get_paginated_list", _fake_paginated_list)
+
+    result = provider.search_work_items(
+        query="issue",
+        repo="repo-a",
+        skip=1,
+        take=2,
+    )
+
+    assert [item["id"] for item in result["results"]] == [2, 3]
+    assert result["returned_count"] == 2
+    assert result["has_more"] is True
+    assert result["matchesCount"] == 6
+    assert calls == [
+        {
+            "path": "/projects/gitlab-org%2Frepo-a/issues",
+            "params": {"scope": "all", "search": "issue"},
+            "limit": 4,
+        },
+        {
+            "path": "/projects/gitlab-org%2Frepo-a/issues",
+            "params": {"scope": "all", "search": "issue"},
+            "limit": None,
+        },
+    ]

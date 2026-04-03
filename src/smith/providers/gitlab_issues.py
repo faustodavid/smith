@@ -88,11 +88,11 @@ class GitLabIssueMixin:
         include_closed: bool = True,
     ) -> dict[str, Any]:
         repo_name = (repo or project or "").strip()
-        per_page = min(max(1, take), 100)
-        page = (max(0, skip) // per_page) + 1
-        offset = max(0, skip) % per_page
+        start = max(0, skip)
+        window_size = max(1, take)
+        limit = start + window_size + 1
 
-        params: dict[str, Any] = {"scope": "all", "per_page": per_page, "page": page}
+        params: dict[str, Any] = {"scope": "all"}
         if query.strip():
             params["search"] = query
         if not include_closed:
@@ -111,14 +111,13 @@ class GitLabIssueMixin:
         else:
             path = f"/groups/{quote(self._require_gitlab_group(), safe='')}/issues"
 
-        issues_data = self._request(
-            "GET",
+        issues_data = self._get_paginated_list(
             path,
             params=params,
-            expect_json=True,
+            limit=limit,
         )
         items = [item for item in issues_data if isinstance(item, dict)] if isinstance(issues_data, list) else []
-        paged = items[offset : offset + max(1, take)]
+        paged = items[start : start + window_size]
 
         results = [
             self._issue_to_work_item(
@@ -127,9 +126,12 @@ class GitLabIssueMixin:
             )
             for issue in paged
         ]
-        has_more = offset + len(paged) < len(items)
+        has_more = len(items) > start + len(paged)
+        matches_count = len(items)
+        if has_more:
+            matches_count = len(self._get_paginated_list(path, params=params))
         return {
-            "matchesCount": max(len(items), max(0, skip) + len(results)),
+            "matchesCount": matches_count,
             "returned_count": len(results),
             "has_more": has_more,
             "results": results,

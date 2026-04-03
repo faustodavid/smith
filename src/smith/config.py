@@ -101,8 +101,24 @@ def _run_glab_command(args: list[str], *, allow_failure_output: bool = False) ->
         return ""
 
 
+def _glab_auth_status_all_unsupported(status_output: str) -> bool:
+    normalized = status_output.lower()
+    return (
+        ("unknown flag" in normalized and "--all" in normalized)
+        or ("flag provided but not defined" in normalized and "--all" in normalized)
+        or "accepts 0 arg(s), received 1" in normalized
+    )
+
+
+def _glab_auth_status_output() -> str:
+    status_output = _run_glab_command(["glab", "auth", "status", "--all"], allow_failure_output=True)
+    if status_output and not _glab_auth_status_all_unsupported(status_output):
+        return status_output
+    return _run_glab_command(["glab", "auth", "status"], allow_failure_output=True)
+
+
 def _authenticated_glab_hosts() -> list[str]:
-    status_output = _run_glab_command(["glab", "auth", "status"], allow_failure_output=True)
+    status_output = _glab_auth_status_output()
     if not status_output:
         return []
 
@@ -118,15 +134,20 @@ def _authenticated_glab_hosts() -> list[str]:
 
     for line in [*status_output.splitlines(), ""]:
         stripped = line.strip()
-        if stripped and "." in stripped and _GLAB_HOST_PATTERN.fullmatch(stripped):
+        normalized_host = _normalize_gitlab_host(stripped.rstrip(":"))
+        if normalized_host and _GLAB_HOST_PATTERN.fullmatch(normalized_host):
             flush()
-            current_host = stripped.rstrip(":")
+            current_host = normalized_host
             current_authenticated = False
             current_missing_token = False
             continue
         if not current_host:
             continue
-        if stripped.startswith(f"✓ Logged in to {current_host} ") or "Token found:" in stripped:
+        if stripped.startswith("✓ Logged in to "):
+            logged_in_host = _normalize_gitlab_host(stripped.removeprefix("✓ Logged in to ").split(" ", 1)[0])
+            if logged_in_host == current_host:
+                current_authenticated = True
+        if "Token found:" in stripped:
             current_authenticated = True
         if "No token found" in stripped:
             current_missing_token = True
@@ -145,6 +166,17 @@ def resolve_glab_gitlab_host() -> str:
     return configured_host
 
 
+def _glab_api_protocol(host: str) -> str:
+    normalized_host = _normalize_gitlab_host(host)
+    if not normalized_host:
+        return "https"
+    protocol = _run_glab_command(
+        ["glab", "config", "get", "api_protocol", "--host", normalized_host],
+        allow_failure_output=True,
+    ).strip().lower()
+    return protocol if protocol in {"http", "https"} else "https"
+
+
 def resolve_gitlab_api_url(*, default: str, enable_auto_discovery: bool = True) -> str:
     explicit_api_url = (os.getenv("GITLAB_API_URL", "") or "").strip().rstrip("/")
     if explicit_api_url:
@@ -153,10 +185,15 @@ def resolve_gitlab_api_url(*, default: str, enable_auto_discovery: bool = True) 
     raw_host = (os.getenv("GITLAB_HOST", "") or "").strip().rstrip("/")
     normalized_default = default.rstrip("/")
     should_auto_discover = enable_auto_discovery and normalized_default == "https://gitlab.com/api/v4"
+    auto_discovered_host = ""
     if not raw_host and should_auto_discover:
-        raw_host = resolve_glab_gitlab_host()
+        auto_discovered_host = resolve_glab_gitlab_host()
+        raw_host = auto_discovered_host
     if not raw_host:
         return normalized_default
+
+    if auto_discovered_host:
+        raw_host = f"{_glab_api_protocol(auto_discovered_host)}://{raw_host}"
 
     parsed = urlparse(raw_host if "://" in raw_host else f"https://{raw_host}")
     scheme = parsed.scheme or "https"

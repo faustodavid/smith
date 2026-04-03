@@ -57,7 +57,8 @@ class GitLabPullRequestMixin:
         creator_filter = [item.lower() for item in creators or []]
         from_dt = parse_iso_datetime(date_from)
         to_dt = parse_iso_datetime(date_to)
-        desired_count = max(1, max(0, skip) + max(1, take))
+        window_size = max(1, take)
+        desired_count = max(0, skip) + window_size + 1
         single_repo_mode = len(repo_names) == 1
 
         states_to_fetch: list[str] = []
@@ -68,6 +69,8 @@ class GitLabPullRequestMixin:
         if "abandoned" in normalized_status:
             states_to_fetch.append("closed")
         if not states_to_fetch:
+            states_to_fetch = ["all"]
+        elif single_repo_mode and len(states_to_fetch) > 1:
             states_to_fetch = ["all"]
 
         output: list[dict[str, Any]] = []
