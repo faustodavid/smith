@@ -23,12 +23,24 @@ def _csv_list(value: str) -> list[str]:
 def _selected_providers(provider: str) -> list[str]:
     normalized = (provider or "azdo").strip().lower()
     if normalized == "all":
-        return ["github", "azdo"]
+        return ["github", "gitlab", "azdo"]
     return [normalized]
 
 
 def _requires_github_org(provider: str) -> bool:
     return "github" in _selected_providers(provider)
+
+
+def _provider_is_configured(args: argparse.Namespace, provider: str) -> bool:
+    if provider == "github":
+        return bool(str(getattr(args, "github_org", "") or "").strip() or os.getenv("GITHUB_ORG", "").strip())
+    if provider == "azdo":
+        return bool(str(getattr(args, "azdo_org", "") or "").strip() or os.getenv("AZURE_DEVOPS_ORG", "").strip())
+    if provider == "gitlab":
+        cli_group = str(getattr(args, "gitlab_group", "") or "").strip().strip("/")
+        env_group = os.getenv("GITLAB_GROUP", "").strip().strip("/")
+        return bool(cli_group or env_group)
+    return False
 
 
 def _is_partial_result(data: Any) -> bool:
@@ -113,14 +125,18 @@ def validate_args_for_provider(args: argparse.Namespace) -> None:
         return
 
     if command != "code.search" and provider == "all":
-        raise ValueError(f"{command} does not support provider 'all'. Use azdo or github.")
+        raise ValueError(f"{command} does not support provider 'all'. Use azdo, github, or gitlab.")
 
     if command == "code.search" and not str(getattr(args, "query", "") or "").strip():
         raise ValueError('code search requires a query. Example: smith code search "grafana.*"')
 
     selected = _selected_providers(provider)
+    if command == "code.search" and provider == "all":
+        selected = [provider_name for provider_name in selected if _provider_is_configured(args, provider_name)]
+
     github_org = str(getattr(args, "github_org", "") or "").strip()
     azdo_org = str(getattr(args, "azdo_org", "") or "").strip()
+    gitlab_group = str(getattr(args, "gitlab_group", "") or "").strip().strip("/")
     if "github" in selected and not os.getenv("GITHUB_ORG", "").strip() and not github_org:
         raise ValueError("Missing GITHUB_ORG. Example: export GITHUB_ORG=<org>  (or use --github-org)")
     if "azdo" in selected and not os.getenv("AZURE_DEVOPS_ORG", "").strip() and not azdo_org:
@@ -128,9 +144,13 @@ def validate_args_for_provider(args: argparse.Namespace) -> None:
             "Missing AZURE_DEVOPS_ORG. "
             "Example: export AZURE_DEVOPS_ORG=<your-org>  (or use --azdo-org)"
         )
+    if "gitlab" in selected and not os.getenv("GITLAB_GROUP", "").strip().strip("/") and not gitlab_group:
+        raise ValueError("Missing GITLAB_GROUP. Example: export GITLAB_GROUP=<group>  (or use --gitlab-group)")
 
     if command == "code.search" and provider == "github" and str(getattr(args, "project", "") or "").strip():
         raise ValueError("GitHub code search does not support `--project`. Use `--repo` instead.")
+    if command == "code.search" and provider == "gitlab" and str(getattr(args, "project", "") or "").strip():
+        raise ValueError("GitLab code search does not support `--project`. Use `--repo` instead.")
 
 
 def _emit_success(
@@ -182,6 +202,7 @@ def _client_from_args(args: argparse.Namespace) -> SmithClient:
     return SmithClient(
         azdo_org=getattr(args, "azdo_org", None),
         github_org=getattr(args, "github_org", None),
+        gitlab_group=getattr(args, "gitlab_group", None),
     )
 
 

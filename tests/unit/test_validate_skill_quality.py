@@ -36,6 +36,7 @@ def test_validate_skill_quality_classifier_examples_cover_trigger_contract() -> 
     validator = _load_validator_module()
 
     assert validator.classify_trigger("Review Azure DevOps pipeline logs for build 42.") == "positive"
+    assert validator.classify_trigger("Inspect GitLab merge request 42 in repo-a.") == "positive"
     assert validator.classify_trigger("Where is the webhook secret configured?") == "ambiguous"
     assert validator.classify_trigger("Create a work item for this regression.") == "negative"
     assert validator.classify_trigger("Create a GitHub issue for this bug") == "negative"
@@ -48,3 +49,4 @@ def test_behavior_fixture_covers_github_repo_shape_rule() -> None:
 
     assert any(case.get("required_phrase") == "bare `<repo>`" for case in cases)
     assert any(case.get("required_phrase") == "not `org/repo`" for case in cases)
+    assert any(case.get("required_phrase") == "relative to configured `GITLAB_GROUP`" for case in cases)

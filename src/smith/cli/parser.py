@@ -61,7 +61,7 @@ def _add_output_format(parser: argparse.ArgumentParser) -> None:
 def _add_search_provider_option(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--provider",
-        choices=["azdo", "github", "all"],
+        choices=["azdo", "github", "gitlab", "all"],
         default="all",
         help="Provider target (default: all)",
     )
@@ -193,12 +193,26 @@ def _add_repos_group(root_subparsers: argparse._SubParsersAction[argparse.Argume
         primary_path="repos",
     )
 
+    repos_gitlab = _add_parser(
+        repos_provider,
+        "gitlab",
+        help_text="List GitLab repositories",
+    )
+    repos_gitlab.set_defaults(project=None)
+    _add_output_format(repos_gitlab)
+    _set_handler(
+        repos_gitlab,
+        handle_discover_repos,
+        "repos",
+        primary_path="repos",
+    )
+
 
 def _add_orgs_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     orgs = _add_parser(
         root_subparsers,
         "orgs",
-        help_text="List GitHub organization or Azure DevOps projects",
+        help_text="List GitHub orgs, GitLab groups, or Azure DevOps projects",
     )
     orgs_provider = orgs.add_subparsers(dest="provider", required=True)
 
@@ -223,6 +237,19 @@ def _add_orgs_group(root_subparsers: argparse._SubParsersAction[argparse.Argumen
     _add_output_format(orgs_github)
     _set_handler(
         orgs_github,
+        handle_discover_projects,
+        "orgs",
+        primary_path="orgs",
+    )
+
+    orgs_gitlab = _add_parser(
+        orgs_provider,
+        "gitlab",
+        help_text="Show the configured GitLab group",
+    )
+    _add_output_format(orgs_gitlab)
+    _set_handler(
+        orgs_gitlab,
         handle_discover_projects,
         "orgs",
         primary_path="orgs",
@@ -276,6 +303,17 @@ def _add_code_group(root_subparsers: argparse._SubParsersAction[argparse.Argumen
     _add_output_format(code_grep_github)
     _set_handler(code_grep_github, handle_code_grep, "code.grep", primary_path="code grep")
 
+    code_grep_gitlab = _add_parser(
+        code_grep_provider,
+        "gitlab",
+        help_text="Grep GitLab repository",
+    )
+    code_grep_gitlab.add_argument("repo", help="Repository path relative to the configured GitLab group")
+    code_grep_gitlab.set_defaults(project=None)
+    _add_grep_options(code_grep_gitlab)
+    _add_output_format(code_grep_gitlab)
+    _set_handler(code_grep_gitlab, handle_code_grep, "code.grep", primary_path="code grep")
+
 
 def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     prs = _add_parser(root_subparsers, "prs", help_text="List, get, and read pull request comments")
@@ -298,6 +336,13 @@ def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     _add_output_format(pr_list_github)
     _set_handler(pr_list_github, handle_pr_list, "prs.list", primary_path="prs list")
 
+    pr_list_gitlab = _add_parser(pr_list_provider, "gitlab", help_text="List GitLab merge requests")
+    pr_list_gitlab.add_argument("repo", help="Repository path relative to the configured GitLab group")
+    pr_list_gitlab.set_defaults(project=None)
+    _add_pr_list_filters(pr_list_gitlab)
+    _add_output_format(pr_list_gitlab)
+    _set_handler(pr_list_gitlab, handle_pr_list, "prs.list", primary_path="prs list")
+
     pr_get = _add_parser(pr_sub, "get", help_text="Get pull request details")
     pr_get_provider = pr_get.add_subparsers(dest="provider", required=True)
 
@@ -315,6 +360,13 @@ def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     _add_output_format(pr_get_github)
     _set_handler(pr_get_github, handle_pr_get, "prs.get", primary_path="prs get")
 
+    pr_get_gitlab = _add_parser(pr_get_provider, "gitlab", help_text="Get GitLab merge request details")
+    pr_get_gitlab.add_argument("repo")
+    pr_get_gitlab.add_argument("id", type=int)
+    pr_get_gitlab.set_defaults(project=None)
+    _add_output_format(pr_get_gitlab)
+    _set_handler(pr_get_gitlab, handle_pr_get, "prs.get", primary_path="prs get")
+
     pr_threads = _add_parser(pr_sub, "threads", help_text="Get pull request comment threads")
     pr_threads_provider = pr_threads.add_subparsers(dest="provider", required=True)
 
@@ -331,6 +383,13 @@ def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     pr_threads_github.set_defaults(project=None)
     _add_output_format(pr_threads_github)
     _set_handler(pr_threads_github, handle_pr_threads, "prs.threads", primary_path="prs threads")
+
+    pr_threads_gitlab = _add_parser(pr_threads_provider, "gitlab", help_text="Get GitLab merge request threads")
+    pr_threads_gitlab.add_argument("repo")
+    pr_threads_gitlab.add_argument("id", type=int)
+    pr_threads_gitlab.set_defaults(project=None)
+    _add_output_format(pr_threads_gitlab)
+    _set_handler(pr_threads_gitlab, handle_pr_threads, "prs.threads", primary_path="prs threads")
 
 
 def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -375,6 +434,22 @@ def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
         primary_path="pipelines logs list",
     )
 
+    ci_logs_list_gitlab = _add_parser(
+        ci_logs_list_provider,
+        "gitlab",
+        help_text="List GitLab pipeline jobs",
+    )
+    ci_logs_list_gitlab.add_argument("repo")
+    ci_logs_list_gitlab.add_argument("id", type=int, help="Pipeline ID")
+    ci_logs_list_gitlab.set_defaults(project=None)
+    _add_output_format(ci_logs_list_gitlab)
+    _set_handler(
+        ci_logs_list_gitlab,
+        handle_ci_logs,
+        "pipelines.logs.list",
+        primary_path="pipelines logs list",
+    )
+
     ci_logs_grep = _add_parser(ci_logs_sub, "grep", help_text="Search or read pipeline logs")
     ci_logs_grep_provider = ci_logs_grep.add_subparsers(dest="provider", required=True)
 
@@ -407,6 +482,23 @@ def _add_ci_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentP
     _add_output_format(ci_logs_grep_github)
     _set_handler(
         ci_logs_grep_github,
+        handle_ci_grep,
+        "pipelines.logs.grep",
+        primary_path="pipelines logs grep",
+    )
+
+    ci_logs_grep_gitlab = _add_parser(
+        ci_logs_grep_provider,
+        "gitlab",
+        help_text="Search GitLab pipeline jobs",
+    )
+    ci_logs_grep_gitlab.add_argument("repo")
+    ci_logs_grep_gitlab.add_argument("id", type=int, help="Pipeline ID")
+    ci_logs_grep_gitlab.set_defaults(project=None)
+    _add_ci_grep_options(ci_logs_grep_gitlab)
+    _add_output_format(ci_logs_grep_gitlab)
+    _set_handler(
+        ci_logs_grep_gitlab,
         handle_ci_grep,
         "pipelines.logs.grep",
         primary_path="pipelines logs grep",
@@ -448,6 +540,18 @@ def _add_stories_group(root_subparsers: argparse._SubParsersAction[argparse.Argu
         primary_path="stories get",
     )
 
+    stories_get_gitlab = _add_parser(stories_get_provider, "gitlab", help_text="GitLab issue")
+    stories_get_gitlab.add_argument("repo")
+    stories_get_gitlab.add_argument("id", type=int)
+    stories_get_gitlab.set_defaults(project=None)
+    _add_output_format(stories_get_gitlab)
+    _set_handler(
+        stories_get_gitlab,
+        handle_work_get,
+        "stories.get",
+        primary_path="stories get",
+    )
+
     stories_search = _add_parser(stories_sub, "search", help_text="Search work items and issues")
     stories_search_provider = stories_search.add_subparsers(dest="provider", required=True)
 
@@ -472,6 +576,19 @@ def _add_stories_group(root_subparsers: argparse._SubParsersAction[argparse.Argu
     _add_output_format(stories_search_github)
     _set_handler(
         stories_search_github,
+        handle_work_search,
+        "stories.search",
+        primary_path="stories search",
+    )
+
+    stories_search_gitlab = _add_parser(stories_search_provider, "gitlab", help_text="GitLab issue search")
+    stories_search_gitlab.add_argument("repo")
+    stories_search_gitlab.add_argument("--query", required=True)
+    stories_search_gitlab.set_defaults(project=None)
+    _add_work_search_filters(stories_search_gitlab)
+    _add_output_format(stories_search_gitlab)
+    _set_handler(
+        stories_search_gitlab,
         handle_work_search,
         "stories.search",
         primary_path="stories search",
@@ -508,11 +625,25 @@ def _add_stories_group(root_subparsers: argparse._SubParsersAction[argparse.Argu
         primary_path="stories mine",
     )
 
+    stories_mine_gitlab = _add_parser(stories_mine_provider, "gitlab", help_text="GitLab assigned issues")
+    stories_mine_gitlab.add_argument("repo")
+    stories_mine_gitlab.add_argument("--include-closed", action="store_true")
+    stories_mine_gitlab.add_argument("--skip", type=int, default=0)
+    stories_mine_gitlab.add_argument("--take", type=int, default=20)
+    stories_mine_gitlab.set_defaults(project=None)
+    _add_output_format(stories_mine_gitlab)
+    _set_handler(
+        stories_mine_gitlab,
+        handle_work_mine,
+        "stories.mine",
+        primary_path="stories mine",
+    )
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="smith",
-        description="Smith Azure DevOps and GitHub read-only workflows with local credentials.",
+        description="Smith Azure DevOps, GitHub, and GitLab read-only workflows with local credentials.",
     )
     parser.add_argument(
         "--azdo-org",
@@ -525,6 +656,12 @@ def build_parser() -> argparse.ArgumentParser:
         dest="github_org",
         default=None,
         help="Override GITHUB_ORG for this invocation.",
+    )
+    parser.add_argument(
+        "--gitlab-group",
+        dest="gitlab_group",
+        default=None,
+        help="Override GITLAB_GROUP for this invocation.",
     )
     parser.add_argument(
         "-v",

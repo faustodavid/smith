@@ -14,7 +14,8 @@ authors = [
 ]
 dependencies = [
   "requests>=2.31.0",
-  "azure-identity>=1.17.1"
+  "azure-identity>=1.17.1",
+  "truststore>=0.10.0"
 ]
 
 [project.optional-dependencies]

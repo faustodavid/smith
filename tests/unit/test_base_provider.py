@@ -50,11 +50,12 @@ class _Retryable403Provider(_TestProvider):
 
 def test_provider_name_helpers_normalize_and_validate() -> None:
     assert normalize_provider("GITHUB") == "github"
-    assert resolve_providers("all") == ["github", "azdo"]
+    assert normalize_provider("GITLAB") == "gitlab"
+    assert resolve_providers("all") == ["github", "gitlab", "azdo"]
     assert normalize_single_provider("azdo", command="repos") == "azdo"
 
     with pytest.raises(ValueError, match="provider must be one of"):
-        normalize_provider("gitlab")
+        normalize_provider("bitbucket")
     with pytest.raises(ValueError, match="repos does not support provider 'all'"):
         normalize_single_provider("all", command="repos")
 

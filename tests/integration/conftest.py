@@ -9,6 +9,7 @@ from tests.support import make_runtime_config
 
 from smith.providers.azdo import AzdoProvider
 from smith.providers.github import GitHubProvider
+from smith.providers.gitlab import GitLabProvider
 
 
 def _required_env(names: list[str], *, label: str) -> dict[str, str]:
@@ -43,6 +44,34 @@ def github_smoke_env() -> dict[str, Any]:
 def github_provider(github_smoke_env: dict[str, Any]) -> GitHubProvider:
     return GitHubProvider(
         config=make_runtime_config(github_org=github_smoke_env["GITHUB_ORG"]),
+        session=requests.Session(),
+    )
+
+
+@pytest.fixture
+def gitlab_smoke_env() -> dict[str, Any]:
+    values = _required_env(
+        [
+            "GITLAB_GROUP",
+            "GITLAB_TOKEN",
+            "SMITH_TEST_GITLAB_REPO",
+            "SMITH_TEST_GITLAB_MR_ID",
+            "SMITH_TEST_GITLAB_PIPELINE_ID",
+            "SMITH_TEST_GITLAB_ISSUE_ID",
+        ],
+        label="GitLab",
+    )
+    values["SMITH_TEST_GITLAB_SEARCH_QUERY"] = (
+        os.getenv("SMITH_TEST_GITLAB_SEARCH_QUERY", "").strip()
+        or values["SMITH_TEST_GITLAB_REPO"]
+    )
+    return values
+
+
+@pytest.fixture
+def gitlab_provider(gitlab_smoke_env: dict[str, Any]) -> GitLabProvider:
+    return GitLabProvider(
+        config=make_runtime_config(gitlab_group=gitlab_smoke_env["GITLAB_GROUP"]),
         session=requests.Session(),
     )
 

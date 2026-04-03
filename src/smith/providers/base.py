@@ -14,27 +14,27 @@ from smith.http import configure_http_session, is_retryable_get_status, parse_re
 
 logger = logging.getLogger(__name__)
 
-ProviderName = Literal["azdo", "github", "all"]
+ProviderName = Literal["azdo", "github", "gitlab", "all"]
 
 
 def normalize_provider(provider: str | None) -> ProviderName:
     normalized = (provider or "azdo").strip().lower()
-    if normalized not in {"azdo", "github", "all"}:
-        raise ValueError("provider must be one of: azdo, github, all")
+    if normalized not in {"azdo", "github", "gitlab", "all"}:
+        raise ValueError("provider must be one of: azdo, github, gitlab, all")
     return cast(ProviderName, normalized)
 
 
 def resolve_providers(provider: str | None) -> list[str]:
     normalized = normalize_provider(provider)
     if normalized == "all":
-        return ["github", "azdo"]
+        return ["github", "gitlab", "azdo"]
     return [normalized]
 
 
 def normalize_single_provider(provider: str | None, *, command: str) -> str:
     normalized = normalize_provider(provider)
     if normalized == "all":
-        raise ValueError(f"{command} does not support provider 'all'. Use azdo or github.")
+        raise ValueError(f"{command} does not support provider 'all'. Use azdo, github, or gitlab.")
     return normalized
 
 

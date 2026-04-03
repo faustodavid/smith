@@ -1,14 +1,14 @@
 # Trigger Cases
 
-Use `smith` when the request is read-only and the likely source of truth is Azure DevOps or GitHub.
+Use `smith` when the request is read-only and the likely source of truth is Azure DevOps, GitHub, or GitLab.
 
 ## Positive
 
 - Find where code or config is defined.
 - Search a repo for a key, resource, regex, or file.
-- Inspect a pull request, changed files, review threads, or related code paths.
+- Inspect a pull request, merge request, changed files, review threads, or related code paths.
 - Inspect pipeline logs or a build failure.
-- Read work items or GitHub issues.
+- Read work items, GitHub issues, or GitLab issues.
 
 ## Negative
 
@@ -27,7 +27,7 @@ Default: start with `smith code search "<query>"`, then narrow.
 
 ## Quick Check
 
-1. Is GitHub or Azure DevOps the target?
+1. Is GitHub, GitLab, or Azure DevOps the target?
 2. Is the request read-only?
 3. Is repo, PR, pipeline, or story evidence needed?
 4. If unsure, start broad.

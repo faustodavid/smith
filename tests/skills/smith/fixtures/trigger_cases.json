@@ -8,6 +8,10 @@
     "expected": "positive"
   },
   {
+    "prompt": "Inspect GitLab merge request 42 in repo-a.",
+    "expected": "positive"
+  },
+  {
     "prompt": "Inspect pull request 123 in repo-a.",
     "expected": "positive"
   },

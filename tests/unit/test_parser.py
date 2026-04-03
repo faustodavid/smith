@@ -25,7 +25,7 @@ def test_stories_group_parses_to_stories_command() -> None:
     assert args.id == 123
 
 
-@pytest.mark.parametrize("provider", ["azdo", "github"])
+@pytest.mark.parametrize("provider", ["azdo", "github", "gitlab"])
 def test_orgs_parser_uses_canonical_command_id(provider: str) -> None:
     parser = build_parser()
     args = parser.parse_args(["orgs", provider])
@@ -40,6 +40,15 @@ def test_repos_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "repos"
     assert args.provider == "github"
+    assert args.project is None
+
+
+def test_repos_gitlab_parser_uses_canonical_command_id() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["repos", "gitlab"])
+
+    assert args.command_id == "repos"
+    assert args.provider == "gitlab"
     assert args.project is None
 
 
@@ -59,6 +68,16 @@ def test_prs_get_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "prs.get"
     assert args.provider == "github"
+    assert args.repo == "repo-a"
+    assert args.id == 42
+
+
+def test_prs_get_gitlab_parser_uses_canonical_command_id() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["prs", "get", "gitlab", "repo-a", "42"])
+
+    assert args.command_id == "prs.get"
+    assert args.provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.id == 42
 
@@ -95,12 +114,34 @@ def test_code_grep_parser_uses_required_positional_pattern() -> None:
     assert args.pattern == "error"
 
 
+def test_code_grep_gitlab_parser_uses_required_positional_pattern() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["code", "grep", "gitlab", "repo-a", "--path", "/src", "error"])
+
+    assert args.command_id == "code.grep"
+    assert args.provider == "gitlab"
+    assert args.repo == "repo-a"
+    assert args.path == "/src"
+    assert args.pattern == "error"
+
+
 def test_pipelines_logs_grep_parser_uses_canonical_command_id() -> None:
     parser = build_parser()
     args = parser.parse_args(["pipelines", "logs", "grep", "github", "repo-a", "42", "error"])
 
     assert args.command_id == "pipelines.logs.grep"
     assert args.provider == "github"
+    assert args.repo == "repo-a"
+    assert args.id == 42
+    assert args.pattern == "error"
+
+
+def test_pipelines_logs_grep_gitlab_parser_uses_canonical_command_id() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipelines", "logs", "grep", "gitlab", "repo-a", "42", "error"])
+
+    assert args.command_id == "pipelines.logs.grep"
+    assert args.provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.id == 42
     assert args.pattern == "error"
@@ -173,12 +214,34 @@ def test_github_org_flag_parses() -> None:
     assert args.azdo_org is None
 
 
+def test_gitlab_group_flag_parses() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["--gitlab-group", "platform/subgroup", "repos", "gitlab"])
+
+    assert args.gitlab_group == "platform/subgroup"
+    assert args.github_org is None
+    assert args.azdo_org is None
+
+
 def test_both_org_flags_parse_independently() -> None:
     parser = build_parser()
-    args = parser.parse_args(["--azdo-org", "a-org", "--github-org", "g-org", "code", "search", "test"])
+    args = parser.parse_args(
+        [
+            "--azdo-org",
+            "a-org",
+            "--github-org",
+            "g-org",
+            "--gitlab-group",
+            "platform",
+            "code",
+            "search",
+            "test",
+        ]
+    )
 
     assert args.azdo_org == "a-org"
     assert args.github_org == "g-org"
+    assert args.gitlab_group == "platform"
 
 
 def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) -> None:
@@ -197,7 +260,9 @@ def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) ->
     assert "\n    work" not in output
     assert "organizations" not in output
     assert "List repositories" in output
-    assert "List GitHub organization or Azure DevOps projects" in output
+    assert "GitHub orgs" in output
+    assert "GitLab groups" in output
+    assert "DevOps" in output
     assert "Search and grep across providers and repos" in output
     assert "List, get, and read pull request comments" in output
     assert "Read and grep pipeline logs" in output

@@ -17,7 +17,7 @@ class _FakeClient:
         self._err = err
 
     def execute_discover_projects(self, *, provider: str) -> Any:
-        assert provider in {"azdo", "github", "all"}
+        assert provider in {"azdo", "github", "gitlab", "all"}
         if self._err is not None:
             raise self._err
         return self._payload
@@ -88,6 +88,19 @@ def test_auth_and_api_exit_codes(monkeypatch: Any, capsys: Any) -> None:
 
     assert code_api == 4
     assert "api failed" in api_out.err
+
+
+def test_code_search_without_configured_github_or_azdo_does_not_raise_missing_github_org(monkeypatch: Any, capsys: Any) -> None:
+    monkeypatch.delenv("GITHUB_ORG", raising=False)
+    monkeypatch.delenv("AZURE_DEVOPS_ORG", raising=False)
+    monkeypatch.delenv("GITLAB_GROUP", raising=False)
+
+    code = cli_main.main(["code", "search", "grafana"])
+    captured = capsys.readouterr()
+
+    assert code == cli_main.EXIT_INVALID_ARGS
+    assert "No providers configured" in captured.err
+    assert "Missing GITHUB_ORG" not in captured.err
 
 
 def test_script_entrypoint_smoke() -> None:

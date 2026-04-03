@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
-ProviderName = Literal["azdo", "github", "all"]
+ProviderName = Literal["azdo", "github", "gitlab", "all"]
 
 
 class ProviderError(TypedDict):

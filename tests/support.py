@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import dataclass
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import parse_qs, urlsplit
 
 from smith.config import RuntimeConfig
@@ -24,6 +22,9 @@ def make_runtime_config(**overrides: Any) -> RuntimeConfig:
         github_timeout_seconds=30,
         github_max_concurrent_requests=2,
         github_rate_limit_max_sleep_seconds=120,
+        gitlab_group="gitlab-org",
+        gitlab_api_url="https://gitlab.com/api/v4",
+        gitlab_timeout_seconds=30,
         http_pool_maxsize=32,
         http_pool_connections=16,
         http_retry_max_attempts=2,

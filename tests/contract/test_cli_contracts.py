@@ -20,6 +20,7 @@ def _make_args(**overrides: Any) -> Namespace:
         "query": "grafana",
         "github_org": None,
         "azdo_org": None,
+        "gitlab_group": None,
         "project": "proj-a",
         "repo": "repo-a",
         "repos": ["repo-a"],
@@ -71,7 +72,7 @@ class _RecordingClient:
 
 def test_csv_list_and_provider_helpers() -> None:
     assert handlers._csv_list(" a, ,b , c ") == ["a", "b", "c"]
-    assert handlers._selected_providers("all") == ["github", "azdo"]
+    assert handlers._selected_providers("all") == ["github", "gitlab", "azdo"]
     assert handlers._selected_providers("github") == ["github"]
     assert handlers._requires_github_org("all") is True
     assert handlers._requires_github_org("azdo") is False
@@ -106,9 +107,14 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
         (_make_args(command_id="code.search", query="   "), "code search requires a query"),
         (_make_args(command_id="repos", provider="github"), "Missing GITHUB_ORG"),
         (_make_args(command_id="repos", provider="azdo"), "Missing AZURE_DEVOPS_ORG"),
+        (_make_args(command_id="repos", provider="gitlab"), "Missing GITLAB_GROUP"),
         (
             _make_args(command_id="code.search", provider="github", project="proj-a", github_org="gh-org"),
             "GitHub code search does not support `--project`",
+        ),
+        (
+            _make_args(command_id="code.search", provider="gitlab", project="proj-a", gitlab_group="platform"),
+            "GitLab code search does not support `--project`",
         ),
     ],
 )
@@ -119,6 +125,7 @@ def test_validate_args_for_provider_rejects_invalid_inputs(
 ) -> None:
     monkeypatch.delenv("GITHUB_ORG", raising=False)
     monkeypatch.delenv("AZURE_DEVOPS_ORG", raising=False)
+    monkeypatch.delenv("GITLAB_GROUP", raising=False)
 
     with pytest.raises(ValueError, match=message):
         handlers.validate_args_for_provider(args)
@@ -127,9 +134,24 @@ def test_validate_args_for_provider_rejects_invalid_inputs(
 def test_validate_args_for_provider_allows_cli_overrides(monkeypatch: Any) -> None:
     monkeypatch.delenv("GITHUB_ORG", raising=False)
     monkeypatch.delenv("AZURE_DEVOPS_ORG", raising=False)
-    args = _make_args(command_id="code.search", provider="all", github_org="gh-org", azdo_org="azdo-org")
+    monkeypatch.delenv("GITLAB_GROUP", raising=False)
+    args = _make_args(
+        command_id="code.search",
+        provider="all",
+        github_org="gh-org",
+        azdo_org="azdo-org",
+        gitlab_group="platform",
+    )
 
     handlers.validate_args_for_provider(args)
+
+
+def test_validate_args_for_provider_code_search_all_ignores_unconfigured_providers(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITHUB_ORG", raising=False)
+    monkeypatch.delenv("AZURE_DEVOPS_ORG", raising=False)
+    monkeypatch.setenv("GITLAB_GROUP", "platform")
+
+    handlers.validate_args_for_provider(_make_args(command_id="code.search", provider="all"))
 
 
 def test_emit_success_supports_text_and_json_and_metadata(capsys: Any, monkeypatch: Any) -> None:
@@ -323,6 +345,7 @@ def test_handlers_forward_expected_arguments(
     [
         ("azdo", ["proj-a"], ["repo-a"]),
         ("github", None, ["repo-a"]),
+        ("gitlab", None, ["repo-a"]),
     ],
 )
 def test_handle_pr_list_branches_by_provider(
@@ -370,6 +393,6 @@ def test_client_from_args_passes_org_overrides(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(handlers, "SmithClient", _FakeClient)
 
-    handlers._client_from_args(SimpleNamespace(azdo_org="azdo-org", github_org="gh-org"))
+    handlers._client_from_args(SimpleNamespace(azdo_org="azdo-org", github_org="gh-org", gitlab_group="platform"))
 
-    assert captured == {"azdo_org": "azdo-org", "github_org": "gh-org"}
+    assert captured == {"azdo_org": "azdo-org", "github_org": "gh-org", "gitlab_group": "platform"}
