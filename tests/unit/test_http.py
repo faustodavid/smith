@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
 import requests
 
+import smith.http as http_module
 from smith.http import (
     configure_http_session,
+    configure_native_tls_trust,
     is_retryable_get_status,
     parse_rate_limit_reset_seconds,
     parse_retry_after_seconds,
@@ -44,6 +47,23 @@ def test_configure_http_session_swallows_mount_errors_from_mocked_session() -> N
     configure_http_session(session, pool_connections=2, pool_maxsize=4)
 
     session.mount.assert_called_once()
+
+
+def test_configure_native_tls_trust_injects_truststore_once(monkeypatch: Any) -> None:
+    calls: list[str] = []
+
+    class _FakeTrustStore:
+        @staticmethod
+        def inject_into_ssl() -> None:
+            calls.append("inject")
+
+    monkeypatch.setattr(http_module, "_NATIVE_TLS_TRUST_CONFIGURED", False)
+    monkeypatch.setattr(http_module.importlib, "import_module", lambda name: _FakeTrustStore())
+
+    configure_native_tls_trust()
+    configure_native_tls_trust()
+
+    assert calls == ["inject"]
 
 
 @pytest.mark.parametrize("status_code", [429, 500, 502, 503, 504])

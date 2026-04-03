@@ -5,6 +5,7 @@ import re
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote
 
+from smith.errors import SmithApiError
 from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers.helpers import build_grep_result, grep_compile_error_result, grep_match_lines
 from smith.utils import compile_search_pattern, match_all_pattern, normalize_path, slice_lines
@@ -181,12 +182,17 @@ class GitLabCodeMixin:
             params: dict[str, Any] = {"ref": ref, "recursive": "true", "per_page": per_page, "page": page}
             if prefix:
                 params["path"] = prefix
-            data = self._request(
-                "GET",
-                f"/projects/{self._project_id(repo)}/repository/tree",
-                params=params,
-                expect_json=True,
-            )
+            try:
+                data = self._request(
+                    "GET",
+                    f"/projects/{self._project_id(repo)}/repository/tree",
+                    params=params,
+                    expect_json=True,
+                )
+            except SmithApiError as exc:
+                if prefix and exc.status_code == 404:
+                    break
+                raise
             if not isinstance(data, list):
                 break
             page_items = [item for item in data if isinstance(item, dict)]

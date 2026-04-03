@@ -15,6 +15,13 @@ from smith.providers.base import normalize_provider, normalize_single_provider, 
 from smith.providers.github import GITHUB_DEFAULT_API_URL, GITHUB_DEFAULT_API_VERSION, GitHubProvider
 from smith.providers.gitlab import GITLAB_DEFAULT_API_URL, GitLabProvider
 
+_NO_PROVIDERS_CONFIGURED_MESSAGE = (
+    "No providers configured. Set at least one of:\n"
+    "  - AZURE_DEVOPS_ORG (for Azure DevOps)\n"
+    "  - GITHUB_ORG (for GitHub)\n"
+    "  - GITLAB_GROUP (for GitLab)"
+)
+
 
 class SmithClient:
     def __init__(
@@ -42,12 +49,7 @@ class SmithClient:
         )
 
         if not runtime.azdo_configured and not runtime.github_configured and not runtime.gitlab_configured:
-            raise ValueError(
-                "No providers configured. Set at least one of:\n"
-                "  - AZURE_DEVOPS_ORG (for Azure DevOps)\n"
-                "  - GITHUB_ORG (for GitHub)\n"
-                "  - GITLAB_GROUP (for GitLab)"
-            )
+            raise ValueError(_NO_PROVIDERS_CONFIGURED_MESSAGE)
 
         main_session = session or requests.Session()
         configure_http_session(
@@ -155,7 +157,9 @@ class SmithClient:
         operations: dict[str, Callable[[], Any]],
     ) -> dict[str, Any]:
         requested_provider = normalize_provider(provider)
-        providers = resolve_providers(requested_provider)
+        providers = self._configured_providers() if requested_provider == "all" else resolve_providers(requested_provider)
+        if not providers:
+            raise ValueError(_NO_PROVIDERS_CONFIGURED_MESSAGE)
         return run_fanout(
             providers=providers,
             requested_provider=requested_provider,
@@ -163,6 +167,16 @@ class SmithClient:
             provider_entry_success=self._provider_entry_success,
             provider_entry_error=self._provider_entry_error,
         )
+
+    def _configured_providers(self) -> list[str]:
+        providers: list[str] = []
+        if self._runtime.github_configured:
+            providers.append("github")
+        if self._runtime.gitlab_configured:
+            providers.append("gitlab")
+        if self._runtime.azdo_configured:
+            providers.append("azdo")
+        return providers
 
     def _list_azdo_repositories(self, *, project: str | None) -> list[dict[str, Any]]:
         azdo = self._get_azdo()

@@ -31,6 +31,18 @@ def _requires_github_org(provider: str) -> bool:
     return "github" in _selected_providers(provider)
 
 
+def _provider_is_configured(args: argparse.Namespace, provider: str) -> bool:
+    if provider == "github":
+        return bool(str(getattr(args, "github_org", "") or "").strip() or os.getenv("GITHUB_ORG", "").strip())
+    if provider == "azdo":
+        return bool(str(getattr(args, "azdo_org", "") or "").strip() or os.getenv("AZURE_DEVOPS_ORG", "").strip())
+    if provider == "gitlab":
+        cli_group = str(getattr(args, "gitlab_group", "") or "").strip().strip("/")
+        env_group = os.getenv("GITLAB_GROUP", "").strip().strip("/")
+        return bool(cli_group or env_group)
+    return False
+
+
 def _is_partial_result(data: Any) -> bool:
     if isinstance(data, dict) and "providers" in data:
         providers = data.get("providers", {})
@@ -119,6 +131,9 @@ def validate_args_for_provider(args: argparse.Namespace) -> None:
         raise ValueError('code search requires a query. Example: smith code search "grafana.*"')
 
     selected = _selected_providers(provider)
+    if command == "code.search" and provider == "all":
+        selected = [provider_name for provider_name in selected if _provider_is_configured(args, provider_name)]
+
     github_org = str(getattr(args, "github_org", "") or "").strip()
     azdo_org = str(getattr(args, "azdo_org", "") or "").strip()
     gitlab_group = str(getattr(args, "gitlab_group", "") or "").strip().strip("/")

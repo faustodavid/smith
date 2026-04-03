@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from typing import Any
 
 import pytest
@@ -83,6 +84,7 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
         "GITHUB_MAX_CONCURRENT_REQUESTS",
         "GITHUB_RATE_LIMIT_MAX_SLEEP_SECONDS",
         "GITLAB_GROUP",
+        "GITLAB_HOST",
         "GITLAB_API_URL",
         "GITLAB_TIMEOUT_SECONDS",
         "SMITH_HTTP_POOL_MAXSIZE",
@@ -288,6 +290,77 @@ def test_parse_runtime_config_gitlab_group_override_wins_over_env(monkeypatch: A
     )
 
     assert runtime.gitlab_group == "cli-group"
+    assert runtime.gitlab_api_url == "https://gitlab.example.com/api/v4"
+
+
+def test_parse_runtime_config_gitlab_host_env_fallback(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITLAB_HOST", "gitlab.example.test")
+    monkeypatch.delenv("GITLAB_API_URL", raising=False)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.gitlab_api_url == "https://gitlab.example.test/api/v4"
+
+
+def test_parse_runtime_config_gitlab_glab_host_fallback(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITLAB_GROUP", "example-group")
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_API_URL", raising=False)
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        if args == ["glab", "config", "get", "host"]:
+            return subprocess.CompletedProcess(args, 0, stdout="gitlab.com\n")
+        if args == ["glab", "auth", "status"]:
+            raise subprocess.CalledProcessError(
+                1,
+                args,
+                output=(
+                    "gitlab.com\n"
+                    "  ! No token found (checked config file, keyring, and environment variables).\n"
+                    "gitlab.example.test\n"
+                    "  ✓ Logged in to gitlab.example.test as fausto\n"
+                    "  ✓ Token found: **************************\n"
+                ),
+            )
+        raise AssertionError(f"unexpected glab command: {args}")
+
+    monkeypatch.setattr("smith.config.subprocess.run", _fake_run)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.gitlab_api_url == "https://gitlab.example.test/api/v4"
+
+
+def test_parse_runtime_config_gitlab_api_url_override_wins_over_host(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITLAB_HOST", "gitlab.example.test")
+    monkeypatch.setenv("GITLAB_API_URL", "https://gitlab.example.com/api/v4/")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
     assert runtime.gitlab_api_url == "https://gitlab.example.com/api/v4"
 
 

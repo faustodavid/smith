@@ -7,7 +7,7 @@ import pytest
 import requests
 from tests.support import make_runtime_config
 
-from smith.errors import SmithAuthError
+from smith.errors import SmithApiError, SmithAuthError
 from smith.providers.gitlab import GitLabProvider
 
 
@@ -27,10 +27,11 @@ def test_gitlab_token_helpers_and_url_building(monkeypatch: Any) -> None:
     assert provider._get_token() == "env-token"
     assert provider._timeout() == 30
     assert provider._build_url("/projects") == "https://gitlab.com/api/v4/projects"
+    assert provider._gitlab_host() == "gitlab.com"
     assert provider._gitlab_web_url() == "https://gitlab.com"
 
 
-def test_gitlab_token_falls_back_to_glab_cli_and_reports_auth_failures(monkeypatch: Any) -> None:
+def test_gitlab_token_falls_back_to_glab_config_and_reports_auth_failures(monkeypatch: Any) -> None:
     monkeypatch.delenv("GITLAB_TOKEN", raising=False)
     provider = _provider()
     calls: list[list[str]] = []
@@ -43,7 +44,7 @@ def test_gitlab_token_falls_back_to_glab_cli_and_reports_auth_failures(monkeypat
 
     assert provider._get_token() == "cli-token"
     assert provider._get_token() == "cli-token"
-    assert calls == [["glab", "auth", "token"]]
+    assert calls == [["glab", "config", "get", "token", "--host", "gitlab.com"]]
 
     monkeypatch.setattr(
         "smith.providers.gitlab.subprocess.run",
@@ -76,6 +77,22 @@ def test_gitlab_token_rejects_empty_cli_token_and_requires_group(monkeypatch: An
         _provider(make_runtime_config(gitlab_group=""))._require_gitlab_group()
 
 
+def test_gitlab_token_uses_host_specific_glab_config_lookup(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+    provider = _provider(make_runtime_config(gitlab_api_url="https://gitlab.example.test/api/v4"))
+    calls: list[list[str]] = []
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        calls.append(args)
+        return SimpleNamespace(stdout="cli-token\n")
+
+    monkeypatch.setattr("smith.providers.gitlab.subprocess.run", _fake_run)
+
+    assert provider._gitlab_host() == "gitlab.example.test"
+    assert provider._get_token() == "cli-token"
+    assert calls == [["glab", "config", "get", "token", "--host", "gitlab.example.test"]]
+
+
 def test_gitlab_project_path_helpers_and_repository_file_resolution(monkeypatch: Any) -> None:
     provider = _provider()
     repo_id = provider._project_id("repo-a")
@@ -103,7 +120,7 @@ def test_gitlab_project_path_helpers_and_repository_file_resolution(monkeypatch:
             "page": 1,
             "path": "README.md",
         }:
-            return []
+            raise SmithApiError("not a tree", status_code=404)
         raise AssertionError(f"unexpected request: {path} {params}")
 
     def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:

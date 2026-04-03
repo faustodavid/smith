@@ -146,6 +146,14 @@ def test_validate_args_for_provider_allows_cli_overrides(monkeypatch: Any) -> No
     handlers.validate_args_for_provider(args)
 
 
+def test_validate_args_for_provider_code_search_all_ignores_unconfigured_providers(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITHUB_ORG", raising=False)
+    monkeypatch.delenv("AZURE_DEVOPS_ORG", raising=False)
+    monkeypatch.setenv("GITLAB_GROUP", "platform")
+
+    handlers.validate_args_for_provider(_make_args(command_id="code.search", provider="all"))
+
+
 def test_emit_success_supports_text_and_json_and_metadata(capsys: Any, monkeypatch: Any) -> None:
     monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['name']}")
     json_args = _make_args(output_format="json", deprecated_flags=["--repos"])

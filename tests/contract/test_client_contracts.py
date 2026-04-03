@@ -454,6 +454,28 @@ def test_execute_code_search_runs_all_provider_operations(monkeypatch: Any) -> N
     assert result["providers"]["azdo"]["data"]["kwargs"]["repos"] == ["repo-a"]
 
 
+def test_execute_code_search_all_skips_unconfigured_providers(monkeypatch: Any) -> None:
+    runtime = make_runtime_config(azdo_org="", github_org="", gitlab_group="platform")
+    calls = _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object())
+
+    result = client.execute_code_search(
+        provider="all",
+        query="grafana",
+        project=None,
+        repos=None,
+        skip=0,
+        take=5,
+    )
+
+    assert calls["run_fanout"] == {"providers": ["gitlab"], "requested_provider": "all"}
+    assert result["summary"]["queried"] == ["gitlab"]
+    assert set(result["providers"]) == {"gitlab"}
+    assert _FakeAzdoProvider.instances == []
+    assert _FakeGitHubProvider.instances == []
+    assert len(_FakeGitLabProvider.instances) == 1
+
+
 @pytest.mark.parametrize("provider", ["github", "gitlab"])
 def test_execute_pr_list_uses_projects_as_repo_fallback(monkeypatch: Any, provider: str) -> None:
     runtime = make_runtime_config()
