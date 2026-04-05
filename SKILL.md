@@ -123,6 +123,7 @@ Wrong:
    - GitHub: `smith code grep github <repo> ".*" --output-mode files_with_matches`
    - GitLab: `smith code grep gitlab <repo> ".*" --output-mode files_with_matches`
 4. Extract proof from the smallest possible scope.
+   - For unfamiliar or very large repos, start with `smith code search "<query>"` first, then narrow grep with `--path` or `--glob`.
    - Azure DevOps: `smith code grep azdo <project> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
    - GitHub: `smith code grep github <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
    - GitLab: `smith code grep gitlab <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
@@ -152,6 +153,10 @@ Wrong:
   - Check org env vars and auth, then retry once.
 - 429:
   - Narrow repo, path, glob, regex, or result count.
+- Repository too large for grep:
+  - The grep guard triggers when the candidate file set is too large.
+  - Use `smith code search "<query>"` to locate the relevant path first.
+  - Then rerun `smith code grep ...` with `--path <dir>` and, when possible, `--glob "*.ext"`.
 - Truncation:
   - Narrow `--path` and `--glob`, or page with `--from-line` and `--to-line`.
 - Empty results:

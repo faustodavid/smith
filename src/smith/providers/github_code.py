@@ -20,6 +20,7 @@ from smith.formatting import format_grep_matches, glob_to_regex, normalize_branc
 from smith.providers.helpers import (
     build_grep_result,
     grep_compile_error_result,
+    grep_too_many_files_result,
 )
 from smith.utils import (
     compile_search_pattern,
@@ -447,7 +448,19 @@ class GitHubCodeMixin:
         file_regex = glob_to_regex(glob) if glob else ".*"
         filename_filter = re.compile(file_regex)
         resolved_branch = normalize_branch_name(branch) or self._get_repository_default_branch(repo)
-        checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
+        grep_local_cache_enabled = parse_bool_env(
+            "GITHUB_GREP_USE_LOCAL_CACHE",
+            default=True,
+        )
+        checkout_dir: str | None = None
+        if grep_local_cache_enabled:
+            existing_checkout_dir = self._local_checkout_path(
+                org=self._require_github_org(),
+                repo=repo,
+                branch=resolved_branch,
+            )
+            if os.path.isdir(os.path.join(existing_checkout_dir, ".git")):
+                checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
         if checkout_dir:
             files = self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
         else:
@@ -457,6 +470,8 @@ class GitHubCodeMixin:
             for item in files
             if filename_filter.search(os.path.basename(str(item.get("path", ""))))
         ]
+        if len(matching) > self._config.grep_max_files:
+            return grep_too_many_files_result(len(matching), self._config.grep_max_files)
 
         if output_mode == "files_with_matches" and is_match_all:
             text = "\n".join(str(item.get("path", "")) for item in matching)
@@ -471,6 +486,17 @@ class GitHubCodeMixin:
                 "warnings": [],
                 "partial": False,
             }
+        if not checkout_dir and grep_local_cache_enabled and matching:
+            checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
+            if checkout_dir:
+                local_paths_by_file = {
+                    str(item.get("path", "")): str(item.get("local_path") or "") or None
+                    for item in self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
+                }
+                matching = [
+                    {**item, "local_path": local_paths_by_file.get(str(item.get("path", "")))}
+                    for item in matching
+                ]
 
         search_pattern, compile_error = compile_search_pattern(
             regex_pattern,

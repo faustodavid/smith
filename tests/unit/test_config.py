@@ -77,6 +77,7 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
         "AZURE_DEVOPS_API_VERSION",
         "AZURE_DEVOPS_TIMEOUT_SECONDS",
         "THANOS_LOCAL_MAX_OUTPUT_CHARS",
+        "SMITH_GREP_MAX_FILES",
         "GITHUB_ORG",
         "GITHUB_API_URL",
         "GITHUB_API_VERSION",
@@ -109,6 +110,7 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
     assert runtime.api_version == "7.1"
     assert runtime.timeout_seconds == 30
     assert runtime.max_output_chars == 10240
+    assert runtime.grep_max_files == 5000
     assert runtime.github_org == ""
     assert runtime.github_api_url == "https://api.github.com"
     assert runtime.github_api_version == "2022-11-28"
@@ -126,6 +128,7 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
 
 def test_parse_runtime_config_applies_timeout_and_backoff_overrides(monkeypatch: Any) -> None:
     monkeypatch.setenv("AZURE_DEVOPS_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("SMITH_GREP_MAX_FILES", "9000")
     monkeypatch.setenv("GITHUB_TIMEOUT_SECONDS", "60")
     monkeypatch.setenv("GITHUB_MAX_CONCURRENT_REQUESTS", "4")
     monkeypatch.setenv("GITHUB_RATE_LIMIT_MAX_SLEEP_SECONDS", "180")
@@ -143,6 +146,7 @@ def test_parse_runtime_config_applies_timeout_and_backoff_overrides(monkeypatch:
     )
 
     assert runtime.timeout_seconds == 45
+    assert runtime.grep_max_files == 9000
     assert runtime.github_timeout_seconds == 60
     assert runtime.github_max_concurrent_requests == 4
     assert runtime.github_rate_limit_max_sleep_seconds == 180
@@ -277,6 +281,8 @@ def test_parse_runtime_config_gitlab_group_env_fallback(monkeypatch: Any) -> Non
 
 def test_parse_runtime_config_gitlab_group_override_wins_over_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("GITLAB_GROUP", "env-group")
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_API_URL", raising=False)
 
     runtime = parse_runtime_config(
         azdo_org="example",
@@ -556,3 +562,27 @@ def test_parse_runtime_config_bounds_github_rate_limit_max_sleep_seconds(
     )
 
     assert runtime.github_rate_limit_max_sleep_seconds == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [("0", 100), ("9000", 9000), ("999999", 100_000)],
+)
+def test_parse_runtime_config_bounds_grep_max_files(
+    monkeypatch: Any,
+    raw_value: str,
+    expected: int,
+) -> None:
+    monkeypatch.setenv("SMITH_GREP_MAX_FILES", raw_value)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.grep_max_files == expected

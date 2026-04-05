@@ -1,15 +1,40 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
+import pytest
 import requests
 from tests.support import make_runtime_config
 
+from smith.errors import SmithApiError
 from smith.providers.gitlab import GitLabProvider
 
 
 def _provider(config: Any | None = None) -> GitLabProvider:
     return GitLabProvider(config=config or make_runtime_config(), session=requests.Session())
+
+
+def _cache_git_output(
+    provider: GitLabProvider,
+    *,
+    tracked_paths: list[str] | None = None,
+    repo: str = "repo-a",
+    origin_url: str | None = None,
+) -> Any:
+    expected_origin = origin_url or provider._local_checkout_remote_url(repo=repo)
+    tracked_output = "\0".join(tracked_paths or [])
+    if tracked_output:
+        tracked_output += "\0"
+
+    def _fake_git_output(args: list[str], **kwargs: Any) -> str:
+        if "remote" in args:
+            return f"{expected_origin}\n"
+        if "ls-files" in args:
+            return tracked_output
+        raise AssertionError(f"unexpected git output command: {args}")
+
+    return _fake_git_output
 
 
 def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) -> None:
@@ -67,6 +92,396 @@ def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) ->
     ]
 
 
+def test_gitlab_grep_files_with_matches_uses_server_side_search_api(monkeypatch: Any) -> None:
+    provider = _provider(make_runtime_config(max_output_chars=50))
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        return [
+            {"path": "src/app.py"},
+            {"path": "src/postgres.py"},
+            {"path": "src/lib/util.py"},
+            {"path": "docs/postgres.md"},
+        ]
+
+    def _unexpected_repository_walk(**kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("expected Search API fast path")
+
+    monkeypatch.setattr(provider, "_request", _fake_request)
+    monkeypatch.setattr(provider, "_get_repository_files", _unexpected_repository_walk)
+    monkeypatch.setattr(
+        provider,
+        "_get_file_text",
+        lambda *, file_path, **kwargs: "postgres\nok" if file_path in {"/src/app.py", "/src/lib/util.py"} else "ok",
+    )
+
+    result = provider.grep(
+        repo="repo-a",
+        pattern="postgres",
+        path="src",
+        branch="feature",
+        glob="*.py",
+        output_mode="files_with_matches",
+    )
+
+    assert result == {
+        "text": "/src/app.py\n/src/lib/util.py",
+        "files_matched": 2,
+        "warnings": [],
+        "partial": False,
+    }
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/search",
+            "params": {"scope": "blobs", "search": "postgres", "per_page": 100, "ref": "feature", "page": 1},
+        }
+    ]
+
+
+def test_gitlab_grep_files_with_matches_falls_back_when_search_api_errors(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+
+    def _failing_search(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        raise SmithApiError("search unavailable", status_code=400)
+
+    monkeypatch.setattr(provider, "_request", _failing_search)
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: [
+            {"path": "/src/app.py", "is_binary": False, "sha": "sha-app"},
+            {"path": "/src/util.py", "is_binary": False, "sha": "sha-util"},
+        ],
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_file_text",
+        lambda *, file_path, **kwargs: "postgres\nok" if file_path == "/src/app.py" else "ok",
+    )
+
+    result = provider.grep(repo="repo-a", pattern="postgres", output_mode="files_with_matches")
+
+    assert result == {
+        "text": "/src/app.py",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/search",
+            "params": {"scope": "blobs", "search": "postgres", "per_page": 100, "page": 1},
+        }
+    ]
+
+
+def test_gitlab_grep_uses_local_checkout_cache_when_available(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_git_subprocess", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_git_subprocess_output", _cache_git_output(provider, tracked_paths=["src/app.py"]))
+
+    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    os.makedirs(checkout_dir, exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, "src"), exist_ok=True)
+    with open(os.path.join(checkout_dir, ".git", "smith-last-fetch"), "w", encoding="utf-8"):
+        pass
+    with open(os.path.join(checkout_dir, "src", "app.py"), "w", encoding="utf-8") as file_handle:
+        file_handle.write("ok\nerror\nerror\n")
+
+    monkeypatch.setattr(
+        provider,
+        "_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call GitLab API")),
+    )
+
+    result = provider.grep(repo="repo-a", pattern="error", output_mode="count")
+
+    assert result == {
+        "text": "/src/app.py:2",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_gitlab_grep_reuses_fresh_cache_without_touching_fetch_marker(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    commands: list[list[str]] = []
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_git_subprocess", lambda args, **kwargs: commands.append(args))
+    monkeypatch.setattr(provider, "_git_subprocess_output", _cache_git_output(provider, tracked_paths=["src/app.py"]))
+
+    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    marker_path = os.path.join(checkout_dir, ".git", "smith-last-fetch")
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, "src"), exist_ok=True)
+    with open(marker_path, "w", encoding="utf-8"):
+        pass
+    with open(os.path.join(checkout_dir, "src", "app.py"), "w", encoding="utf-8") as file_handle:
+        file_handle.write("error\n")
+    marker_mtime = os.path.getmtime(marker_path)
+
+    result = provider.grep(repo="repo-a", pattern="error", output_mode="count")
+
+    assert result == {
+        "text": "/src/app.py:1",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+    assert os.path.getmtime(marker_path) == marker_mtime
+    assert any(command[-1] == "origin/main" for command in commands if "checkout" in command)
+    assert all("fetch" not in command for command in commands)
+
+
+def test_gitlab_grep_falls_back_to_api_when_local_checkout_unavailable(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        provider,
+        "_git_subprocess",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("git unavailable")),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: [{"path": "/src/app.py", "is_binary": False, "sha": "sha-app"}],
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_file_text",
+        lambda **kwargs: "error\nok\n",
+    )
+
+    result = provider.grep(repo="repo-a", pattern="error", output_mode="count")
+
+    assert result == {
+        "text": "/src/app.py:1",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_gitlab_grep_falls_back_to_api_when_cache_origin_mismatches(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+
+    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    with open(os.path.join(checkout_dir, ".git", "smith-last-fetch"), "w", encoding="utf-8"):
+        pass
+
+    def _fake_git_output(args: list[str], **kwargs: Any) -> str:
+        if "remote" in args:
+            return "https://gitlab.com/other-group/repo-a.git\n"
+        raise AssertionError("unexpected git output command")
+
+    monkeypatch.setattr(provider, "_git_subprocess_output", _fake_git_output)
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: [{"path": "/src/app.py", "is_binary": False, "sha": "sha-app"}],
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_file_text",
+        lambda **kwargs: "error\nok\n",
+    )
+
+    result = provider.grep(repo="repo-a", pattern="error", output_mode="count")
+
+    assert result == {
+        "text": "/src/app.py:1",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_gitlab_local_checkout_path_avoids_branch_collisions() -> None:
+    provider = _provider()
+
+    first = provider._local_checkout_path(repo="repo-a", branch="feature/a")
+    second = provider._local_checkout_path(repo="repo-a", branch="feature_a")
+
+    assert first != second
+
+
+def test_gitlab_grep_local_checkout_rejects_path_traversal(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_git_subprocess", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_git_subprocess_output", _cache_git_output(provider))
+
+    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    os.makedirs(checkout_dir, exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    with open(os.path.join(checkout_dir, ".git", "smith-last-fetch"), "w", encoding="utf-8"):
+        pass
+
+    secret_dir = tmp_path / "secret-area"
+    secret_dir.mkdir()
+    (secret_dir / "secret.txt").write_text("error\n", encoding="utf-8")
+
+    result = provider.grep(repo="repo-a", pattern="error", path="../../secret-area", output_mode="count")
+
+    assert result == {
+        "text": "",
+        "files_matched": 0,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_gitlab_grep_local_checkout_skips_symlinks(monkeypatch: Any, tmp_path: Any) -> None:
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlinks unsupported")
+
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_git_subprocess", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_git_subprocess_output", _cache_git_output(provider, tracked_paths=["src/link.txt"]))
+
+    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    os.makedirs(checkout_dir, exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, "src"), exist_ok=True)
+    with open(os.path.join(checkout_dir, ".git", "smith-last-fetch"), "w", encoding="utf-8"):
+        pass
+
+    secret_file = tmp_path / "secret.txt"
+    secret_file.write_text("error\n", encoding="utf-8")
+    link_path = os.path.join(checkout_dir, "src", "link.txt")
+
+    try:
+        os.symlink(secret_file, link_path)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    result = provider.grep(repo="repo-a", pattern="error", output_mode="count")
+
+    assert result == {
+        "text": "",
+        "files_matched": 0,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_gitlab_grep_local_checkout_skips_cache_marker_for_match_all(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_git_subprocess", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_git_subprocess_output", _cache_git_output(provider, tracked_paths=["src/app.py"]))
+
+    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    os.makedirs(checkout_dir, exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, "src"), exist_ok=True)
+    with open(os.path.join(checkout_dir, ".git", "smith-last-fetch"), "w", encoding="utf-8"):
+        pass
+    with open(os.path.join(checkout_dir, "src", "app.py"), "w", encoding="utf-8") as file_handle:
+        file_handle.write("ok\n")
+
+    result = provider.grep(repo="repo-a", pattern=".*", output_mode="files_with_matches")
+
+    assert result == {
+        "text": "/src/app.py",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_gitlab_grep_local_checkout_rejects_internal_metadata_paths(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_git_subprocess", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_git_subprocess_output", _cache_git_output(provider))
+
+    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    with open(os.path.join(checkout_dir, ".git", "config"), "w", encoding="utf-8") as file_handle:
+        file_handle.write("origin = secret\n")
+    with open(os.path.join(checkout_dir, ".git", "smith-last-fetch"), "w", encoding="utf-8"):
+        pass
+
+    marker_result = provider.grep(
+        repo="repo-a",
+        pattern=".*",
+        path=".git/smith-last-fetch",
+        output_mode="files_with_matches",
+    )
+    git_result = provider.grep(repo="repo-a", pattern="origin", path=".git/config", output_mode="count")
+
+    assert marker_result == {
+        "text": "",
+        "files_matched": 0,
+        "warnings": [],
+        "partial": False,
+    }
+    assert git_result == {
+        "text": "",
+        "files_matched": 0,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_gitlab_grep_local_checkout_ignores_untracked_files(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_git_subprocess", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_git_subprocess_output", _cache_git_output(provider, tracked_paths=["src/app.py"]))
+
+    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    os.makedirs(checkout_dir, exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    os.makedirs(os.path.join(checkout_dir, "src"), exist_ok=True)
+    with open(os.path.join(checkout_dir, ".git", "smith-last-fetch"), "w", encoding="utf-8"):
+        pass
+    with open(os.path.join(checkout_dir, "src", "app.py"), "w", encoding="utf-8") as file_handle:
+        file_handle.write("ok\n")
+    with open(os.path.join(checkout_dir, "src", "scratch.txt"), "w", encoding="utf-8") as file_handle:
+        file_handle.write("error\n")
+
+    result = provider.grep(repo="repo-a", pattern="error", output_mode="count")
+
+    assert result == {
+        "text": "",
+        "files_matched": 0,
+        "warnings": [],
+        "partial": False,
+    }
+
+
 def test_gitlab_grep_supports_match_all_shortcut_compile_errors_and_warning_paths(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
     monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
@@ -103,6 +518,41 @@ def test_gitlab_grep_supports_match_all_shortcut_compile_errors_and_warning_path
 
     compile_error = provider.grep(repo="repo-a", pattern="[")
     assert compile_error["text"].startswith("Error: Invalid regex pattern")
+
+
+def test_gitlab_grep_returns_guard_result_before_cloning_or_reading_large_scopes(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider(make_runtime_config(grep_max_files=1))
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: [
+            {"path": "/src/app.py", "is_binary": False, "sha": "sha-app"},
+            {"path": "/src/util.py", "is_binary": False, "sha": "sha-util"},
+        ],
+    )
+    monkeypatch.setattr(
+        provider,
+        "_ensure_local_checkout",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not clone before guard")),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_file_text",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not read file content")),
+    )
+
+    result = provider.grep(repo="repo-a", pattern="error")
+
+    assert result["files_matched"] == 0
+    assert result["partial"] is True
+    assert result["warnings"] == [
+        "candidate file count 2 exceeds SMITH_GREP_MAX_FILES=1; narrow with --path/--glob or start with `smith code search`."
+    ]
+    assert "Search scope contains 2 candidate files which exceeds the safety limit (1)." in result["text"]
+    assert 'smith code search "<query>"' in result["text"]
 
 
 def test_gitlab_list_pull_requests_uses_combined_single_repo_stream_for_mixed_statuses(monkeypatch: Any) -> None:

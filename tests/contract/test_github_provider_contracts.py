@@ -118,6 +118,41 @@ def test_github_grep_supports_match_all_shortcut_compile_errors_and_warning_path
     assert compile_error["text"].startswith("Error: Invalid regex pattern")
 
 
+def test_github_grep_returns_guard_result_before_cloning_or_reading_large_scopes(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider(make_runtime_config(grep_max_files=1))
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_get_repository_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: [
+            {"path": "/src/app.py", "sha": "sha-app"},
+            {"path": "/src/util.py", "sha": "sha-util"},
+        ],
+    )
+    monkeypatch.setattr(
+        provider,
+        "_ensure_local_checkout",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not clone before guard")),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_file_text",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not read file content")),
+    )
+
+    result = provider.grep(repo="repo-a", pattern="error")
+
+    assert result["files_matched"] == 0
+    assert result["partial"] is True
+    assert result["warnings"] == [
+        "candidate file count 2 exceeds SMITH_GREP_MAX_FILES=1; narrow with --path/--glob or start with `smith code search`."
+    ]
+    assert "Search scope contains 2 candidate files which exceeds the safety limit (1)." in result["text"]
+    assert 'smith code search "<query>"' in result["text"]
+
+
 def test_github_grep_respects_global_concurrency_limit_when_parallel_enabled(monkeypatch: Any) -> None:
     config = make_runtime_config(github_max_concurrent_requests=2)
     provider = _provider(config=config)
