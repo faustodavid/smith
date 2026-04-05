@@ -105,6 +105,39 @@ def test_azdo_grep_supports_match_all_shortcut_and_warning_paths(monkeypatch: An
     assert result["partial"] is True
 
 
+def test_azdo_grep_returns_guard_result_before_reading_large_scopes(monkeypatch: Any) -> None:
+    provider = _provider(make_runtime_config(grep_max_files=1))
+    repo_url = f"{provider.org_url}/proj-a/_apis/git/repositories/repo-a/items"
+
+    def _fake_request_json(method: str, url: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        assert url == repo_url
+        if params and params.get("scopePath") == "/":
+            return {
+                "value": [
+                    {"path": "/src/app.py", "gitObjectType": "blob", "contentMetadata": {"isBinary": False}},
+                    {"path": "/src/util.py", "gitObjectType": "blob", "contentMetadata": {"isBinary": False}},
+                ]
+            }
+        raise AssertionError(f"unexpected request: {url} {params}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+    monkeypatch.setattr(
+        provider,
+        "_get_file_text",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not read file content")),
+    )
+
+    result = provider.grep(project="proj-a", repo="repo-a", pattern="error")
+
+    assert result["files_matched"] == 0
+    assert result["partial"] is True
+    assert result["warnings"] == [
+        "candidate file count 2 exceeds SMITH_GREP_MAX_FILES=1; narrow with --path/--glob or start with `smith code search`."
+    ]
+    assert "Search scope contains 2 candidate files which exceeds the safety limit (1)." in result["text"]
+    assert 'smith code search "<query>"' in result["text"]
+
+
 def test_azdo_list_pull_requests_maps_filters_statuses_and_labels(monkeypatch: Any) -> None:
     provider = _provider()
     active_pr = {

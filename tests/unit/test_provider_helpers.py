@@ -8,6 +8,7 @@ from smith.providers.helpers import (
     grep_build_logs_core,
     grep_compile_error_result,
     grep_match_lines,
+    grep_too_many_files_result,
     paginate_results,
 )
 
@@ -52,6 +53,18 @@ def test_grep_compile_error_result_uses_custom_matched_key() -> None:
     assert result["logs_matched"] == 0
     assert result["warnings"] == []
     assert result["partial"] is False
+
+
+def test_grep_too_many_files_result_returns_partial_guidance() -> None:
+    result = grep_too_many_files_result(7000, 5000)
+
+    assert result["files_matched"] == 0
+    assert result["partial"] is True
+    assert result["warnings"] == [
+        "candidate file count 7000 exceeds SMITH_GREP_MAX_FILES=5000; narrow with --path/--glob or start with `smith code search`."
+    ]
+    assert "Search scope contains 7000 candidate files" in result["text"]
+    assert '--glob "*.py"' in result["text"]
 
 
 def test_grep_match_lines_returns_content_mode_output_for_matches() -> None:

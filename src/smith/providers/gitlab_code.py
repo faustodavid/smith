@@ -15,7 +15,12 @@ from urllib.parse import quote
 from smith.config import parse_bool_env, parse_int_env
 from smith.errors import SmithApiError
 from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
-from smith.providers.helpers import build_grep_result, grep_compile_error_result, grep_match_lines
+from smith.providers.helpers import (
+    build_grep_result,
+    grep_compile_error_result,
+    grep_match_lines,
+    grep_too_many_files_result,
+)
 from smith.utils import compile_search_pattern, match_all_pattern, normalize_path, slice_lines
 
 if TYPE_CHECKING:
@@ -615,11 +620,15 @@ class GitLabCodeMixin:
             )
 
         resolved_branch = normalized_branch or self._get_project_default_branch(repo)
+        grep_local_cache_enabled = parse_bool_env("GITLAB_GREP_USE_LOCAL_CACHE", default=True)
         checkout_dir: str | None = None
         if search_api_candidates is not None:
             files = search_api_candidates
         else:
-            checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
+            if grep_local_cache_enabled:
+                existing_checkout_dir = self._local_checkout_path(repo=repo, branch=resolved_branch)
+                if os.path.isdir(os.path.join(existing_checkout_dir, ".git")):
+                    checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
             if checkout_dir:
                 files = self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
             else:
@@ -639,6 +648,8 @@ class GitLabCodeMixin:
             for file_item in files
             if filename_filter.search(os.path.basename(str(file_item.get("path", ""))))
         ]
+        if len(matching) > self._config.grep_max_files:
+            return grep_too_many_files_result(len(matching), self._config.grep_max_files)
 
         if output_mode == "files_with_matches" and is_match_all:
             text = "\n".join(str(item.get("path", "")) for item in matching)
@@ -653,6 +664,17 @@ class GitLabCodeMixin:
                 "warnings": [],
                 "partial": False,
             }
+        if not checkout_dir and grep_local_cache_enabled and matching:
+            checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
+            if checkout_dir:
+                local_paths_by_file = {
+                    str(item.get("path", "")): str(item.get("local_path") or "") or None
+                    for item in self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
+                }
+                matching = [
+                    {**item, "local_path": local_paths_by_file.get(str(item.get("path", "")))}
+                    for item in matching
+                ]
 
         search_pattern, compile_error = compile_search_pattern(
             regex_pattern,

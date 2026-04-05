@@ -9,6 +9,7 @@ from smith.providers.helpers import (
     build_grep_result,
     grep_compile_error_result,
     grep_match_lines,
+    grep_too_many_files_result,
 )
 from smith.utils import (
     compile_search_pattern,
@@ -200,6 +201,8 @@ class AzdoCodeMixin:
             for file_item in files
             if filename_filter.search(os.path.basename(str(file_item.get("path", ""))))
         ]
+        if len(matching) > self._config.grep_max_files:
+            return grep_too_many_files_result(len(matching), self._config.grep_max_files)
 
         if output_mode == "files_with_matches" and is_match_all:
             text = "\n".join(item["path"] for item in matching)

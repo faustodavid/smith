@@ -16,6 +16,7 @@ def make_runtime_config(**overrides: Any) -> RuntimeConfig:
         api_version="7.1",
         timeout_seconds=30,
         max_output_chars=10240,
+        grep_max_files=5000,
         github_org="octo-org",
         github_api_url="https://api.github.com",
         github_api_version="2022-11-28",

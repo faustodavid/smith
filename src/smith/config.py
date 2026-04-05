@@ -17,6 +17,7 @@ class RuntimeConfig:
     api_version: str
     timeout_seconds: int
     max_output_chars: int
+    grep_max_files: int
     github_org: str
     github_api_url: str
     github_api_version: str
@@ -241,6 +242,12 @@ def parse_runtime_config(
             default=max_output_chars or 10240,
             min_value=256,
             max_value=1_000_000,
+        ),
+        grep_max_files=parse_int_env(
+            "SMITH_GREP_MAX_FILES",
+            default=5000,
+            min_value=100,
+            max_value=100_000,
         ),
         github_org=(github_org or os.getenv("GITHUB_ORG", "") or "").strip(),
         github_api_url=os.getenv("GITHUB_API_URL", github_api_url_default).rstrip("/"),

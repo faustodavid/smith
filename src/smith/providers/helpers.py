@@ -25,6 +25,31 @@ def grep_compile_error_result(
     }
 
 
+def grep_too_many_files_result(
+    candidate_count: int,
+    limit: int,
+    *,
+    matched_key: str = "files_matched",
+) -> dict[str, Any]:
+    return {
+        "text": (
+            f"Search scope contains {candidate_count} candidate files which exceeds the safety limit ({limit}).\n"
+            "Narrow your search:\n"
+            "  --path <dir>       restrict to a subdirectory\n"
+            '  --glob "*.py"      restrict to a file type\n'
+            'Or use `smith code search "<query>"` first to locate the right path, then grep with --path.'
+        ),
+        matched_key: 0,
+        "warnings": [
+            (
+                f"candidate file count {candidate_count} exceeds SMITH_GREP_MAX_FILES={limit}; "
+                "narrow with --path/--glob or start with `smith code search`."
+            )
+        ],
+        "partial": True,
+    }
+
+
 def grep_match_lines(
     *,
     lines: list[str],
