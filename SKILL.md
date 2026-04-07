@@ -26,6 +26,7 @@ Run Azure DevOps, GitHub, and GitLab investigations with a deterministic broad-t
 ### Ambiguous request fallback
 
 - If GitHub, GitLab, or Azure DevOps is the likely source of truth, start broad with `smith code search "<query>"`.
+- For unfamiliar repos, prefer `smith code search "<stable noun>"` over repo-wide grep.
 - If repo or project scope is unknown, use discovery helpers first.
 - If the request is still unclear after discovery, return the findings so far and the best next narrowing command.
 
@@ -112,6 +113,11 @@ Wrong:
 - `smith code grep gitlab acme/platform/api "CI_JOB_TOKEN"`
 - `smith prs get gitlab acme/platform/api 42`
 
+Important pipeline ID rule:
+
+- `smith pipelines logs list ... <id>` takes a pipeline, run, or build ID, not a job or log ID.
+- If you only have a specific job or log, find the parent pipeline first, then use `smith pipelines logs grep ... <pipeline-id> ".*" --log-id <job-or-log-id>`.
+
 ## Investigation Algorithm
 
 1. Confirm the request is read-only and GitHub, GitLab, or Azure DevOps backed.
@@ -139,6 +145,15 @@ Wrong:
 - Prefer another simple search over one overloaded search string.
 - Do not assume wildcard qualifier support such as `org:foo/bar-*`.
 - When search already returns the exact file you need, move to focused grep instead of dumping the whole repo.
+
+## Exploration Tactics
+
+- Do not start with a broad regex over the whole repo unless you already know the subsystem path.
+- Start with `smith code search "<stable noun>"`.
+- After search reveals a likely area, map only that subtree with `smith code grep ... ".*" --path <dir> --output-mode files_with_matches`.
+- Then switch to focused content grep with both `--path <dir>` and, when possible, `--glob "*.ext"`.
+- Narrow in this order: repo -> subsystem path -> glob -> regex -> line window.
+- For pipeline failures, list the pipeline once, pick the relevant job by stage or job name, then grep only that `--log-id`.
 
 ## Stop Conditions
 
