@@ -26,6 +26,7 @@ Run Azure DevOps, GitHub, and GitLab investigations with a deterministic broad-t
 ### Ambiguous request fallback
 
 - If GitHub, GitLab, or Azure DevOps is the likely source of truth, start broad with `smith code search "<query>"`.
+- For unfamiliar repos, prefer `smith code search "<stable noun>"` over repo-wide grep.
 - If repo or project scope is unknown, use discovery helpers first.
 - If the request is still unclear after discovery, return the findings so far and the best next narrowing command.
 
@@ -112,24 +113,32 @@ Wrong:
 - `smith code grep gitlab acme/platform/api "CI_JOB_TOKEN"`
 - `smith prs get gitlab acme/platform/api 42`
 
+Important pipeline ID rule:
+
+- `smith pipelines logs list ... <id>` takes a pipeline, run, or build ID, not a job or log ID.
+- If you only have a specific job or log, find the parent pipeline first, then use `smith pipelines logs grep ... <pipeline-id> ".*" --log-id <job-or-log-id>`.
+
 ## Investigation Algorithm
 
 1. Confirm the request is read-only and GitHub, GitLab, or Azure DevOps backed.
-2. Discover candidate scope.
-   - If repo, project, or file is unknown, start with `smith code search "<query>"`.
+2. Discover candidate scope cautiously.
+   - Do not start with a broad regex over the whole repo unless you already know the subsystem path.
+   - Start with `smith code search "<stable noun>"` to locate the relevant area. Include `--repo <repo>` if the repository is already known.
    - If org, project, or repo scope is unclear, use `smith orgs ...` or `smith repos ...`.
-3. Map repository structure only when needed.
-   - Azure DevOps: `smith code grep azdo <project> <repo> ".*" --output-mode files_with_matches`
-   - GitHub: `smith code grep github <repo> ".*" --output-mode files_with_matches`
-   - GitLab: `smith code grep gitlab <repo> ".*" --output-mode files_with_matches`
-4. Extract proof from the smallest possible scope.
-   - For unfamiliar or very large repos, start with `smith code search "<query>"` first, then narrow grep with `--path` or `--glob`.
-   - Azure DevOps: `smith code grep azdo <project> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
-   - GitHub: `smith code grep github <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
-   - GitLab: `smith code grep gitlab <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+3. Map only the relevant subtree.
+   - After search reveals a likely area, map only that subtree:
+     - Azure DevOps: `smith code grep azdo <project> <repo> ".*" --path <dir> --output-mode files_with_matches`
+     - GitHub: `smith code grep github <repo> ".*" --path <dir> --output-mode files_with_matches`
+     - GitLab: `smith code grep gitlab <repo> ".*" --path <dir> --output-mode files_with_matches`
+4. Extract proof with focused grep.
+   - Narrow in this order: repo -> subsystem path -> glob -> regex -> line window.
+   - Use both `--path <dir>` and, when possible, `--glob "*.ext"`:
+     - Azure DevOps: `smith code grep azdo <project> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+     - GitHub: `smith code grep github <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+     - GitLab: `smith code grep gitlab <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
 5. Corroborate only when needed.
    - Use `prs` for review context or changed-file confirmation.
-   - Use `pipelines logs` for build failures or runtime evidence.
+   - Use `pipelines logs` for build failures or runtime evidence. List the pipeline once, pick the relevant job by stage or job name, then grep only that `--log-id`.
    - Use `stories` for work-item or issue context.
 6. Report only what the retrieved evidence supports.
 
