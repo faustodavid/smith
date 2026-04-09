@@ -116,6 +116,7 @@ def _add_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--from-line", type=int)
     parser.add_argument("--to-line", type=int)
     parser.add_argument("--case-sensitive", action="store_true")
+    parser.add_argument("--no-clone", action="store_true", help="Skip local clone and fetch files via provider APIs instead")
 
 
 def _add_pr_list_filters(parser: argparse.ArgumentParser) -> None:

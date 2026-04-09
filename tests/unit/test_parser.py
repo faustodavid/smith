@@ -129,6 +129,18 @@ def test_code_grep_parser_uses_required_positional_pattern() -> None:
     assert args.repo == "repo-a"
     assert args.path == "/src"
     assert args.pattern == "error"
+    assert args.no_clone is False
+
+
+def test_code_grep_parser_accepts_no_clone() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["code", "grep", "github", "repo-a", "--no-clone", "error"])
+
+    assert args.command_id == "code.grep"
+    assert args.provider == "github"
+    assert args.repo == "repo-a"
+    assert args.pattern == "error"
+    assert args.no_clone is True
 
 
 def test_code_grep_gitlab_parser_uses_required_positional_pattern() -> None:
@@ -140,6 +152,7 @@ def test_code_grep_gitlab_parser_uses_required_positional_pattern() -> None:
     assert args.repo == "repo-a"
     assert args.path == "/src"
     assert args.pattern == "error"
+    assert args.no_clone is False
 
 
 def test_pipelines_logs_grep_parser_uses_canonical_command_id() -> None:

@@ -41,6 +41,7 @@ def _make_args(**overrides: Any) -> Namespace:
         "context_lines": 2,
         "from_line": 10,
         "to_line": 20,
+        "no_clone": False,
         "cache_provider": "all",
         "id": 42,
         "log_id": 9,
@@ -238,7 +239,7 @@ def test_emit_error_supports_text_and_json_with_cli_warnings(capsys: Any) -> Non
         ),
         (
             "handle_code_grep",
-            _make_args(command_id="code.grep"),
+            _make_args(command_id="code.grep", no_clone=True),
             "execute_code_grep",
             {
                 "provider": "azdo",
@@ -253,6 +254,7 @@ def test_emit_error_supports_text_and_json_with_cli_warnings(capsys: Any) -> Non
                 "context_lines": 2,
                 "from_line": 10,
                 "to_line": 20,
+                "no_clone": True,
             },
         ),
         (

@@ -732,6 +732,7 @@ class GitLabCodeMixin:
         context_lines: int | None = 3,
         from_line: int | None = None,
         to_line: int | None = None,
+        no_clone: bool = False,
     ) -> dict[str, Any]:
         folder_path = normalize_path(path)
         normalized_branch = normalize_branch_name(branch)
@@ -743,7 +744,8 @@ class GitLabCodeMixin:
 
         resolved_branch = normalized_branch or self._get_project_default_branch(repo)
         grep_local_cache_enabled = parse_bool_env("GITLAB_GREP_USE_LOCAL_CACHE", default=True)
-        checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch) if grep_local_cache_enabled else None
+        use_local_cache = grep_local_cache_enabled and not no_clone
+        checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch) if use_local_cache else None
 
         search_api_candidates: list[dict[str, Any]] | None = None
         if output_mode == "files_with_matches" and not is_match_all and checkout_dir is None:
@@ -796,7 +798,7 @@ class GitLabCodeMixin:
                 "warnings": [],
                 "partial": False,
             }
-        if output_mode != "files_with_matches" and not checkout_dir and grep_local_cache_enabled and matching:
+        if output_mode != "files_with_matches" and not checkout_dir and use_local_cache and matching:
             checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
             if checkout_dir:
                 local_paths_by_file = {

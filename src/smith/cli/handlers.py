@@ -269,6 +269,7 @@ def handle_code_grep(client: SmithClient, args: argparse.Namespace) -> int:
         context_lines=args.context_lines,
         from_line=args.from_line,
         to_line=args.to_line,
+        no_clone=args.no_clone,
     )
     return _emit_success(
         args=args,

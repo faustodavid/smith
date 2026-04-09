@@ -199,6 +199,7 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
                 "context_lines": 2,
                 "from_line": 10,
                 "to_line": 20,
+                "no_clone": True,
             },
             "github",
             "grep",
@@ -213,6 +214,7 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
                 "context_lines": 2,
                 "from_line": 10,
                 "to_line": 20,
+                "no_clone": True,
             },
         ),
         (

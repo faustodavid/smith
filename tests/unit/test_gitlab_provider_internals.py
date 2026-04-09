@@ -236,6 +236,32 @@ def test_gitlab_grep_attempts_local_checkout_before_api_listing(monkeypatch: Any
     assert result["text"] == "/src/app.py"
 
 
+def test_gitlab_grep_no_clone_skips_local_checkout(monkeypatch: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        provider,
+        "_ensure_local_checkout",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("local checkout should be skipped")),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: [{"path": "/src/app.py", "is_binary": False, "sha": "sha-app"}],
+    )
+    monkeypatch.setattr(provider, "_get_file_text", lambda **kwargs: "needle\n")
+
+    result = provider.grep(repo="repo-a", pattern="needle", output_mode="count", no_clone=True)
+
+    assert result == {
+        "text": "/src/app.py:1",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
 def test_gitlab_git_grep_local_reads_only_matched_files(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     matched_file = tmp_path / "src" / "app.py"

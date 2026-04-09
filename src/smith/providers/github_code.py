@@ -578,6 +578,7 @@ class GitHubCodeMixin:
         context_lines: int | None = 3,
         from_line: int | None = None,
         to_line: int | None = None,
+        no_clone: bool = False,
     ) -> dict[str, Any]:
         regex_pattern = pattern or ".*"
         is_match_all = match_all_pattern(regex_pattern)
@@ -588,8 +589,9 @@ class GitHubCodeMixin:
             "GITHUB_GREP_USE_LOCAL_CACHE",
             default=True,
         )
+        use_local_cache = grep_local_cache_enabled and not no_clone
         checkout_dir: str | None = None
-        if grep_local_cache_enabled:
+        if use_local_cache:
             checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
         if checkout_dir:
             files = self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
@@ -616,7 +618,7 @@ class GitHubCodeMixin:
                 "warnings": [],
                 "partial": False,
             }
-        if output_mode != "files_with_matches" and not checkout_dir and grep_local_cache_enabled and matching:
+        if output_mode != "files_with_matches" and not checkout_dir and use_local_cache and matching:
             checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
             if checkout_dir:
                 local_paths_by_file = {
