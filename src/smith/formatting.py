@@ -184,6 +184,22 @@ def _render_grep(data: Any) -> str:
     return text
 
 
+def _render_cache_clean(data: Any) -> str:
+    cleaned = data.get("cleaned", []) if isinstance(data, dict) else []
+    missing = data.get("missing", []) if isinstance(data, dict) else []
+    lines: list[str] = []
+
+    if cleaned:
+        lines.append("cleaned:")
+        lines.extend(str(path) for path in cleaned)
+
+    if missing:
+        lines.append("missing:")
+        lines.extend(str(path) for path in missing)
+
+    return "\n".join(lines)
+
+
 def _render_pr_list(data: Any) -> str:
     rows = data.get("results", []) if isinstance(data, dict) else []
     lines = [_fmt_table_line(["project", "repo", "pr_id", "status", "title"])]
@@ -307,6 +323,7 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "repos": _render_discover_repos,
     "code.search": _render_code_search,
     "code.grep": _render_grep,
+    "cache.clean": _render_cache_clean,
     "pipelines.logs.grep": _render_grep,
     "prs.list": _render_pr_list,
     "prs.get": _render_pr_get,

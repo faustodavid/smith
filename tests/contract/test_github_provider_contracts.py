@@ -118,11 +118,12 @@ def test_github_grep_supports_match_all_shortcut_compile_errors_and_warning_path
     assert compile_error["text"].startswith("Error: Invalid regex pattern")
 
 
-def test_github_grep_returns_guard_result_before_cloning_or_reading_large_scopes(monkeypatch: Any, tmp_path: Any) -> None:
+def test_github_grep_returns_guard_result_without_reading_large_scopes(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider(make_runtime_config(grep_max_files=1))
     monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
     monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(provider, "_get_repository_default_branch", lambda repo: "main")
+    checkout_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
         provider,
         "_get_repository_files",
@@ -134,7 +135,7 @@ def test_github_grep_returns_guard_result_before_cloning_or_reading_large_scopes
     monkeypatch.setattr(
         provider,
         "_ensure_local_checkout",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not clone before guard")),
+        lambda **kwargs: checkout_calls.append(kwargs) or None,
     )
     monkeypatch.setattr(
         provider,
@@ -149,6 +150,7 @@ def test_github_grep_returns_guard_result_before_cloning_or_reading_large_scopes
     assert result["warnings"] == [
         "candidate file count 2 exceeds SMITH_GREP_MAX_FILES=1; narrow with --path/--glob or start with `smith code search`."
     ]
+    assert checkout_calls == [{"repo": "repo-a", "branch": "main"}]
     assert "Search scope contains 2 candidate files which exceeds the safety limit (1)." in result["text"]
     assert 'smith code search "<query>"' in result["text"]
 

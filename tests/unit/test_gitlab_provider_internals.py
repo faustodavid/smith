@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -185,3 +186,116 @@ def test_gitlab_file_text_prefers_blob_api_and_falls_back_to_raw_file(monkeypatc
         f"/projects/{repo_id}/repository/blobs/sha-2/raw",
         f"/projects/{repo_id}/repository/files/src%2Fapp.py/raw",
     ]
+
+
+def test_gitlab_grep_cache_max_age_defaults_to_30_seconds(monkeypatch: Any) -> None:
+    provider = _provider()
+    monkeypatch.delenv("GITLAB_GREP_CACHE_MAX_AGE_SECONDS", raising=False)
+
+    assert provider._gitlab_grep_cache_max_age_seconds() == 30
+
+
+def test_gitlab_grep_attempts_local_checkout_before_api_listing(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    local_file = tmp_path / "src" / "app.py"
+    local_file.parent.mkdir(parents=True)
+    local_file.write_text("needle\n", encoding="utf-8")
+    checkout_calls: list[tuple[str, str]] = []
+
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        provider,
+        "_ensure_local_checkout",
+        lambda *, repo, branch: checkout_calls.append((repo, branch)) or str(tmp_path),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_grep_via_search_api",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Search API should not be used")),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_local_repository_files",
+        lambda **kwargs: [{"path": "/src/app.py", "is_binary": False, "sha": None, "local_path": str(local_file)}],
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("API listing should not be used")),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_git_grep_local",
+        lambda **kwargs: {"text": "/src/app.py", "files_matched": 1, "warnings": [], "partial": False},
+    )
+
+    result = provider.grep(repo="repo-a", pattern="needle", output_mode="files_with_matches")
+
+    assert checkout_calls == [("repo-a", "main")]
+    assert result["text"] == "/src/app.py"
+
+
+def test_gitlab_grep_no_clone_skips_local_checkout(monkeypatch: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        provider,
+        "_ensure_local_checkout",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("local checkout should be skipped")),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_get_repository_files",
+        lambda **kwargs: [{"path": "/src/app.py", "is_binary": False, "sha": "sha-app"}],
+    )
+    monkeypatch.setattr(provider, "_get_file_text", lambda **kwargs: "needle\n")
+
+    result = provider.grep(repo="repo-a", pattern="needle", output_mode="count", no_clone=True)
+
+    assert result == {
+        "text": "/src/app.py:1",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_gitlab_git_grep_local_reads_only_matched_files(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    matched_file = tmp_path / "src" / "app.py"
+    matched_file.parent.mkdir(parents=True)
+    matched_file.write_text("first line\nneedle\n", encoding="utf-8")
+    other_file = tmp_path / "README.md"
+    other_file.write_text("other line\n", encoding="utf-8")
+    git_calls: list[list[str]] = []
+
+    def _fake_git_result(args: list[str], *, cwd: str | None = None, check: bool = True) -> Any:
+        del cwd
+        git_calls.append(args)
+        assert check is False
+        return SimpleNamespace(returncode=0, stdout="src/app.py\n", stderr="")
+
+    monkeypatch.setattr(provider, "_git_subprocess_result", _fake_git_result)
+
+    result = provider._git_grep_local(
+        checkout_dir=str(tmp_path),
+        pattern="needle",
+        case_insensitive=True,
+        output_mode="content",
+        context_lines=0,
+        matching=[
+            {"path": "/src/app.py", "is_binary": False, "sha": None, "local_path": str(matched_file)},
+            {"path": "/README.md", "is_binary": False, "sha": None, "local_path": str(other_file)},
+        ],
+        search_pattern=re.compile("needle", re.IGNORECASE),
+    )
+
+    assert result == {
+        "text": "/src/app.py\n2:needle",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+    assert "-F" in git_calls[0]

@@ -44,8 +44,8 @@ Use the current CLI tree only:
 - Code:
   - `smith code search "<query>"`
   - `smith code grep azdo <project> <repo> "<regex>"`
-  - `smith code grep github <repo> "<regex>"`
-  - `smith code grep gitlab <repo> "<regex>"`
+  - `smith code grep github <repo> "<regex>" [--no-clone]`
+  - `smith code grep gitlab <repo> "<regex>" [--no-clone]`
 - Pull requests:
   - `smith prs list|get|threads azdo ...`
   - `smith prs list|get|threads github ...`
@@ -136,6 +136,8 @@ Important pipeline ID rule:
      - Azure DevOps: `smith code grep azdo <project> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
      - GitHub: `smith code grep github <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
      - GitLab: `smith code grep gitlab <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+   - Use `--no-clone` for one-off targeted grep or when scanning many repos once.
+   - Keep the default clone-backed path when you expect multiple grep calls in the same repo so the local checkout can be reused.
 5. Corroborate only when needed.
    - Use `prs` for review context or changed-file confirmation.
    - Use `pipelines logs` for build failures or runtime evidence. List the pipeline once, pick the relevant job by stage or job name, then grep only that `--log-id`.

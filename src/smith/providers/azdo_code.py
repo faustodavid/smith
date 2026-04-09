@@ -174,6 +174,7 @@ class AzdoCodeMixin:
         context_lines: int | None = 3,
         from_line: int | None = None,
         to_line: int | None = None,
+        no_clone: bool = False,
     ) -> dict[str, Any]:
         folder_path = normalize_path(path)
         normalized_branch = normalize_branch_name(branch)
