@@ -160,6 +160,25 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
     assert result["providers"]["azdo"]["data"]["provider"] == "azdo"
 
 
+def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_path: Any) -> None:
+    github_cache = tmp_path / "github-grep"
+    gitlab_cache = tmp_path / "gitlab-grep"
+    github_cache.mkdir()
+    gitlab_cache.mkdir()
+
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(gitlab_cache))
+
+    result = SmithClient.execute_cache_clean(provider="github")
+
+    assert result == {
+        "cleaned": [str(github_cache)],
+        "missing": [],
+    }
+    assert not github_cache.exists()
+    assert gitlab_cache.exists()
+
+
 @pytest.mark.parametrize(
     ("method_name", "kwargs", "expected_provider", "expected_method", "expected_kwargs"),
     [

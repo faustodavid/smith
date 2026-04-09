@@ -15,6 +15,23 @@ def test_code_search_parser_defaults() -> None:
     assert args.query == "grafana"
 
 
+def test_cache_clean_parser_defaults() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["cache", "clean"])
+
+    assert args.command_id == "cache.clean"
+    assert args.cache_provider == "all"
+    assert args.requires_client is False
+
+
+def test_cache_clean_parser_accepts_provider_override() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["cache", "clean", "--provider", "github"])
+
+    assert args.command_id == "cache.clean"
+    assert args.cache_provider == "github"
+
+
 def test_stories_group_parses_to_stories_command() -> None:
     parser = build_parser()
     args = parser.parse_args(["stories", "get", "azdo", "SRE", "123"])
@@ -253,6 +270,7 @@ def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) ->
     output = capsys.readouterr().out
     assert "repos" in output
     assert "orgs" in output
+    assert "cache" in output
     assert "prs" in output
     assert "pipelines" in output
     assert "stories" in output
@@ -264,6 +282,7 @@ def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) ->
     assert "GitLab groups" in output
     assert "DevOps" in output
     assert "Search and grep across providers and repos" in output
+    assert "Manage local grep caches" in output
     assert "List, get, and read pull request comments" in output
     assert "Read and grep pipeline logs" in output
     assert "Get, search, and get mine" in output

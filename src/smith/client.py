@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Literal
 
 import requests
@@ -177,6 +180,54 @@ class SmithClient:
         if self._runtime.azdo_configured:
             providers.append("azdo")
         return providers
+
+    @staticmethod
+    def _github_grep_cache_root() -> str:
+        configured = (os.getenv("SMITH_GITHUB_GREP_CACHE_DIR") or "").strip()
+        if configured:
+            return configured
+        return str(Path.home() / ".cache" / "smith" / "github-grep")
+
+    @staticmethod
+    def _gitlab_grep_cache_root() -> str:
+        configured = (os.getenv("SMITH_GITLAB_GREP_CACHE_DIR") or "").strip()
+        if configured:
+            return configured
+        return str(Path.home() / ".cache" / "smith" / "gitlab-grep")
+
+    @classmethod
+    def _cache_clean_roots(cls, *, provider: str | None) -> list[str]:
+        normalized = (provider or "all").strip().lower()
+        if normalized not in {"all", "github", "gitlab"}:
+            raise ValueError("cache clean supports provider values: github, gitlab, all")
+
+        roots: list[str] = []
+        if normalized in {"all", "github"}:
+            roots.append(cls._github_grep_cache_root())
+        if normalized in {"all", "gitlab"}:
+            roots.append(cls._gitlab_grep_cache_root())
+        return roots
+
+    @classmethod
+    def execute_cache_clean(cls, *, provider: str | None = None) -> dict[str, Any]:
+        cleaned: list[str] = []
+        missing: list[str] = []
+
+        for cache_root in cls._cache_clean_roots(provider=provider):
+            if os.path.isdir(cache_root):
+                shutil.rmtree(cache_root)
+                cleaned.append(cache_root)
+                continue
+            if os.path.exists(cache_root):
+                os.remove(cache_root)
+                cleaned.append(cache_root)
+                continue
+            missing.append(cache_root)
+
+        return {
+            "cleaned": cleaned,
+            "missing": missing,
+        }
 
     def _list_azdo_repositories(self, *, project: str | None) -> list[dict[str, Any]]:
         azdo = self._get_azdo()

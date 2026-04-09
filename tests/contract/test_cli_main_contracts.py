@@ -72,6 +72,34 @@ def test_main_uses_unexpected_error_fallback(monkeypatch: Any, capsys: Any) -> N
     assert "Unexpected error: boom" in captured.err
 
 
+def test_main_skips_client_creation_for_clientless_handlers(monkeypatch: Any) -> None:
+    received: dict[str, Any] = {}
+
+    def _handler(client: Any, parsed: Namespace) -> int:
+        del parsed
+        received["client"] = client
+        return 0
+
+    args = Namespace(
+        verbose=False,
+        handler=_handler,
+        output_format="text",
+        command_id="cache.clean",
+        requires_client=False,
+    )
+    parser = _Parser(args=args)
+    monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
+    monkeypatch.setattr(cli_main, "validate_args_for_provider", lambda parsed: None)
+    monkeypatch.setattr(
+        cli_main,
+        "_client_from_args",
+        lambda parsed: (_ for _ in ()).throw(AssertionError("client should not be created")),
+    )
+
+    assert cli_main.main(["cache", "clean"]) == 0
+    assert received == {"client": None}
+
+
 def test_entrypoint_raises_system_exit(monkeypatch: Any) -> None:
     monkeypatch.setattr(cli_main, "main", lambda argv=None: 7)
 

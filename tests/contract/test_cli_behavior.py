@@ -103,6 +103,28 @@ def test_code_search_without_configured_github_or_azdo_does_not_raise_missing_gi
     assert "Missing GITHUB_ORG" not in captured.err
 
 
+def test_cache_clean_succeeds_without_configured_providers(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
+    github_cache = tmp_path / "github-grep"
+    github_cache.mkdir()
+
+    monkeypatch.delenv("GITHUB_ORG", raising=False)
+    monkeypatch.delenv("AZURE_DEVOPS_ORG", raising=False)
+    monkeypatch.delenv("GITLAB_GROUP", raising=False)
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))
+    monkeypatch.setattr(
+        cli_main,
+        "_client_from_args",
+        lambda args: (_ for _ in ()).throw(AssertionError("client should not be created")),
+    )
+
+    code = cli_main.main(["cache", "clean", "--provider", "github"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert str(github_cache) in captured.out
+    assert not github_cache.exists()
+
+
 def test_script_entrypoint_smoke() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(

@@ -45,7 +45,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         validate_args_for_provider(args)
-        client = _client_from_args(args)
+        requires_client = bool(getattr(args, "requires_client", True))
+        client = _client_from_args(args) if requires_client else None
         return handler(client, args)
     except ValueError as exc:
         return _emit_error(

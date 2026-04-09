@@ -206,6 +206,18 @@ def _client_from_args(args: argparse.Namespace) -> SmithClient:
     )
 
 
+def handle_cache_clean(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+
+    data = SmithClient.execute_cache_clean(provider=getattr(args, "cache_provider", "all"))
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=data,
+        partial=False,
+    )
+
+
 def handle_discover_projects(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_discover_projects(provider=args.provider)
     return _emit_success(

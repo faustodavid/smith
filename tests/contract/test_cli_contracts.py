@@ -41,6 +41,7 @@ def _make_args(**overrides: Any) -> Namespace:
         "context_lines": 2,
         "from_line": 10,
         "to_line": 20,
+        "cache_provider": "all",
         "id": 42,
         "log_id": 9,
         "wiql": "SELECT [System.Id] FROM WorkItems",
@@ -338,6 +339,26 @@ def test_handlers_forward_expected_arguments(
     assert exit_code == handlers.EXIT_OK
     assert output.out.strip() == f"{args.command_id}:{handler_name}"
     assert client.calls == [(expected_method, expected_kwargs)]
+
+
+def test_handle_cache_clean_cleans_requested_provider_cache(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
+    github_cache = tmp_path / "github-grep"
+    gitlab_cache = tmp_path / "gitlab-grep"
+    github_cache.mkdir()
+    gitlab_cache.mkdir()
+    args = _make_args(command_id="cache.clean", output_format="text", cache_provider="github")
+
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(gitlab_cache))
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{','.join(data['cleaned'])}")
+
+    exit_code = handlers.handle_cache_clean(None, args)
+    output = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert output.out.strip() == f"cache.clean:{github_cache}"
+    assert not github_cache.exists()
+    assert gitlab_cache.exists()
 
 
 @pytest.mark.parametrize(

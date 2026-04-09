@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from smith.cli.handlers import (
     _csv_list,
+    handle_cache_clean,
     handle_ci_grep,
     handle_ci_logs,
     handle_code_grep,
@@ -20,7 +21,6 @@ from smith.cli.handlers import (
     handle_work_mine,
     handle_work_search,
 )
-from smith.client import SmithClient
 
 
 class _DeprecatedCsvAppendAction(argparse.Action):
@@ -69,17 +69,19 @@ def _add_search_provider_option(parser: argparse.ArgumentParser) -> None:
 
 def _set_handler(
     parser: argparse.ArgumentParser,
-    handler: Callable[[SmithClient, argparse.Namespace], int],
+    handler: Callable[..., int],
     command_id: str,
     *,
     primary_path: str,
     alias_used: str | None = None,
+    requires_client: bool = True,
 ) -> None:
     parser.set_defaults(
         handler=handler,
         command_id=command_id,
         primary_path=primary_path,
         alias_used=alias_used,
+        requires_client=requires_client,
     )
 
 
@@ -313,6 +315,28 @@ def _add_code_group(root_subparsers: argparse._SubParsersAction[argparse.Argumen
     _add_grep_options(code_grep_gitlab)
     _add_output_format(code_grep_gitlab)
     _set_handler(code_grep_gitlab, handle_code_grep, "code.grep", primary_path="code grep")
+
+
+def _add_cache_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    cache = _add_parser(root_subparsers, "cache", help_text="Manage local grep caches")
+    cache_sub = cache.add_subparsers(dest="action", required=True)
+
+    cache_clean = _add_parser(cache_sub, "clean", help_text="Remove local grep caches")
+    cache_clean.add_argument(
+        "--provider",
+        dest="cache_provider",
+        choices=["github", "gitlab", "all"],
+        default="all",
+        help="Cache provider to clean (default: all)",
+    )
+    _add_output_format(cache_clean)
+    _set_handler(
+        cache_clean,
+        handle_cache_clean,
+        "cache.clean",
+        primary_path="cache clean",
+        requires_client=False,
+    )
 
 
 def _add_pr_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -674,12 +698,13 @@ def build_parser() -> argparse.ArgumentParser:
     root_subparsers = parser.add_subparsers(
         dest="group",
         required=True,
-        metavar="{repos,orgs,code,prs,pipelines,stories}",
+        metavar="{repos,orgs,code,cache,prs,pipelines,stories}",
     )
 
     _add_repos_group(root_subparsers)
     _add_orgs_group(root_subparsers)
     _add_code_group(root_subparsers)
+    _add_cache_group(root_subparsers)
     _add_pr_group(root_subparsers)
     _add_ci_group(root_subparsers)
     _add_stories_group(root_subparsers)

@@ -305,6 +305,21 @@ class GitLabCodeMixin:
             text=True,
         )
 
+    def _git_subprocess_result(
+        self: Any,
+        args: list[str],
+        *,
+        cwd: str | None = None,
+        check: bool = True,
+    ) -> Any:
+        return subprocess.run(
+            self._prepare_git_command(args),
+            cwd=cwd,
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
     def _git_subprocess_output(self: Any, args: list[str], *, cwd: str | None = None) -> str:
         result = subprocess.run(
             self._prepare_git_command(args),
@@ -324,7 +339,7 @@ class GitLabCodeMixin:
     def _gitlab_grep_cache_max_age_seconds(self: Any) -> int:
         return parse_int_env(
             "GITLAB_GREP_CACHE_MAX_AGE_SECONDS",
-            default=300,
+            default=30,
             min_value=1,
             max_value=86_400,
         )
@@ -496,6 +511,126 @@ class GitLabCodeMixin:
         return normalized == ".git" or normalized.startswith(".git/")
 
     @staticmethod
+    def _local_git_grep_mode(pattern: str) -> str:
+        return "-F" if re.search(r"[.^$*+?{}\[\]\\|()]", pattern) is None else "-P"
+
+    @staticmethod
+    def _local_git_grep_batches(
+        candidate_paths: list[str],
+        *,
+        max_paths: int = 256,
+        max_chars: int = 32_768,
+    ) -> list[list[str]]:
+        batches: list[list[str]] = []
+        batch: list[str] = []
+        batch_chars = 0
+
+        for candidate_path in candidate_paths:
+            candidate_len = len(candidate_path) + 1
+            if batch and (len(batch) >= max_paths or batch_chars + candidate_len > max_chars):
+                batches.append(batch)
+                batch = []
+                batch_chars = 0
+            batch.append(candidate_path)
+            batch_chars += candidate_len
+
+        if batch:
+            batches.append(batch)
+
+        return batches
+
+    def _git_grep_local(
+        self: Any,
+        *,
+        checkout_dir: str,
+        pattern: str,
+        case_insensitive: bool,
+        output_mode: Literal["content", "files_with_matches", "count"],
+        context_lines: int,
+        matching: list[dict[str, Any]],
+        search_pattern: re.Pattern[str],
+    ) -> dict[str, Any] | None:
+        local_paths_by_file: dict[str, str] = {}
+        candidate_paths: list[str] = []
+
+        for item in matching:
+            file_path = normalize_path(str(item.get("path") or ""))
+            local_path = str(item.get("local_path") or "") or None
+            if not file_path or local_path is None:
+                continue
+            local_paths_by_file[file_path] = local_path
+            candidate_paths.append(file_path.lstrip("/"))
+
+        if not candidate_paths:
+            return None
+
+        matched_paths: list[str] = []
+        seen_paths: set[str] = set()
+        grep_mode = self._local_git_grep_mode(pattern)
+
+        for batch in self._local_git_grep_batches(candidate_paths):
+            args = ["git", "-C", checkout_dir, "grep", grep_mode, "--full-name", "-l"]
+            if case_insensitive:
+                args.append("-i")
+            args.extend(["-e", pattern, "--", *batch])
+            result = self._git_subprocess_result(args, check=False)
+            return_code = int(getattr(result, "returncode", 1))
+            if return_code not in (0, 1):
+                stderr = str(getattr(result, "stderr", "") or "").strip()
+                logger.debug(
+                    "git grep unavailable for %s: %s",
+                    checkout_dir,
+                    stderr or return_code,
+                )
+                return None
+            for line in str(getattr(result, "stdout", "") or "").splitlines():
+                file_path = normalize_path(line.strip())
+                if not file_path or file_path not in local_paths_by_file or file_path in seen_paths:
+                    continue
+                seen_paths.add(file_path)
+                matched_paths.append(file_path)
+
+        if output_mode == "files_with_matches":
+            return build_grep_result(
+                output_lines=matched_paths,
+                matched_count=len(matched_paths),
+                warnings=[],
+                max_output_chars=self.max_output_chars,
+                truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
+            )
+
+        output_lines: list[str] = []
+        warnings: list[str] = []
+        files_matched = 0
+
+        for file_path in matched_paths:
+            local_path = local_paths_by_file[file_path]
+            try:
+                content = self._read_local_file_text(local_path)
+            except Exception as exc:
+                warnings.append(f"failed to read {file_path}: {exc}")
+                continue
+
+            matched_lines, count = grep_match_lines(
+                lines=content.splitlines(),
+                search_pattern=search_pattern,
+                file_label=file_path,
+                output_mode=output_mode,
+                context_lines=context_lines,
+            )
+            if count:
+                files_matched += count
+                output_lines.extend(matched_lines)
+
+        return build_grep_result(
+            output_lines=output_lines,
+            matched_count=files_matched,
+            warnings=warnings,
+            max_output_chars=self.max_output_chars,
+            truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
+        )
+
+    @staticmethod
     def _supports_search_api_literal_grep(
         pattern: str,
         *,
@@ -606,8 +741,12 @@ class GitLabCodeMixin:
         file_regex = glob_to_regex(glob) if glob else ".*"
         filename_filter = re.compile(file_regex)
 
+        resolved_branch = normalized_branch or self._get_project_default_branch(repo)
+        grep_local_cache_enabled = parse_bool_env("GITLAB_GREP_USE_LOCAL_CACHE", default=True)
+        checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch) if grep_local_cache_enabled else None
+
         search_api_candidates: list[dict[str, Any]] | None = None
-        if output_mode == "files_with_matches" and not is_match_all:
+        if output_mode == "files_with_matches" and not is_match_all and checkout_dir is None:
             search_api_candidates = self._grep_via_search_api(
                 repo=repo,
                 pattern=regex_pattern,
@@ -619,16 +758,9 @@ class GitLabCodeMixin:
                 to_line=to_line,
             )
 
-        resolved_branch = normalized_branch or self._get_project_default_branch(repo)
-        grep_local_cache_enabled = parse_bool_env("GITLAB_GREP_USE_LOCAL_CACHE", default=True)
-        checkout_dir: str | None = None
         if search_api_candidates is not None:
             files = search_api_candidates
         else:
-            if grep_local_cache_enabled:
-                existing_checkout_dir = self._local_checkout_path(repo=repo, branch=resolved_branch)
-                if os.path.isdir(os.path.join(existing_checkout_dir, ".git")):
-                    checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
             if checkout_dir:
                 files = self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
             else:
@@ -664,7 +796,7 @@ class GitLabCodeMixin:
                 "warnings": [],
                 "partial": False,
             }
-        if not checkout_dir and grep_local_cache_enabled and matching:
+        if output_mode != "files_with_matches" and not checkout_dir and grep_local_cache_enabled and matching:
             checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
             if checkout_dir:
                 local_paths_by_file = {
@@ -682,6 +814,19 @@ class GitLabCodeMixin:
         )
         if compile_error or search_pattern is None:
             return grep_compile_error_result(compile_error or "Invalid pattern")
+
+        if checkout_dir and not is_match_all and from_line is None and to_line is None:
+            git_grep_result = self._git_grep_local(
+                checkout_dir=checkout_dir,
+                pattern=regex_pattern,
+                case_insensitive=case_insensitive,
+                output_mode=output_mode,
+                context_lines=context_lines or 0,
+                matching=matching,
+                search_pattern=search_pattern,
+            )
+            if git_grep_result is not None:
+                return git_grep_result
 
         output_lines: list[str] = []
         warnings: list[str] = []
