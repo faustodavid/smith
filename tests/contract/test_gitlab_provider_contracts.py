@@ -103,7 +103,7 @@ def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) ->
 
     result = provider.search_code(query="grafana", project=None, repos=["repo-a"], skip=1, take=1)
 
-    assert result == {"matchesCount": 2, "results": ["gitlab-org/repo-a:/src/util.py"]}
+    assert result == {"matchesCount": 2, "results": ["repo-a:/src/util.py"]}
     assert calls == [
         {
             "method": "GET",
@@ -131,7 +131,7 @@ def test_gitlab_search_code_uses_pagination_headers_for_exact_total(monkeypatch:
 
     result = provider.search_code(query="grafana", project=None, repos=["repo-a"], skip=0, take=1)
 
-    assert result == {"matchesCount": 25, "results": ["gitlab-org/repo-a:/src/app.py"]}
+    assert result == {"matchesCount": 25, "results": ["repo-a:/src/app.py"]}
     assert calls == [
         {
             "method": "GET",
@@ -165,8 +165,8 @@ def test_gitlab_search_code_falls_back_to_complete_pagination_for_exact_total(mo
     assert result == {
         "matchesCount": 105,
         "results": [
-            "gitlab-org/repo-a:/src/file-100.py",
-            "gitlab-org/repo-a:/src/file-101.py",
+            "repo-a:/src/file-100.py",
+            "repo-a:/src/file-101.py",
         ],
     }
     assert calls == [

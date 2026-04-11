@@ -38,7 +38,7 @@ def test_benchmark_smith_cli_injects_benchmark_org_in_code_search() -> None:
         )
 
     assert "matches: 1" in output
-    assert f"{BENCHMARK_GITHUB_ORG}/example-repo:/src/file.py" in output
+    assert "example-repo:/src/file.py" in output
     assert len(server.requests) == 1
     assert server.requests[0].path == "/search/code"
     assert server.requests[0].query["q"] == [f"needle org:{BENCHMARK_GITHUB_ORG}"]

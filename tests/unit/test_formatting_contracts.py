@@ -154,14 +154,14 @@ def test_render_text_code_search_shows_total_and_displayed_counts() -> None:
         "code.search",
         {
             "matchesCount": 5,
-            "results": ["octo/repo:/src/app.py", "octo/repo:/src/lib.py"],
+            "results": ["repo:/src/app.py", "repo:/src/lib.py"],
         },
     )
 
     assert rendered == (
         "matches: 5 (showing 2)\n"
-        "octo/repo:/src/app.py\n"
-        "octo/repo:/src/lib.py"
+        "repo:/src/app.py\n"
+        "repo:/src/lib.py"
     )
 
 
@@ -170,7 +170,7 @@ def test_render_text_grouped_provider_output_preserves_order_warnings_and_errors
         "providers": {
             "github": {
                 "ok": True,
-                "data": {"matchesCount": 2, "results": ["octo/repo:/src/app.py"]},
+                "data": {"matchesCount": 2, "results": ["repo:/src/app.py"]},
                 "warnings": [],
                 "partial": False,
                 "error": None,
@@ -188,7 +188,7 @@ def test_render_text_grouped_provider_output_preserves_order_warnings_and_errors
 
     assert render_text("code.search", payload) == (
         "[github] matches: 2 (showing 1)\n"
-        "octo/repo:/src/app.py\n"
+        "repo:/src/app.py\n"
         "\n"
         "[azdo]\n"
         "error: rate limited"

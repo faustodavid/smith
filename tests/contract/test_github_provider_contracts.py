@@ -60,7 +60,7 @@ def test_github_search_code_builds_repo_qualifier_and_applies_skip_take(monkeypa
 
     result = provider.search_code(query="grafana", project=None, repos=["repo-a"], skip=1, take=1)
 
-    assert result == {"matchesCount": 2, "results": ["octo-org/repo-a:/src/util.py"]}
+    assert result == {"matchesCount": 2, "results": ["repo-a:/src/util.py"]}
     assert calls == [
         {
             "method": "GET",

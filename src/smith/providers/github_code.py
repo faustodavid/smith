@@ -124,7 +124,7 @@ class GitHubCodeMixin:
             repository = item.get("repository") or {}
             repo_name = str(repository.get("name") or "")
             path = str(item.get("path") or "")
-            results.append(f"{org}/{repo_name}:/{path}")
+            results.append(f"{repo_name}:/{path}" if repo_name else f"/{path}")
 
         if not total_count:
             total_count = len(all_items)
