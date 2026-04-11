@@ -242,8 +242,7 @@ def test_gitlab_grep_reuses_fresh_cache_without_touching_fetch_marker(monkeypatc
         "partial": False,
     }
     assert os.path.getmtime(marker_path) == marker_mtime
-    assert any(command[-1] == "origin/main" for command in commands if "checkout" in command)
-    assert all("fetch" not in command for command in commands)
+    assert commands == []
 
 
 def test_gitlab_grep_falls_back_to_api_when_local_checkout_unavailable(monkeypatch: Any, tmp_path: Any) -> None:
@@ -251,6 +250,7 @@ def test_gitlab_grep_falls_back_to_api_when_local_checkout_unavailable(monkeypat
     monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
     monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_grep_via_search_api", lambda **kwargs: None)
     monkeypatch.setattr(
         provider,
         "_git_subprocess",
@@ -282,6 +282,7 @@ def test_gitlab_grep_falls_back_to_api_when_cache_origin_mismatches(monkeypatch:
     monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
     monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_grep_via_search_api", lambda **kwargs: None)
 
     checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
     os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
@@ -485,6 +486,8 @@ def test_gitlab_grep_local_checkout_ignores_untracked_files(monkeypatch: Any, tm
 def test_gitlab_grep_supports_match_all_shortcut_compile_errors_and_warning_paths(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
     monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_ensure_local_checkout", lambda **kwargs: None)
+    monkeypatch.setattr(provider, "_grep_via_search_api", lambda **kwargs: None)
     monkeypatch.setattr(
         provider,
         "_get_repository_files",
@@ -525,6 +528,7 @@ def test_gitlab_grep_returns_guard_result_without_reading_large_scopes(monkeypat
     monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
     monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
+    monkeypatch.setattr(provider, "_grep_via_search_api", lambda **kwargs: None)
     checkout_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
         provider,
