@@ -11,91 +11,91 @@ logger = logging.getLogger(__name__)
 
 def run_fanout(
     *,
-    providers: list[str],
-    requested_provider: str,
+    remotes: list[str],
+    requested_remote: str,
     operations: dict[str, Callable[[], Any]],
-    provider_entry_success: Callable[[Any], dict[str, Any]],
-    provider_entry_error: Callable[[str, str], dict[str, Any]],
+    remote_entry_success: Callable[[Any], dict[str, Any]],
+    remote_entry_error: Callable[[str, str], dict[str, Any]],
 ) -> dict[str, Any]:
-    provider_results: dict[str, dict[str, Any]] = {}
+    remote_results: dict[str, dict[str, Any]] = {}
     succeeded: list[str] = []
     failed: list[str] = []
 
-    def run_provider_operation(provider_name: str) -> tuple[dict[str, Any], bool]:
-        operation = operations.get(provider_name)
+    def run_remote_operation(remote_name: str) -> tuple[dict[str, Any], bool]:
+        operation = operations.get(remote_name)
         if operation is None:
             return (
-                provider_entry_error(
-                    "unsupported_provider",
-                    f"Provider '{provider_name}' is not supported for this command.",
+                remote_entry_error(
+                    "unsupported_remote",
+                    f"Remote '{remote_name}' is not supported for this command.",
                 ),
                 False,
             )
 
-        logger.debug("Running provider operation: %s", provider_name)
+        logger.debug("Running remote operation: %s", remote_name)
         try:
             payload = operation()
-            logger.debug("Provider %s succeeded", provider_name)
-            return provider_entry_success(payload), True
+            logger.debug("Remote %s succeeded", remote_name)
+            return remote_entry_success(payload), True
         except ValueError as exc:
-            logger.debug("Provider %s raised ValueError: %s", provider_name, exc)
-            return provider_entry_error("invalid_args", str(exc)), False
+            logger.debug("Remote %s raised ValueError: %s", remote_name, exc)
+            return remote_entry_error("invalid_args", str(exc)), False
         except SmithAuthError as exc:
-            logger.debug("Provider %s auth failure: %s", provider_name, exc)
-            return provider_entry_error("auth_failure", str(exc)), False
+            logger.debug("Remote %s auth failure: %s", remote_name, exc)
+            return remote_entry_error("auth_failure", str(exc)), False
         except SmithApiError as exc:
-            logger.debug("Provider %s API error: %s", provider_name, exc)
-            return provider_entry_error("api_error", str(exc)), False
+            logger.debug("Remote %s API error: %s", remote_name, exc)
+            return remote_entry_error("api_error", str(exc)), False
         except Exception as exc:  # pragma: no cover - defensive conversion
-            logger.warning("Provider %s unexpected error: %s", provider_name, exc, exc_info=True)
-            return provider_entry_error("api_error", f"Unexpected provider error: {exc}"), False
+            logger.warning("Remote %s unexpected error: %s", remote_name, exc, exc_info=True)
+            return remote_entry_error("api_error", f"Unexpected remote error: {exc}"), False
 
-    if len(providers) > 1:
-        with ThreadPoolExecutor(max_workers=len(providers)) as executor:
+    if len(remotes) > 1:
+        with ThreadPoolExecutor(max_workers=len(remotes)) as executor:
             futures = {
-                provider_name: executor.submit(run_provider_operation, provider_name)
-                for provider_name in providers
+                remote_name: executor.submit(run_remote_operation, remote_name)
+                for remote_name in remotes
             }
-            for provider_name in providers:
-                provider_entry, ok = futures[provider_name].result()
-                provider_results[provider_name] = provider_entry
+            for remote_name in remotes:
+                remote_entry, ok = futures[remote_name].result()
+                remote_results[remote_name] = remote_entry
                 if ok:
-                    succeeded.append(provider_name)
+                    succeeded.append(remote_name)
                 else:
-                    failed.append(provider_name)
+                    failed.append(remote_name)
     else:
-        for provider_name in providers:
-            provider_entry, ok = run_provider_operation(provider_name)
-            provider_results[provider_name] = provider_entry
+        for remote_name in remotes:
+            remote_entry, ok = run_remote_operation(remote_name)
+            remote_results[remote_name] = remote_entry
             if ok:
-                succeeded.append(provider_name)
+                succeeded.append(remote_name)
             else:
-                failed.append(provider_name)
+                failed.append(remote_name)
 
     if not succeeded:
         error_codes = [
-            provider_results[name]["error"]["code"]
+            remote_results[name]["error"]["code"]
             for name in failed
-            if provider_results.get(name, {}).get("error")
+            if remote_results.get(name, {}).get("error")
         ]
         messages = [
-            f"{name}: {provider_results[name]['error']['message']}"
+            f"{name}: {remote_results[name]['error']['message']}"
             for name in failed
-            if provider_results.get(name, {}).get("error")
+            if remote_results.get(name, {}).get("error")
         ]
-        combined = "; ".join(messages) if messages else "All provider requests failed."
+        combined = "; ".join(messages) if messages else "All remote requests failed."
 
         if error_codes and all(code == "auth_failure" for code in error_codes):
             raise SmithAuthError(combined)
-        if len(providers) == 1 and any(code == "invalid_args" for code in error_codes):
+        if len(remotes) == 1 and any(code == "invalid_args" for code in error_codes):
             raise ValueError(combined)
         raise SmithApiError(combined)
 
     return {
-        "providers": provider_results,
+        "remotes": remote_results,
         "summary": {
-            "requested_provider": requested_provider,
-            "queried": providers,
+            "requested_remote": requested_remote,
+            "queried": remotes,
             "succeeded": succeeded,
             "failed": failed,
         },

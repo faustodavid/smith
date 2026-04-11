@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
-from smith.config import parse_bool_env, parse_int_env, parse_runtime_config
+from smith.config import RemoteConfig, SmithConfig, load_config, parse_bool_env, parse_int_env, parse_runtime_config, save_config
 
 
 @pytest.mark.parametrize(
@@ -194,25 +196,7 @@ def test_parse_runtime_config_falls_back_for_invalid_retry_backoff(monkeypatch: 
     assert runtime.http_retry_backoff_seconds == pytest.approx(0.4)
 
 
-def test_parse_runtime_config_github_org_override(monkeypatch: Any) -> None:
-    monkeypatch.delenv("GITHUB_ORG", raising=False)
-
-    runtime = parse_runtime_config(
-        azdo_org="example",
-        api_version=None,
-        timeout_seconds=None,
-        max_output_chars=None,
-        github_org="override-gh-org",
-        github_api_url_default="https://api.github.com/",
-        github_api_version_default="2022-11-28",
-        gitlab_api_url_default="https://gitlab.com/api/v4/",
-    )
-
-    assert runtime.github_org == "override-gh-org"
-    assert runtime.github_configured is True
-
-
-def test_parse_runtime_config_github_org_env_fallback(monkeypatch: Any) -> None:
+def test_parse_runtime_config_github_org_ignores_legacy_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
 
     runtime = parse_runtime_config(
@@ -225,45 +209,11 @@ def test_parse_runtime_config_github_org_env_fallback(monkeypatch: Any) -> None:
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
-    assert runtime.github_org == "env-gh-org"
+    assert runtime.github_org == ""
+    assert runtime.github_configured is False
 
 
-def test_parse_runtime_config_github_org_override_wins_over_env(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
-
-    runtime = parse_runtime_config(
-        azdo_org="example",
-        api_version=None,
-        timeout_seconds=None,
-        max_output_chars=None,
-        github_org="cli-override",
-        github_api_url_default="https://api.github.com/",
-        github_api_version_default="2022-11-28",
-        gitlab_api_url_default="https://gitlab.com/api/v4/",
-    )
-
-    assert runtime.github_org == "cli-override"
-
-
-def test_parse_runtime_config_gitlab_group_override(monkeypatch: Any) -> None:
-    monkeypatch.delenv("GITLAB_GROUP", raising=False)
-
-    runtime = parse_runtime_config(
-        azdo_org="example",
-        api_version=None,
-        timeout_seconds=None,
-        max_output_chars=None,
-        github_api_url_default="https://api.github.com/",
-        github_api_version_default="2022-11-28",
-        gitlab_group="platform",
-        gitlab_api_url_default="https://gitlab.com/api/v4/",
-    )
-
-    assert runtime.gitlab_group == "platform"
-    assert runtime.gitlab_configured is True
-
-
-def test_parse_runtime_config_gitlab_group_env_fallback(monkeypatch: Any) -> None:
+def test_parse_runtime_config_gitlab_group_ignores_legacy_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("GITLAB_GROUP", "platform/subgroup/")
 
     runtime = parse_runtime_config(
@@ -276,27 +226,8 @@ def test_parse_runtime_config_gitlab_group_env_fallback(monkeypatch: Any) -> Non
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
-    assert runtime.gitlab_group == "platform/subgroup"
-
-
-def test_parse_runtime_config_gitlab_group_override_wins_over_env(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "env-group")
-    monkeypatch.delenv("GITLAB_HOST", raising=False)
-    monkeypatch.delenv("GITLAB_API_URL", raising=False)
-
-    runtime = parse_runtime_config(
-        azdo_org="example",
-        api_version=None,
-        timeout_seconds=None,
-        max_output_chars=None,
-        github_api_url_default="https://api.github.com/",
-        github_api_version_default="2022-11-28",
-        gitlab_group="cli-group",
-        gitlab_api_url_default="https://gitlab.example.com/api/v4/",
-    )
-
-    assert runtime.gitlab_group == "cli-group"
-    assert runtime.gitlab_api_url == "https://gitlab.example.com/api/v4"
+    assert runtime.gitlab_group == ""
+    assert runtime.gitlab_configured is False
 
 
 def test_parse_runtime_config_gitlab_host_env_fallback(monkeypatch: Any) -> None:
@@ -317,7 +248,6 @@ def test_parse_runtime_config_gitlab_host_env_fallback(monkeypatch: Any) -> None
 
 
 def test_parse_runtime_config_gitlab_glab_host_fallback(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "example-group")
     monkeypatch.delenv("GITLAB_HOST", raising=False)
     monkeypatch.delenv("GITLAB_API_URL", raising=False)
     calls: list[list[str]] = []
@@ -363,7 +293,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback(monkeypatch: Any) -> Non
 
 
 def test_parse_runtime_config_gitlab_glab_host_fallback_preserves_api_protocol(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "example-group")
     monkeypatch.delenv("GITLAB_HOST", raising=False)
     monkeypatch.delenv("GITLAB_API_URL", raising=False)
     calls: list[list[str]] = []
@@ -407,7 +336,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_preserves_api_protocol(m
 
 
 def test_parse_runtime_config_gitlab_glab_host_fallback_supports_single_label_hosts(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "example-group")
     monkeypatch.delenv("GITLAB_HOST", raising=False)
     monkeypatch.delenv("GITLAB_API_URL", raising=False)
     calls: list[list[str]] = []
@@ -451,7 +379,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_supports_single_label_ho
 
 
 def test_parse_runtime_config_gitlab_glab_host_fallback_without_status_all_support(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "example-group")
     monkeypatch.delenv("GITLAB_HOST", raising=False)
     monkeypatch.delenv("GITLAB_API_URL", raising=False)
     calls: list[list[str]] = []
@@ -586,3 +513,97 @@ def test_parse_runtime_config_bounds_grep_max_files(
     )
 
     assert runtime.grep_max_files == expected
+
+
+def test_load_config_requires_existing_file(tmp_path: Path) -> None:
+    missing_path = tmp_path / "config.yaml"
+
+    with pytest.raises(ValueError, match="Config file not found"):
+        load_config(config_path=missing_path)
+
+
+def test_load_config_preserves_explicit_github_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  github-stub:
+    provider: github
+    org: octo-org
+    host: 127.0.0.1:4010
+    token_env: GITHUB_TOKEN
+    enabled: true
+    api_url: http://127.0.0.1:4010/api/github
+defaults: {}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["github-stub"].host == "127.0.0.1:4010"
+    assert config.remotes["github-stub"].api_url == "http://127.0.0.1:4010/api/github"
+
+
+@pytest.mark.parametrize(
+    ("host", "api_url"),
+    [
+        ("127.0.0.1:4010", "http://127.0.0.1:4010/api/github"),
+        ("github.example.test", "https://github.example.test/custom/api"),
+    ],
+)
+def test_save_config_persists_non_derivable_github_api_url_override(
+    tmp_path: Path,
+    host: str,
+    api_url: str,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github-stub": RemoteConfig(
+                    name="github-stub",
+                    provider="github",
+                    org="octo-org",
+                    host=host,
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url=api_url,
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["github-stub"]["api_url"] == api_url
+    assert reloaded.remotes["github-stub"].api_url == api_url
+
+
+def test_save_config_omits_derived_github_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github-enterprise": RemoteConfig(
+                    name="github-enterprise",
+                    provider="github",
+                    org="octo-org",
+                    host="github.example.test",
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url="https://github.example.test/api/v3",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert "api_url" not in saved["remotes"]["github-enterprise"]

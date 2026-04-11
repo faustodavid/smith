@@ -22,13 +22,107 @@ uv tool update-shell
 ## Quick Start
 
 ```bash
-export AZURE_DEVOPS_ORG="<org>"
-export GITHUB_ORG="<org>"
-export GITLAB_GROUP="<group-or-subgroup>"
-smith repos github
-smith repos gitlab
-smith code search "grafana" --provider all
+smith config init
+smith config path
+$EDITOR ~/.config/smith/config.yaml
+
+export GITHUB_TOKEN="<token>"
+export GITLAB_TOKEN="<token>"
+az login
+
+smith config list
+smith repos github-public
+smith repos gitlab-platform
+smith code search "grafana" --remote all
 ```
+
+## Configuration
+
+Smith reads remotes from `~/.config/smith/config.yaml` by default. You can override the location with `SMITH_CONFIG=/path/to/config.yaml`.
+
+Commands take configured remote names such as `github-public`, `gitlab-platform`, or `azdo-main`.
+
+Create the file:
+
+```bash
+smith config init
+```
+
+Example config:
+
+```yaml
+defaults:
+  timeout_seconds: 30
+  max_output_chars: 20000
+
+remotes:
+  github-public:
+    provider: github
+    org: acme
+    token_env: GITHUB_TOKEN
+    enabled: true
+
+  gitlab-platform:
+    provider: gitlab
+    group: acme/platform
+    token_env: GITLAB_TOKEN
+    enabled: true
+
+  azdo-main:
+    provider: azdo
+    org: acme
+    enabled: true
+```
+
+For self-hosted GitHub Enterprise or GitLab, set `host`:
+
+```yaml
+remotes:
+  github-enterprise:
+    provider: github
+    org: platform
+    host: github.acme.internal
+    token_env: GITHUB_ENTERPRISE_TOKEN
+    enabled: true
+
+  gitlab-self-hosted:
+    provider: gitlab
+    group: platform/backend
+    host: gitlab.acme.internal
+    token_env: GITLAB_SELF_HOSTED_TOKEN
+    enabled: true
+```
+
+Useful config commands:
+
+```bash
+smith config path
+smith config list
+smith config show github-public
+smith config disable azdo-main
+smith config enable azdo-main
+```
+
+Usage examples:
+
+```bash
+# Search across every enabled remote
+smith code search "grafana" --remote all
+
+# Search only one configured remote
+smith code search "grafana" --remote github-public
+
+# List repositories for one configured GitLab remote
+smith repos gitlab-platform
+
+# Grep a repository through one configured GitHub remote
+smith code grep github-public repo-a "TODO"
+
+# Azure DevOps commands still take a project plus repo
+smith code grep azdo-main SRE repo-a "timeout"
+```
+
+When multiple remotes are queried, Smith labels results with the remote name.
 
 ## Development
 

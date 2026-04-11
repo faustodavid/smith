@@ -258,12 +258,14 @@ class GitLabCodeMixin:
 
         results: list[str] = []
         for item in page_items_for_output:
-            project_path = self._search_result_project_path(
-                item,
-                repo=str(item.get("_repo_hint") or "") or None,
+            project_path = self._relative_repo_path(
+                self._search_result_project_path(
+                    item,
+                    repo=str(item.get("_repo_hint") or "") or None,
+                )
             )
             path = normalize_path(str(item.get("path") or item.get("filename") or ""))
-            results.append(f"{project_path}:{path}")
+            results.append(f"{project_path}:{path}" if project_path else path)
 
         return {
             "matchesCount": total_matches,

@@ -10,7 +10,7 @@ from smith.cli.handlers import (
     EXIT_INVALID_ARGS,
     _client_from_args,
     _emit_error,
-    validate_args_for_provider,
+    validate_args_for_remote,
 )
 from smith.cli.parser import build_parser
 from smith.errors import SmithApiError, SmithAuthError
@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     command = getattr(args, "command_id", "unknown")
 
     try:
-        validate_args_for_provider(args)
+        validate_args_for_remote(args)
         requires_client = bool(getattr(args, "requires_client", True))
         client = _client_from_args(args) if requires_client else None
         return handler(client, args)

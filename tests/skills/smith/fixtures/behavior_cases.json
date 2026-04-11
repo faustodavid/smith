@@ -3,8 +3,8 @@
     "name": "default_loop",
     "expected_sequence": [
       "smith code search",
-      "smith code grep github <repo> \".*\" --output-mode files_with_matches",
-      "smith code grep github <repo> \"<regex>\""
+      "smith code grep <github-remote-name> <repo> \".*\" --output-mode files_with_matches",
+      "smith code grep <github-remote-name> <repo> \"<regex>\""
     ],
     "required_phrase": "not enough evidence",
     "requires_evidence_paths": true
@@ -12,11 +12,11 @@
   {
     "name": "discovery_helpers",
     "expected_sequence": [
-      "smith orgs github",
-      "smith orgs gitlab",
-      "smith repos github",
-      "smith repos gitlab",
-      "smith repos azdo <project>"
+      "smith orgs <github-remote-name>",
+      "smith orgs <gitlab-remote-name>",
+      "smith repos <github-remote-name>",
+      "smith repos <gitlab-remote-name>",
+      "smith repos <azdo-remote-name> <project>"
     ],
     "requires_evidence_paths": false
   },
@@ -32,7 +32,7 @@
   },
   {
     "name": "gitlab_repo_shape_rule",
-    "required_phrase": "relative to configured `GITLAB_GROUP`",
+    "required_phrase": "relative to the configured remote's group",
     "requires_evidence_paths": false
   },
   {
@@ -43,18 +43,18 @@
   {
     "name": "read_only_followups",
     "expected_sequence": [
-      "smith prs list github <repo>",
-      "smith pipelines logs list github <repo> <id>",
-      "smith stories search azdo <project> --query"
+      "smith prs list <github-remote-name> <repo>",
+      "smith pipelines logs list <github-remote-name> <repo> <id>",
+      "smith stories search <azdo-remote-name> <project> --query"
     ],
     "requires_evidence_paths": true
   },
   {
     "name": "gitlab_followups",
     "expected_sequence": [
-      "smith prs list gitlab <repo>",
-      "smith pipelines logs list gitlab <repo> <id>",
-      "smith stories search gitlab <repo> --query"
+      "smith prs list <gitlab-remote-name> <repo>",
+      "smith pipelines logs list <gitlab-remote-name> <repo> <id>",
+      "smith stories search <gitlab-remote-name> <repo> --query"
     ],
     "requires_evidence_paths": true
   }

@@ -10,7 +10,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.github_mcp import DEFAULT_GITHUB_MCP_URL, resolve_github_mcp_token
 from smith.benchmark.smith_cli import REPO_ROOT, build_smith_pythonpath
 
@@ -91,8 +90,6 @@ def add_smith_codex_mcp_server(
             "mcp",
             "add",
             SMITH_CODEX_SERVER_NAME,
-            "--env",
-            f"GITHUB_ORG={BENCHMARK_GITHUB_ORG}",
             "--env",
             f"GITHUB_TOKEN={github_token}",
             "--env",

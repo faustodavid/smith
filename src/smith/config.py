@@ -4,7 +4,11 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
+
+import yaml
 
 AZDO_BASE_URL = "https://dev.azure.com"
 AZDO_SEARCH_BASE_URL = "https://almsearch.dev.azure.com"
@@ -204,20 +208,191 @@ def resolve_gitlab_api_url(*, default: str, enable_auto_discovery: bool = True) 
     return f"{scheme}://{netloc}/api/v4"
 
 
+@dataclass(frozen=True)
+class RemoteConfig:
+    name: str
+    provider: str
+    org: str
+    host: str
+    token_env: str | None
+    enabled: bool
+    api_url: str
+
+
+@dataclass(frozen=True)
+class SmithConfig:
+    remotes: dict[str, RemoteConfig]
+    defaults: dict[str, Any]
+
+
+def _default_config_path() -> Path:
+    config_env = os.getenv("SMITH_CONFIG", "").strip()
+    if config_env:
+        return Path(config_env)
+    return Path.home() / ".config" / "smith" / "config.yaml"
+
+
+def _compute_api_url_for_remote(provider: str, host: str) -> str:
+    if provider == "github":
+        if not host or host == "github.com":
+            return "https://api.github.com"
+        return f"https://{host}/api/v3"
+    if provider == "gitlab":
+        if not host or host == "gitlab.com":
+            return "https://gitlab.com/api/v4"
+        parsed = urlparse(host if "://" in host else f"https://{host}")
+        scheme = parsed.scheme or "https"
+        netloc = (parsed.netloc or parsed.path or "").strip().strip("/")
+        return f"{scheme}://{netloc}/api/v4"
+    if provider == "azdo":
+        return "https://dev.azure.com"
+    return ""
+
+
+def _normalize_config_api_url(raw_api_url: Any) -> str:
+    return str(raw_api_url or "").strip().rstrip("/")
+
+
+def _load_remote_api_url(*, provider: str, remote: dict[str, Any], host: str) -> str:
+    explicit_api_url = _normalize_config_api_url(remote.get("api_url", ""))
+    if provider == "github" and explicit_api_url:
+        return explicit_api_url
+    return _compute_api_url_for_remote(provider, host)
+
+
+def _should_persist_api_url(remote: RemoteConfig) -> bool:
+    if remote.provider != "github":
+        return False
+    normalized_api_url = _normalize_config_api_url(remote.api_url)
+    if not normalized_api_url:
+        return False
+    return normalized_api_url != _compute_api_url_for_remote(remote.provider, remote.host)
+
+
+def _validate_remote_dict(name: str, remote: dict[str, Any]) -> None:
+    provider = remote.get("provider", "").strip().lower()
+    if provider not in {"github", "gitlab", "azdo"}:
+        raise ValueError(f"Remote '{name}': provider must be one of github, gitlab, azdo (got '{provider}')")
+
+    if provider in {"github", "azdo"}:
+        org = remote.get("org", "").strip()
+        if not org:
+            raise ValueError(f"Remote '{name}': {provider} remotes require 'org' field")
+    elif provider == "gitlab":
+        group = remote.get("group", "").strip()
+        if not group:
+            raise ValueError(f"Remote '{name}': gitlab remotes require 'group' field")
+
+
+def load_config(*, config_path: Path | None = None) -> SmithConfig:
+    path = config_path or _default_config_path()
+
+    if not path.exists():
+        raise ValueError(f"Config file not found at {path}. Run `smith config init` to create it.")
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    except Exception as exc:
+        raise ValueError(f"Failed to load config from {path}: {exc}") from exc
+
+    if not isinstance(raw, dict):
+        raise ValueError(f"Config file {path} must contain a YAML mapping")
+
+    remotes_dict: dict[str, RemoteConfig] = {}
+    raw_remotes = raw.get("remotes", {})
+    if not isinstance(raw_remotes, dict):
+        raise ValueError("Config 'remotes' must be a mapping")
+
+    for name, remote in raw_remotes.items():
+        if not isinstance(remote, dict):
+            raise ValueError(f"Remote '{name}' must be a mapping")
+        _validate_remote_dict(name, remote)
+
+        provider = remote["provider"].strip().lower()
+        org = remote.get("org", "").strip() or remote.get("group", "").strip()
+        host = remote.get("host", "").strip()
+        if not host:
+            if provider == "github":
+                host = "github.com"
+            elif provider == "gitlab":
+                host = "gitlab.com"
+            elif provider == "azdo":
+                host = "dev.azure.com"
+        
+        token_env = remote.get("token_env", "").strip() or None
+        enabled = bool(remote.get("enabled", True))
+        api_url = _load_remote_api_url(provider=provider, remote=remote, host=host)
+
+        remotes_dict[name] = RemoteConfig(
+            name=name,
+            provider=provider,
+            org=org,
+            host=host,
+            token_env=token_env,
+            enabled=enabled,
+            api_url=api_url,
+        )
+
+    defaults = raw.get("defaults", {})
+    if not isinstance(defaults, dict):
+        defaults = {}
+
+    return SmithConfig(remotes=remotes_dict, defaults=defaults)
+
+
+def save_config(config: SmithConfig, *, config_path: Path | None = None) -> None:
+    path = config_path or _default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    remotes_dict: dict[str, dict[str, Any]] = {}
+    for name, remote in config.remotes.items():
+        remote_dict: dict[str, Any] = {
+            "provider": remote.provider,
+            "enabled": remote.enabled,
+        }
+        if remote.provider in {"github", "azdo"}:
+            remote_dict["org"] = remote.org
+        else:
+            remote_dict["group"] = remote.org
+
+        if remote.host:
+            if remote.provider == "github" and remote.host != "github.com":
+                remote_dict["host"] = remote.host
+            elif remote.provider == "gitlab" and remote.host != "gitlab.com":
+                remote_dict["host"] = remote.host
+            elif remote.provider == "azdo" and remote.host != "dev.azure.com":
+                remote_dict["host"] = remote.host
+
+        if remote.token_env:
+            remote_dict["token_env"] = remote.token_env
+
+        if _should_persist_api_url(remote):
+            remote_dict["api_url"] = _normalize_config_api_url(remote.api_url)
+
+        remotes_dict[name] = remote_dict
+
+    output = {"remotes": remotes_dict, "defaults": config.defaults}
+
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(output, f, default_flow_style=False, sort_keys=True)
+
+
+def resolve_remote(config: SmithConfig, name: str) -> RemoteConfig | None:
+    return config.remotes.get(name)
+
+
 def parse_runtime_config(
     *,
     azdo_org: str | None,
     api_version: str | None,
     timeout_seconds: int | None,
     max_output_chars: int | None,
-    github_org: str | None = None,
     github_api_url_default: str,
     github_api_version_default: str,
-    gitlab_group: str | None = None,
     gitlab_api_url_default: str,
 ) -> RuntimeConfig:
-    resolved_azdo_org = (azdo_org or os.getenv("AZURE_DEVOPS_ORG", "") or "").strip()
-    resolved_gitlab_group = (gitlab_group or os.getenv("GITLAB_GROUP", "") or "").strip().strip("/")
+    resolved_azdo_org = (azdo_org or "").strip()
 
     resolved_api_version = api_version or os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1"
     timeout = parse_int_env(
@@ -249,7 +424,7 @@ def parse_runtime_config(
             min_value=100,
             max_value=100_000,
         ),
-        github_org=(github_org or os.getenv("GITHUB_ORG", "") or "").strip(),
+        github_org="",
         github_api_url=os.getenv("GITHUB_API_URL", github_api_url_default).rstrip("/"),
         github_api_version=os.getenv("GITHUB_API_VERSION", github_api_version_default),
         github_timeout_seconds=parse_int_env(
@@ -270,10 +445,10 @@ def parse_runtime_config(
             min_value=1,
             max_value=900,
         ),
-        gitlab_group=resolved_gitlab_group,
+        gitlab_group="",
         gitlab_api_url=resolve_gitlab_api_url(
             default=gitlab_api_url_default,
-            enable_auto_discovery=bool(resolved_gitlab_group),
+            enable_auto_discovery=True,
         ),
         gitlab_timeout_seconds=parse_int_env(
             "GITLAB_TIMEOUT_SECONDS",

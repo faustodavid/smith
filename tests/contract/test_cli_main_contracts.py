@@ -47,7 +47,7 @@ def test_main_emits_json_for_value_errors(monkeypatch: Any, capsys: Any) -> None
     args = Namespace(verbose=False, handler=lambda client, parsed: 0, output_format="json", command_id="repos")
     parser = _Parser(args=args)
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
-    monkeypatch.setattr(cli_main, "validate_args_for_provider", lambda parsed: (_ for _ in ()).throw(ValueError("bad args")))
+    monkeypatch.setattr(cli_main, "validate_args_for_remote", lambda parsed: (_ for _ in ()).throw(ValueError("bad args")))
 
     assert cli_main.main(["repos", "github"]) == cli_main.EXIT_INVALID_ARGS
     captured = capsys.readouterr()
@@ -64,7 +64,7 @@ def test_main_uses_unexpected_error_fallback(monkeypatch: Any, capsys: Any) -> N
     )
     parser = _Parser(args=args)
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
-    monkeypatch.setattr(cli_main, "validate_args_for_provider", lambda parsed: None)
+    monkeypatch.setattr(cli_main, "validate_args_for_remote", lambda parsed: None)
     monkeypatch.setattr(cli_main, "_client_from_args", lambda parsed: object())
 
     assert cli_main.main(["repos", "github"]) == cli_main.EXIT_API_FAILURE
@@ -89,7 +89,7 @@ def test_main_skips_client_creation_for_clientless_handlers(monkeypatch: Any) ->
     )
     parser = _Parser(args=args)
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
-    monkeypatch.setattr(cli_main, "validate_args_for_provider", lambda parsed: None)
+    monkeypatch.setattr(cli_main, "validate_args_for_remote", lambda parsed: None)
     monkeypatch.setattr(
         cli_main,
         "_client_from_args",

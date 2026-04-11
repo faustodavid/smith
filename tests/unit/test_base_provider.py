@@ -8,7 +8,7 @@ import requests
 from tests.support import FakeResponse, RecordingSession, make_runtime_config
 
 from smith.errors import SmithApiError, SmithAuthError
-from smith.providers.base import BaseProvider, normalize_provider, normalize_single_provider, resolve_providers
+from smith.providers.base import BaseProvider
 
 
 class _TestProvider(BaseProvider):
@@ -46,18 +46,6 @@ class _Retryable403Provider(_TestProvider):
 
     def _is_auth_failure_response(self, response: Any) -> bool:
         return False
-
-
-def test_provider_name_helpers_normalize_and_validate() -> None:
-    assert normalize_provider("GITHUB") == "github"
-    assert normalize_provider("GITLAB") == "gitlab"
-    assert resolve_providers("all") == ["github", "gitlab", "azdo"]
-    assert normalize_single_provider("azdo", command="repos") == "azdo"
-
-    with pytest.raises(ValueError, match="provider must be one of"):
-        normalize_provider("bitbucket")
-    with pytest.raises(ValueError, match="repos does not support provider 'all'"):
-        normalize_single_provider("all", command="repos")
 
 
 def test_get_http_session_reuses_main_and_worker_sessions(monkeypatch: Any) -> None:

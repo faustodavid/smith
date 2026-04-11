@@ -35,48 +35,49 @@ Run Azure DevOps, GitHub, and GitLab investigations with a deterministic broad-t
 Use the current CLI tree only:
 
 - Discovery:
-  - `smith orgs azdo`
-  - `smith orgs github`
-  - `smith orgs gitlab`
-  - `smith repos azdo [<project>]`
-  - `smith repos github`
-  - `smith repos gitlab`
+  - `smith orgs <azdo-remote-name>`
+  - `smith orgs <github-remote-name>`
+  - `smith orgs <gitlab-remote-name>`
+  - `smith repos <azdo-remote-name>`
+  - `smith repos <azdo-remote-name> <project>`
+  - `smith repos <github-remote-name>`
+  - `smith repos <gitlab-remote-name>`
 - Code:
-  - `smith code search "<query>"`
-  - `smith code grep azdo <project> <repo> "<regex>"`
-  - `smith code grep github <repo> "<regex>" [--no-clone]`
-  - `smith code grep gitlab <repo> "<regex>" [--no-clone]`
+  - `smith code search "<query>" [--remote <configured-remote-name>|--remote all]`
+  - `smith code grep <azdo-remote-name> <project> <repo> "<regex>"`
+  - `smith code grep <github-remote-name> <repo> "<regex>" [--no-clone]`
+  - `smith code grep <gitlab-remote-name> <repo> "<regex>" [--no-clone]`
 - Pull requests:
-  - `smith prs list|get|threads azdo ...`
-  - `smith prs list|get|threads github ...`
-  - `smith prs list|get|threads gitlab ...`
+  - `smith prs list <azdo-remote-name> <project> <repo>`
+  - `smith prs list <github-remote-name> <repo>`
+  - `smith prs list <gitlab-remote-name> <repo>`
 - Pipelines:
-  - `smith pipelines logs list|grep azdo ...`
-  - `smith pipelines logs list|grep github ...`
-  - `smith pipelines logs list|grep gitlab ...`
+  - `smith pipelines logs list <azdo-remote-name> <project> <id>`
+  - `smith pipelines logs list <github-remote-name> <repo> <id>`
+  - `smith pipelines logs list <gitlab-remote-name> <repo> <id>`
 - Stories and issues:
-  - `smith stories get|search|mine azdo ...`
-  - `smith stories get|search|mine github ...`
-  - `smith stories get|search|mine gitlab ...`
+  - `smith stories search <azdo-remote-name> <project> --query "<text>"`
+  - `smith stories search <github-remote-name> <repo> --query "<text>"`
+  - `smith stories search <gitlab-remote-name> <repo> --query "<text>"`
 
 Representative command examples:
 
-- `smith prs list github <repo>`
-- `smith prs list gitlab <repo>`
-- `smith pipelines logs list github <repo> <id>`
-- `smith pipelines logs list gitlab <repo> <id>`
-- `smith stories search azdo <project> --query "<text>"`
-- `smith stories search gitlab <repo> --query "<text>"`
+- `smith prs list github-readonly <repo>`
+- `smith prs list gitlab-infra <repo>`
+- `smith pipelines logs list github-readonly <repo> <id>`
+- `smith pipelines logs list gitlab-infra <repo> <id>`
+- `smith stories search azdo-main <project> --query "<text>"`
+- `smith stories search gitlab-infra <repo> --query "<text>"`
 
 Do not invent legacy paths such as `discover`, `organizations`, `work`, `ci`, `board`, or `stories ticket`.
 
-## Provider Argument Rules
+## Remote Argument Rules
 
-`code grep`, `prs`, `pipelines logs`, and `stories` use provider-positional arguments.
+`code grep`, `prs`, `pipelines logs`, and `stories` use configured remote names as the leading positional argument.
 
-- Azure DevOps commands take `<project>` and, when needed, `<repo>`.
-- GitHub commands take a bare `<repo>` slug without the org prefix, not `org/repo`.
-- GitLab commands take `<repo>` relative to configured `GITLAB_GROUP`, not full `group/repo`.
+- Azure DevOps remotes take `<project>` and, when needed, `<repo>`.
+- GitHub remotes take a bare `<repo>` slug without the org prefix, not `org/repo`.
+- GitLab remotes take `<repo>` relative to the configured remote's group, not full `group/repo`.
 
 Important GitHub repo-shape rule:
 
@@ -85,33 +86,33 @@ Important GitHub repo-shape rule:
 
 Correct:
 
-- `smith code grep github openai-python "OPENAI_WEBHOOK_SECRET"`
-- `smith prs get github openai-python 42`
-- `smith pipelines logs list github openai-python 12345`
-- `smith stories get github openai-python 77`
+- `smith code grep github-readonly openai-python "OPENAI_WEBHOOK_SECRET"`
+- `smith prs get github-readonly openai-python 42`
+- `smith pipelines logs list github-readonly openai-python 12345`
+- `smith stories get github-readonly openai-python 77`
 
 Wrong:
 
-- `smith code grep github openai/openai-python "OPENAI_WEBHOOK_SECRET"`
-- `smith prs get github openai/openai-python 42`
+- `smith code grep github-readonly openai/openai-python "OPENAI_WEBHOOK_SECRET"`
+- `smith prs get github-readonly openai/openai-python 42`
 
 Important GitLab repo-shape rule:
 
 - Search results and inline evidence often look like `group/repo:path`.
-- GitLab command arguments are `<repo>` relative to configured `GITLAB_GROUP`.
-- If `GITLAB_GROUP=acme/platform`, use `api` or `services/api`, not full `group/repo`.
+- GitLab command arguments are `<repo>` relative to the configured remote's group.
+- If the configured remote group is `acme/platform`, use `api` or `services/api`, not full `group/repo`.
 
 Correct:
 
-- `smith code grep gitlab api "CI_JOB_TOKEN"`
-- `smith prs get gitlab services/api 42`
-- `smith pipelines logs list gitlab api 12345`
-- `smith stories get gitlab api 77`
+- `smith code grep gitlab-infra api "CI_JOB_TOKEN"`
+- `smith prs get gitlab-infra services/api 42`
+- `smith pipelines logs list gitlab-infra api 12345`
+- `smith stories get gitlab-infra api 77`
 
 Wrong:
 
-- `smith code grep gitlab acme/platform/api "CI_JOB_TOKEN"`
-- `smith prs get gitlab acme/platform/api 42`
+- `smith code grep gitlab-infra acme/platform/api "CI_JOB_TOKEN"`
+- `smith prs get gitlab-infra acme/platform/api 42`
 
 Important pipeline ID rule:
 
@@ -127,15 +128,15 @@ Important pipeline ID rule:
    - If org, project, or repo scope is unclear, use `smith orgs ...` or `smith repos ...`.
 3. Map only the relevant subtree.
    - After search reveals a likely area, map only that subtree:
-     - Azure DevOps: `smith code grep azdo <project> <repo> ".*" --path <dir> --output-mode files_with_matches`
-     - GitHub: `smith code grep github <repo> ".*" --path <dir> --output-mode files_with_matches`
-     - GitLab: `smith code grep gitlab <repo> ".*" --path <dir> --output-mode files_with_matches`
+     - Azure DevOps: `smith code grep <azdo-remote-name> <project> <repo> ".*" --path <dir> --output-mode files_with_matches`
+     - GitHub: `smith code grep <github-remote-name> <repo> ".*" --path <dir> --output-mode files_with_matches`
+     - GitLab: `smith code grep <gitlab-remote-name> <repo> ".*" --path <dir> --output-mode files_with_matches`
 4. Extract proof with focused grep.
    - Narrow in this order: repo -> subsystem path -> glob -> regex -> line window.
    - Use both `--path <dir>` and, when possible, `--glob "*.ext"`:
-     - Azure DevOps: `smith code grep azdo <project> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
-     - GitHub: `smith code grep github <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
-     - GitLab: `smith code grep gitlab <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+     - Azure DevOps: `smith code grep <azdo-remote-name> <project> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+     - GitHub: `smith code grep <github-remote-name> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
+     - GitLab: `smith code grep <gitlab-remote-name> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
    - Use `--no-clone` for one-off targeted grep or when scanning many repos once.
    - Keep the default clone-backed path when you expect multiple grep calls in the same repo so the local checkout can be reused.
 5. Corroborate only when needed.
@@ -175,7 +176,7 @@ Important pipeline ID rule:
 - Wrong repository:
   - Remap the repo with `smith code search "<broader query>"`.
   - For GitHub, if a command 404s after using `org/repo`, rerun it with the bare `<repo>` slug.
-  - For GitLab, if a command 404s after using full `group/repo`, rerun it with the repo path relative to configured `GITLAB_GROUP`.
+  - For GitLab, if a command 404s after using full `group/repo`, rerun it with the repo path relative to the configured remote's group.
 
 Use `references/auth-troubleshooting.md` for env or credential setup and `references/failure-playbook.md` for recovery details.
 
@@ -193,17 +194,14 @@ Use `references/auth-troubleshooting.md` for env or credential setup and `refere
 
 ## Preflight And Environment
 
-- Set org context before running provider commands:
-  - `export AZURE_DEVOPS_ORG="<org>"`
-  - `export GITHUB_ORG="<org>"`
-  - `export GITLAB_GROUP="<group>"`
-- Authenticate when needed:
-  - Azure DevOps: `az login`
-  - GitHub: `export GITHUB_TOKEN="<token>"` or `gh auth login`
-  - GitLab: `export GITLAB_TOKEN="<token>"` or `glab auth login`
-- Per-invocation overrides are available:
-  - `smith --azdo-org <org> ...`
-  - `smith --github-org <org> ...`
-  - `smith --gitlab-group <group> ...`
+- Confirm you are using the right Smith config file:
+  - `smith config path`
+  - `smith config list`
+  - `smith config show <github-remote-name>`
+- Authenticate when needed with the token env var configured for the target remote:
+  - Azure DevOps: export the PAT env var referenced by `<azdo-remote-name>` and run `az login` when required.
+  - GitHub: export the token env var referenced by `<github-remote-name>` or `gh auth login`.
+  - GitLab: export the token env var referenced by `<gitlab-remote-name>` or `glab auth login`.
+- Use `SMITH_CONFIG=/path/to/config.yaml` when the target remotes live outside the default config path.
 
-Some benchmark harnesses expose only a GitHub subset such as `code search`, `code grep github`, `orgs github`, and `repos github`. In that environment, stay within the exposed subset instead of switching tools.
+Some benchmark harnesses expose only a GitHub subset such as `code search`, `code grep <github-remote-name>`, `orgs <github-remote-name>`, and `repos <github-remote-name>`. In that environment, stay within the exposed subset instead of switching tools. The single enabled benchmark remote is often named `github`.

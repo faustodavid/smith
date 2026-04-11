@@ -1,33 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict
-
-ProviderName = Literal["azdo", "github", "gitlab", "all"]
+from typing import Any, TypedDict
 
 
-class ProviderError(TypedDict):
+class RemoteError(TypedDict):
     code: str
     message: str
 
 
-class ProviderEntry(TypedDict):
+class RemoteEntry(TypedDict):
     ok: bool
     data: Any
     warnings: list[str]
     partial: bool
-    error: ProviderError | None
+    error: RemoteError | None
 
 
 class FanoutSummary(TypedDict):
-    requested_provider: str
+    requested_remote: str
     queried: list[str]
     succeeded: list[str]
     failed: list[str]
 
 
 class FanoutResult(TypedDict):
-    providers: dict[str, ProviderEntry]
+    remotes: dict[str, RemoteEntry]
     summary: FanoutSummary
 
 

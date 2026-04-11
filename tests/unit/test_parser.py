@@ -3,129 +3,196 @@ from __future__ import annotations
 import pytest
 
 from smith.cli.parser import build_parser
+from smith.config import RemoteConfig, SmithConfig
+
+
+def _build_test_parser() -> object:
+    return build_parser(
+        smith_config=SmithConfig(
+            remotes={
+                "azdo": RemoteConfig(
+                    name="azdo",
+                    provider="azdo",
+                    org="acme",
+                    host="dev.azure.com",
+                    token_env="AZURE_DEVOPS_PAT",
+                    enabled=True,
+                    api_url="https://dev.azure.com",
+                ),
+                "github": RemoteConfig(
+                    name="github",
+                    provider="github",
+                    org="octo-org",
+                    host="github.com",
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url="https://api.github.com",
+                ),
+                "gitlab": RemoteConfig(
+                    name="gitlab",
+                    provider="gitlab",
+                    org="gitlab-org",
+                    host="gitlab.com",
+                    token_env="GITLAB_TOKEN",
+                    enabled=True,
+                    api_url="https://gitlab.com/api/v4",
+                ),
+                "gitlab-infra": RemoteConfig(
+                    name="gitlab-infra",
+                    provider="gitlab",
+                    org="gitlab-org",
+                    host="gitlab-infra.example.com",
+                    token_env="GITLAB_INFRA_TOKEN",
+                    enabled=True,
+                    api_url="https://gitlab-infra.example.com/api/v4",
+                ),
+            },
+            defaults={},
+        )
+    )
 
 
 def test_code_search_parser_defaults() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["code", "search", "grafana"])
 
     assert args.command_id == "code.search"
-    assert args.provider == "all"
+    assert args.remote == "all"
     assert args.output_format == "text"
     assert args.query == "grafana"
 
 
 def test_cache_clean_parser_defaults() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["cache", "clean"])
 
     assert args.command_id == "cache.clean"
-    assert args.cache_provider == "all"
+    assert args.cache_remote == "all"
     assert args.requires_client is False
 
 
-def test_cache_clean_parser_accepts_provider_override() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["cache", "clean", "--provider", "github"])
+def test_cache_clean_parser_accepts_remote_override() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["cache", "clean", "--remote", "github"])
 
     assert args.command_id == "cache.clean"
-    assert args.cache_provider == "github"
+    assert args.cache_remote == "github"
 
 
 def test_stories_group_parses_to_stories_command() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["stories", "get", "azdo", "SRE", "123"])
 
     assert args.command_id == "stories.get"
-    assert args.provider == "azdo"
+    assert args.remote == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 123
 
 
 @pytest.mark.parametrize("provider", ["azdo", "github", "gitlab"])
 def test_orgs_parser_uses_canonical_command_id(provider: str) -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["orgs", provider])
 
     assert args.command_id == "orgs"
-    assert args.provider == provider
+    assert args.remote == provider
+    assert args.remote_provider == provider
 
 
 def test_repos_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["repos", "github"])
 
     assert args.command_id == "repos"
-    assert args.provider == "github"
+    assert args.remote == "github"
+    assert args.remote_provider == "github"
     assert args.project is None
 
 
 def test_repos_gitlab_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["repos", "gitlab"])
 
     assert args.command_id == "repos"
-    assert args.provider == "gitlab"
+    assert args.remote == "gitlab"
+    assert args.remote_provider == "gitlab"
+    assert args.project is None
+
+
+def test_repos_parser_accepts_named_remote() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["repos", "gitlab-infra"])
+
+    assert args.command_id == "repos"
+    assert args.remote == "gitlab-infra"
+    assert args.remote_provider == "gitlab"
     assert args.project is None
 
 
 def test_prs_list_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["prs", "list", "azdo", "SRE", "repo-a"])
 
     assert args.command_id == "prs.list"
-    assert args.provider == "azdo"
+    assert args.remote == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.repo == "repo-a"
 
 
 def test_prs_get_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["prs", "get", "github", "repo-a", "42"])
 
     assert args.command_id == "prs.get"
-    assert args.provider == "github"
+    assert args.remote == "github"
+    assert args.remote_provider == "github"
     assert args.repo == "repo-a"
     assert args.id == 42
 
 
 def test_prs_get_gitlab_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["prs", "get", "gitlab", "repo-a", "42"])
 
     assert args.command_id == "prs.get"
-    assert args.provider == "gitlab"
+    assert args.remote == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.id == 42
 
 
 def test_prs_threads_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["prs", "threads", "azdo", "SRE", "repo-a", "42"])
 
     assert args.command_id == "prs.threads"
-    assert args.provider == "azdo"
+    assert args.remote == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.repo == "repo-a"
     assert args.id == 42
 
 
 def test_pipelines_logs_list_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["pipelines", "logs", "list", "azdo", "SRE", "42"])
 
     assert args.command_id == "pipelines.logs.list"
-    assert args.provider == "azdo"
+    assert args.remote == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 42
 
 
 def test_code_grep_parser_uses_required_positional_pattern() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["code", "grep", "github", "repo-a", "--path", "/src", "error"])
 
     assert args.command_id == "code.grep"
-    assert args.provider == "github"
+    assert args.remote == "github"
+    assert args.remote_provider == "github"
     assert args.repo == "repo-a"
     assert args.path == "/src"
     assert args.pattern == "error"
@@ -133,60 +200,86 @@ def test_code_grep_parser_uses_required_positional_pattern() -> None:
 
 
 def test_code_grep_parser_accepts_no_clone() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["code", "grep", "github", "repo-a", "--no-clone", "error"])
 
     assert args.command_id == "code.grep"
-    assert args.provider == "github"
+    assert args.remote == "github"
+    assert args.remote_provider == "github"
     assert args.repo == "repo-a"
     assert args.pattern == "error"
     assert args.no_clone is True
 
 
 def test_code_grep_gitlab_parser_uses_required_positional_pattern() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["code", "grep", "gitlab", "repo-a", "--path", "/src", "error"])
 
     assert args.command_id == "code.grep"
-    assert args.provider == "gitlab"
+    assert args.remote == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.path == "/src"
     assert args.pattern == "error"
     assert args.no_clone is False
 
 
+def test_code_grep_parser_accepts_named_remote() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["code", "grep", "gitlab-infra", "repo-a", "--path", "/src", "error"])
+
+    assert args.command_id == "code.grep"
+    assert args.remote == "gitlab-infra"
+    assert args.remote_provider == "gitlab"
+    assert args.repo == "repo-a"
+    assert args.path == "/src"
+    assert args.pattern == "error"
+
+
 def test_pipelines_logs_grep_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["pipelines", "logs", "grep", "github", "repo-a", "42", "error"])
 
     assert args.command_id == "pipelines.logs.grep"
-    assert args.provider == "github"
+    assert args.remote == "github"
+    assert args.remote_provider == "github"
     assert args.repo == "repo-a"
     assert args.id == 42
     assert args.pattern == "error"
 
 
 def test_pipelines_logs_grep_gitlab_parser_uses_canonical_command_id() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["pipelines", "logs", "grep", "gitlab", "repo-a", "42", "error"])
 
     assert args.command_id == "pipelines.logs.grep"
-    assert args.provider == "gitlab"
+    assert args.remote == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.id == 42
     assert args.pattern == "error"
 
 
 def test_pipelines_logs_grep_parser_accepts_log_id_before_pattern() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
     args = parser.parse_args(["pipelines", "logs", "grep", "azdo", "SRE", "42", "--log-id", "18", "error"])
 
     assert args.command_id == "pipelines.logs.grep"
-    assert args.provider == "azdo"
+    assert args.remote == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 42
     assert args.log_id == 18
     assert args.pattern == "error"
+
+
+def test_code_search_parser_accepts_remote_filter() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["code", "search", "grafana", "--remote", "gitlab-infra"])
+
+    assert args.command_id == "code.search"
+    assert args.remote == "gitlab-infra"
+    assert args.query == "grafana"
 
 
 @pytest.mark.parametrize(
@@ -198,7 +291,7 @@ def test_pipelines_logs_grep_parser_accepts_log_id_before_pattern() -> None:
     ],
 )
 def test_grep_commands_fail_when_pattern_contract_is_not_met(argv: list[str]) -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(argv)
@@ -210,6 +303,11 @@ def test_grep_commands_fail_when_pattern_contract_is_not_met(argv: list[str]) ->
         ["discover", "projects", "azdo"],
         ["organizations"],
         ["organizations", "azdo"],
+        ["--azdo-org", "a-org", "orgs", "azdo"],
+        ["--github-org", "g-org", "repos", "github"],
+        ["--gitlab-group", "platform", "repos", "gitlab"],
+        ["code", "search", "grafana", "--provider", "github"],
+        ["cache", "clean", "--provider", "github"],
         ["work", "get", "azdo", "SRE", "123"],
         ["pr", "list", "github", "repo-a"],
         ["pr", "get", "github", "repo-a", "42"],
@@ -222,60 +320,14 @@ def test_grep_commands_fail_when_pattern_contract_is_not_met(argv: list[str]) ->
     ],
 )
 def test_legacy_paths_fail_to_parse(argv: list[str]) -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(argv)
 
 
-def test_azdo_org_flag_parses() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["--azdo-org", "my-azdo", "orgs", "azdo"])
-
-    assert args.azdo_org == "my-azdo"
-    assert args.github_org is None
-
-
-def test_github_org_flag_parses() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["--github-org", "my-gh", "repos", "github"])
-
-    assert args.github_org == "my-gh"
-    assert args.azdo_org is None
-
-
-def test_gitlab_group_flag_parses() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["--gitlab-group", "platform/subgroup", "repos", "gitlab"])
-
-    assert args.gitlab_group == "platform/subgroup"
-    assert args.github_org is None
-    assert args.azdo_org is None
-
-
-def test_both_org_flags_parse_independently() -> None:
-    parser = build_parser()
-    args = parser.parse_args(
-        [
-            "--azdo-org",
-            "a-org",
-            "--github-org",
-            "g-org",
-            "--gitlab-group",
-            "platform",
-            "code",
-            "search",
-            "test",
-        ]
-    )
-
-    assert args.azdo_org == "a-org"
-    assert args.github_org == "g-org"
-    assert args.gitlab_group == "platform"
-
-
 def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--help"])
@@ -291,10 +343,8 @@ def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) ->
     assert "\n    work" not in output
     assert "organizations" not in output
     assert "List repositories" in output
-    assert "GitHub orgs" in output
-    assert "GitLab groups" in output
-    assert "DevOps" in output
-    assert "Search and grep across providers and repos" in output
+    assert "configured org, group, or project scope" in output
+    assert "Search and grep across remotes and repos" in output
     assert "Manage local grep caches" in output
     assert "List, get, and read pull request comments" in output
     assert "Read and grep pipeline logs" in output
@@ -302,7 +352,7 @@ def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) ->
 
 
 def test_stories_help_lists_get_search_and_mine_only(capsys: pytest.CaptureFixture[str]) -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(["stories", "--help"])
@@ -315,7 +365,7 @@ def test_stories_help_lists_get_search_and_mine_only(capsys: pytest.CaptureFixtu
 
 
 def test_pipelines_help_lists_only_logs(capsys: pytest.CaptureFixture[str]) -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(["pipelines", "--help"])
@@ -328,7 +378,7 @@ def test_pipelines_help_lists_only_logs(capsys: pytest.CaptureFixture[str]) -> N
 
 
 def test_pipelines_logs_help_lists_list_and_grep(capsys: pytest.CaptureFixture[str]) -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(["pipelines", "logs", "--help"])
@@ -341,7 +391,18 @@ def test_pipelines_logs_help_lists_list_and_grep(capsys: pytest.CaptureFixture[s
 
 
 def test_stories_query_path_fails_to_parse() -> None:
-    parser = build_parser()
+    parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(["stories", "query", "azdo", "SRE", "--wiql", "SELECT 1"])
+
+
+def test_remote_commands_show_helpful_message_when_no_remotes(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = build_parser(smith_config=SmithConfig(remotes={}, defaults={}))
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["repos", "gitlab-infra"])
+
+    error_output = capsys.readouterr().err
+    assert "No remotes configured" in error_output
+    assert "smith config init" in error_output

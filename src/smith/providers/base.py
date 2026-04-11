@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Literal, cast
+from typing import Any
 
 import requests
 
@@ -14,34 +14,12 @@ from smith.http import configure_http_session, is_retryable_get_status, parse_re
 
 logger = logging.getLogger(__name__)
 
-ProviderName = Literal["azdo", "github", "gitlab", "all"]
-
-
-def normalize_provider(provider: str | None) -> ProviderName:
-    normalized = (provider or "azdo").strip().lower()
-    if normalized not in {"azdo", "github", "gitlab", "all"}:
-        raise ValueError("provider must be one of: azdo, github, gitlab, all")
-    return cast(ProviderName, normalized)
-
-
-def resolve_providers(provider: str | None) -> list[str]:
-    normalized = normalize_provider(provider)
-    if normalized == "all":
-        return ["github", "gitlab", "azdo"]
-    return [normalized]
-
-
-def normalize_single_provider(provider: str | None, *, command: str) -> str:
-    normalized = normalize_provider(provider)
-    if normalized == "all":
-        raise ValueError(f"{command} does not support provider 'all'. Use azdo, github, or gitlab.")
-    return normalized
-
 
 class BaseProvider(ABC):
-    def __init__(self, *, config: RuntimeConfig, session: requests.Session) -> None:
+    def __init__(self, *, config: RuntimeConfig, session: requests.Session, token_env: str | None = None) -> None:
         self._config = config
         self._session = session
+        self._token_env = token_env
         self._http_thread_local = threading.local()
 
     @abstractmethod

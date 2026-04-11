@@ -154,23 +154,23 @@ def test_render_text_code_search_shows_total_and_displayed_counts() -> None:
         "code.search",
         {
             "matchesCount": 5,
-            "results": ["octo/repo:/src/app.py", "octo/repo:/src/lib.py"],
+            "results": ["repo:/src/app.py", "repo:/src/lib.py"],
         },
     )
 
     assert rendered == (
         "matches: 5 (showing 2)\n"
-        "octo/repo:/src/app.py\n"
-        "octo/repo:/src/lib.py"
+        "repo:/src/app.py\n"
+        "repo:/src/lib.py"
     )
 
 
-def test_render_text_grouped_provider_output_preserves_order_warnings_and_errors() -> None:
+def test_render_text_grouped_remote_output_preserves_order_warnings_and_errors() -> None:
     payload = {
-        "providers": {
+        "remotes": {
             "github": {
                 "ok": True,
-                "data": {"matchesCount": 2, "results": ["octo/repo:/src/app.py"]},
+                "data": {"matchesCount": 2, "results": ["repo:/src/app.py"]},
                 "warnings": [],
                 "partial": False,
                 "error": None,
@@ -188,16 +188,16 @@ def test_render_text_grouped_provider_output_preserves_order_warnings_and_errors
 
     assert render_text("code.search", payload) == (
         "[github] matches: 2 (showing 1)\n"
-        "octo/repo:/src/app.py\n"
+        "repo:/src/app.py\n"
         "\n"
         "[azdo]\n"
         "error: rate limited"
     )
 
 
-def test_render_text_flattens_single_provider_and_omits_duplicate_grep_warnings() -> None:
+def test_render_text_flattens_single_remote_and_omits_duplicate_grep_warnings() -> None:
     payload = {
-        "providers": {
+        "remotes": {
             "github": {
                 "ok": True,
                 "data": {"text": "line one", "warnings": ["inner warning"]},
@@ -212,9 +212,9 @@ def test_render_text_flattens_single_provider_and_omits_duplicate_grep_warnings(
     assert render_text("pipelines.logs.grep", payload) == "line one\nwarning: inner warning\npartial: true"
 
 
-def test_render_text_returns_provider_error_for_single_provider_failures() -> None:
+def test_render_text_returns_remote_error_for_single_remote_failures() -> None:
     payload = {
-        "providers": {
+        "remotes": {
             "azdo": {
                 "ok": False,
                 "data": None,
