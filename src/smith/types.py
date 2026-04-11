@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+
 class RemoteError(TypedDict):
     code: str
     message: str

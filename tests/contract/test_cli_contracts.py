@@ -109,8 +109,10 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
     [
         (_make_args(command_id="repos", remote="all", remote_provider=""), "does not support remote 'all'"),
         (_make_args(command_id="code.search", query="   "), "code search requires a query"),
-        (_make_args(command_id="code.search", remote="github", remote_provider="github", project="proj-a"), "GitHub code search does not support `--project`"),
-        (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project="proj-a"), "GitLab code search does not support `--project`"),
+        (_make_args(command_id="code.search", remote="github", remote_provider="github", project="proj-a"),
+         "GitHub code search does not support `--project`"),
+        (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project="proj-a"),
+         "GitLab code search does not support `--project`"),
     ],
 )
 def test_validate_args_for_remote_rejects_invalid_inputs(
@@ -440,7 +442,6 @@ def test_handle_pr_list_branches_by_provider(
 
 def test_client_from_args_loads_config_and_passes_smith_config(monkeypatch: Any) -> None:
     captured: dict[str, Any] = {}
-    fake_config = object()
 
     class _FakeClient:
         def __init__(self, **kwargs: Any) -> None:
