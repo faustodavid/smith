@@ -12,6 +12,12 @@ from smith.cli.handlers import (
     handle_ci_logs,
     handle_code_grep,
     handle_code_search,
+    handle_config_disable,
+    handle_config_enable,
+    handle_config_init,
+    handle_config_list,
+    handle_config_path,
+    handle_config_show,
     handle_discover_projects,
     handle_discover_repos,
     handle_pr_get,
@@ -316,6 +322,74 @@ def _add_code_group(root_subparsers: argparse._SubParsersAction[argparse.Argumen
     _add_grep_options(code_grep_gitlab)
     _add_output_format(code_grep_gitlab)
     _set_handler(code_grep_gitlab, handle_code_grep, "code.grep", primary_path="code grep")
+
+
+def _add_config_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    config = _add_parser(root_subparsers, "config", help_text="Manage remote configurations")
+    config_sub = config.add_subparsers(dest="action", required=True)
+
+    config_list = _add_parser(config_sub, "list", help_text="List all configured remotes")
+    _add_output_format(config_list)
+    _set_handler(
+        config_list,
+        handle_config_list,
+        "config.list",
+        primary_path="config list",
+        requires_client=False,
+    )
+
+    config_show = _add_parser(config_sub, "show", help_text="Show details of a remote")
+    config_show.add_argument("remote_name", help="Name of the remote to show")
+    _add_output_format(config_show)
+    _set_handler(
+        config_show,
+        handle_config_show,
+        "config.show",
+        primary_path="config show",
+        requires_client=False,
+    )
+
+    config_init = _add_parser(config_sub, "init", help_text="Initialize config file")
+    _add_output_format(config_init)
+    _set_handler(
+        config_init,
+        handle_config_init,
+        "config.init",
+        primary_path="config init",
+        requires_client=False,
+    )
+
+    config_path_cmd = _add_parser(config_sub, "path", help_text="Print config file path")
+    _add_output_format(config_path_cmd)
+    _set_handler(
+        config_path_cmd,
+        handle_config_path,
+        "config.path",
+        primary_path="config path",
+        requires_client=False,
+    )
+
+    config_enable = _add_parser(config_sub, "enable", help_text="Enable a remote")
+    config_enable.add_argument("remote_name", help="Name of the remote to enable")
+    _add_output_format(config_enable)
+    _set_handler(
+        config_enable,
+        handle_config_enable,
+        "config.enable",
+        primary_path="config enable",
+        requires_client=False,
+    )
+
+    config_disable = _add_parser(config_sub, "disable", help_text="Disable a remote")
+    config_disable.add_argument("remote_name", help="Name of the remote to disable")
+    _add_output_format(config_disable)
+    _set_handler(
+        config_disable,
+        handle_config_disable,
+        "config.disable",
+        primary_path="config disable",
+        requires_client=False,
+    )
 
 
 def _add_cache_group(root_subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -699,12 +773,13 @@ def build_parser() -> argparse.ArgumentParser:
     root_subparsers = parser.add_subparsers(
         dest="group",
         required=True,
-        metavar="{repos,orgs,code,cache,prs,pipelines,stories}",
+        metavar="{repos,orgs,code,config,cache,prs,pipelines,stories}",
     )
 
     _add_repos_group(root_subparsers)
     _add_orgs_group(root_subparsers)
     _add_code_group(root_subparsers)
+    _add_config_group(root_subparsers)
     _add_cache_group(root_subparsers)
     _add_pr_group(root_subparsers)
     _add_ci_group(root_subparsers)

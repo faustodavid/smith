@@ -29,10 +29,12 @@ class AzdoProvider(
         config: RuntimeConfig,
         credential: Any | None = None,
         session: requests.Session,
+        azdo_org: str | None = None,
+        token_env: str | None = None,
     ) -> None:
-        super().__init__(config=config, session=session)
-        self.org_name = config.azdo_org
-        self.org_url = config.azdo_org_url
+        super().__init__(config=config, session=session, token_env=token_env)
+        self.org_name = azdo_org or config.azdo_org
+        self.org_url = f"https://dev.azure.com/{self.org_name}" if self.org_name else config.azdo_org_url
         self.api_version = config.api_version
         self.max_output_chars = config.max_output_chars
         self._credential = credential or DefaultAzureCredential(

@@ -9,17 +9,18 @@ from typing import Any, Callable, Literal
 
 import requests
 
-from smith.config import parse_runtime_config
+from smith.config import RemoteConfig, SmithConfig, load_config, parse_runtime_config
 from smith.errors import SmithApiError, SmithAuthError, SmithError
 from smith.fanout import run_fanout
 from smith.http import configure_http_session
 from smith.providers.azdo import AzdoProvider
-from smith.providers.base import normalize_provider, normalize_single_provider, resolve_providers
+from smith.providers.base import BaseProvider, normalize_single_provider
 from smith.providers.github import GITHUB_DEFAULT_API_URL, GITHUB_DEFAULT_API_VERSION, GitHubProvider
 from smith.providers.gitlab import GITLAB_DEFAULT_API_URL, GitLabProvider
 
 _NO_PROVIDERS_CONFIGURED_MESSAGE = (
-    "No providers configured. Set at least one of:\n"
+    "No remotes configured. Create a config file at ~/.config/smith/config.yaml "
+    "or set at least one of:\n"
     "  - AZURE_DEVOPS_ORG (for Azure DevOps)\n"
     "  - GITHUB_ORG (for GitHub)\n"
     "  - GITLAB_GROUP (for GitLab)"
@@ -38,87 +39,121 @@ class SmithClient:
         max_output_chars: int | None = None,
         credential: Any | None = None,
         session: requests.Session | None = None,
+        smith_config: SmithConfig | None = None,
     ) -> None:
-        runtime = parse_runtime_config(
-            azdo_org=azdo_org,
-            api_version=api_version,
-            timeout_seconds=timeout_seconds,
-            max_output_chars=max_output_chars,
-            github_org=github_org,
-            github_api_url_default=GITHUB_DEFAULT_API_URL,
-            github_api_version_default=GITHUB_DEFAULT_API_VERSION,
-            gitlab_group=gitlab_group,
-            gitlab_api_url_default=GITLAB_DEFAULT_API_URL,
-        )
+        if smith_config is not None:
+            self._config = smith_config
+        elif azdo_org or github_org or gitlab_group:
+            runtime = parse_runtime_config(
+                azdo_org=azdo_org,
+                api_version=api_version,
+                timeout_seconds=timeout_seconds,
+                max_output_chars=max_output_chars,
+                github_org=github_org,
+                github_api_url_default=GITHUB_DEFAULT_API_URL,
+                github_api_version_default=GITHUB_DEFAULT_API_VERSION,
+                gitlab_group=gitlab_group,
+                gitlab_api_url_default=GITLAB_DEFAULT_API_URL,
+            )
+            remotes: dict[str, RemoteConfig] = {}
+            if runtime.github_configured:
+                remotes["github"] = RemoteConfig(
+                    name="github",
+                    provider="github",
+                    org=runtime.github_org,
+                    host="github.com",
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url=runtime.github_api_url,
+                )
+            if runtime.gitlab_configured:
+                remotes["gitlab"] = RemoteConfig(
+                    name="gitlab",
+                    provider="gitlab",
+                    org=runtime.gitlab_group,
+                    host="gitlab.com",
+                    token_env="GITLAB_TOKEN",
+                    enabled=True,
+                    api_url=runtime.gitlab_api_url,
+                )
+            if runtime.azdo_configured:
+                remotes["azdo"] = RemoteConfig(
+                    name="azdo",
+                    provider="azdo",
+                    org=runtime.azdo_org,
+                    host="dev.azure.com",
+                    token_env="AZURE_DEVOPS_PAT",
+                    enabled=True,
+                    api_url="https://dev.azure.com",
+                )
+            self._config = SmithConfig(remotes=remotes, defaults={})
+            self._runtime = runtime
+        else:
+            self._config = load_config()
+            self._runtime = parse_runtime_config(
+                azdo_org=None,
+                api_version=api_version,
+                timeout_seconds=timeout_seconds or self._config.defaults.get("timeout_seconds"),
+                max_output_chars=max_output_chars or self._config.defaults.get("max_output_chars"),
+                github_org=None,
+                github_api_url_default=GITHUB_DEFAULT_API_URL,
+                github_api_version_default=GITHUB_DEFAULT_API_VERSION,
+                gitlab_group=None,
+                gitlab_api_url_default=GITLAB_DEFAULT_API_URL,
+            )
 
-        if not runtime.azdo_configured and not runtime.github_configured and not runtime.gitlab_configured:
+        if not self._config.remotes:
             raise ValueError(_NO_PROVIDERS_CONFIGURED_MESSAGE)
 
         main_session = session or requests.Session()
         configure_http_session(
             main_session,
-            pool_connections=runtime.http_pool_connections,
-            pool_maxsize=runtime.http_pool_maxsize,
+            pool_connections=self._runtime.http_pool_connections,
+            pool_maxsize=self._runtime.http_pool_maxsize,
         )
 
-        self._runtime = runtime
         self._credential = credential
         self._main_session = main_session
-        self._azdo: AzdoProvider | None = None
-        self._github: GitHubProvider | None = None
-        self._gitlab: GitLabProvider | None = None
+        self._provider_cache: dict[str, BaseProvider] = {}
 
-        self.azdo_org = runtime.azdo_org
-        self.api_version = runtime.api_version
-        self.timeout_seconds = runtime.timeout_seconds
-        self.max_output_chars = runtime.max_output_chars
-        self.github_org = runtime.github_org
-        self.github_api_url = runtime.github_api_url
-        self.github_api_version = runtime.github_api_version
-        self.github_timeout_seconds = runtime.github_timeout_seconds
-        self.gitlab_group = runtime.gitlab_group
-        self.gitlab_api_url = runtime.gitlab_api_url
-        self.gitlab_timeout_seconds = runtime.gitlab_timeout_seconds
+        self.api_version = self._runtime.api_version
+        self.timeout_seconds = self._runtime.timeout_seconds
+        self.max_output_chars = self._runtime.max_output_chars
 
-    def _get_azdo(self) -> AzdoProvider:
-        if self._azdo is None:
-            if not self._runtime.azdo_configured:
-                raise ValueError(
-                    "Azure DevOps is not configured. "
-                    "Set AZURE_DEVOPS_ORG to enable this provider."
-                )
-            self._azdo = AzdoProvider(
+    def _get_provider_for_remote(self, remote: RemoteConfig) -> BaseProvider:
+        if remote.name in self._provider_cache:
+            return self._provider_cache[remote.name]
+
+        if remote.provider == "github":
+            provider: BaseProvider = GitHubProvider(
+                config=self._runtime,
+                session=self._main_session,
+                github_org=remote.org,
+                github_api_url=remote.api_url,
+                github_api_version=GITHUB_DEFAULT_API_VERSION,
+                token_env=remote.token_env,
+            )
+        elif remote.provider == "gitlab":
+            provider = GitLabProvider(
+                config=self._runtime,
+                session=self._main_session,
+                gitlab_group=remote.org,
+                gitlab_api_url=remote.api_url,
+                token_env=remote.token_env,
+            )
+        elif remote.provider == "azdo":
+            provider = AzdoProvider(
                 config=self._runtime,
                 credential=self._credential,
                 session=self._main_session,
+                azdo_org=remote.org,
+                token_env=remote.token_env,
             )
-        return self._azdo
+        else:
+            raise ValueError(f"Unsupported provider: {remote.provider}")
 
-    def _get_github(self) -> GitHubProvider:
-        if self._github is None:
-            if not self._runtime.github_configured:
-                raise ValueError(
-                    "GitHub is not configured. "
-                    "Set GITHUB_ORG to enable this provider."
-                )
-            self._github = GitHubProvider(
-                config=self._runtime,
-                session=self._main_session,
-            )
-        return self._github
-
-    def _get_gitlab(self) -> GitLabProvider:
-        if self._gitlab is None:
-            if not self._runtime.gitlab_configured:
-                raise ValueError(
-                    "GitLab is not configured. "
-                    "Set GITLAB_GROUP to enable this provider."
-                )
-            self._gitlab = GitLabProvider(
-                config=self._runtime,
-                session=self._main_session,
-            )
-        return self._gitlab
+        self._provider_cache[remote.name] = provider
+        return provider
 
     @staticmethod
     def _provider_warnings_and_partial(payload: Any) -> tuple[list[str], bool]:
@@ -153,33 +188,43 @@ class SmithClient:
             "error": {"code": code, "message": message},
         }
 
+    def _resolve_remotes(self, remote_or_provider: str) -> list[RemoteConfig]:
+        if remote_or_provider in self._config.remotes:
+            remote = self._config.remotes[remote_or_provider]
+            return [remote] if remote.enabled else []
+
+        if remote_or_provider in {"github", "gitlab", "azdo"}:
+            return [
+                r for r in self._config.remotes.values()
+                if r.provider == remote_or_provider and r.enabled
+            ]
+
+        if remote_or_provider == "all":
+            return [r for r in self._config.remotes.values() if r.enabled]
+
+        return []
+
     def _fanout(
         self,
         *,
-        provider: str,
-        operations: dict[str, Callable[[], Any]],
+        remote_or_provider: str,
+        operations: dict[str, Callable[[RemoteConfig], Any]],
     ) -> dict[str, Any]:
-        requested_provider = normalize_provider(provider)
-        providers = self._configured_providers() if requested_provider == "all" else resolve_providers(requested_provider)
-        if not providers:
-            raise ValueError(_NO_PROVIDERS_CONFIGURED_MESSAGE)
+        remotes = self._resolve_remotes(remote_or_provider)
+        if not remotes:
+            raise ValueError(f"No enabled remotes found for '{remote_or_provider}'")
+
+        remote_operations: dict[str, Callable[[], Any]] = {}
+        for remote in remotes:
+            remote_operations[remote.name] = lambda r=remote: operations[r.provider](r)
+
         return run_fanout(
-            providers=providers,
-            requested_provider=requested_provider,
-            operations=operations,
+            providers=[r.name for r in remotes],
+            requested_provider=remote_or_provider,
+            operations=remote_operations,
             provider_entry_success=self._provider_entry_success,
             provider_entry_error=self._provider_entry_error,
         )
-
-    def _configured_providers(self) -> list[str]:
-        providers: list[str] = []
-        if self._runtime.github_configured:
-            providers.append("github")
-        if self._runtime.gitlab_configured:
-            providers.append("gitlab")
-        if self._runtime.azdo_configured:
-            providers.append("azdo")
-        return providers
 
     @staticmethod
     def _github_grep_cache_root() -> str:
@@ -229,9 +274,7 @@ class SmithClient:
             "missing": missing,
         }
 
-    def _list_azdo_repositories(self, *, project: str | None) -> list[dict[str, Any]]:
-        azdo = self._get_azdo()
-
+    def _list_azdo_repositories(self, *, azdo: AzdoProvider, project: str | None) -> list[dict[str, Any]]:
         def _normalize_repo_rows(payload: Any) -> list[dict[str, Any]]:
             if isinstance(payload, dict):
                 return [payload]
@@ -255,11 +298,11 @@ class SmithClient:
     def execute_discover_projects(self, *, provider: str) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="orgs")
         return self._fanout(
-            provider=single_provider,
+            remote_or_remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().list_projects(),
-                "github": lambda: self._get_github().list_projects(),
-                "gitlab": lambda: self._get_gitlab().list_projects(),
+                "azdo": lambda r: self._get_provider_for_remote(r).list_projects(),
+                "github": lambda r: self._get_provider_for_remote(r).list_projects(),
+                "gitlab": lambda r: self._get_provider_for_remote(r).list_projects(),
             },
         )
 
@@ -271,11 +314,14 @@ class SmithClient:
     ) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="repos")
         return self._fanout(
-            provider=single_provider,
+            remote_or_remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._list_azdo_repositories(project=project),
-                "github": lambda: self._get_github().list_repositories(),
-                "gitlab": lambda: self._get_gitlab().list_repositories(),
+                "azdo": lambda r: self._list_azdo_repositories(
+                    azdo=self._get_provider_for_remote(r),
+                    project=project,
+                ),
+                "github": lambda r: self._get_provider_for_remote(r).list_repositories(),
+                "gitlab": lambda r: self._get_provider_for_remote(r).list_repositories(),
             },
         )
 
@@ -288,7 +334,7 @@ class SmithClient:
         provider: str,
         project: str | None,
     ) -> dict[str, Any]:
-        return self.execute_discover_repos(provider=provider, project=project)
+        return self.execute_discover_repos(remote_or_provider=provider, project=project)
 
     def execute_code_search(
         self,
@@ -301,23 +347,23 @@ class SmithClient:
         take: int,
     ) -> dict[str, Any]:
         return self._fanout(
-            provider=provider,
+            remote_or_remote_or_provider=provider,
             operations={
-                "azdo": lambda: self._get_azdo().search_code(
+                "azdo": lambda r: self._get_provider_for_remote(r).search_code(
                     query=query,
                     project=project,
                     repos=repos,
                     skip=skip,
                     take=take,
                 ),
-                "github": lambda: self._get_github().search_code(
+                "github": lambda r: self._get_provider_for_remote(r).search_code(
                     query=query,
                     project=project,
                     repos=repos,
                     skip=skip,
                     take=take,
                 ),
-                "gitlab": lambda: self._get_gitlab().search_code(
+                "gitlab": lambda r: self._get_provider_for_remote(r).search_code(
                     query=query,
                     project=project,
                     repos=repos,
@@ -346,9 +392,9 @@ class SmithClient:
     ) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="code.grep")
         return self._fanout(
-            provider=single_provider,
+            remote_or_remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().grep(
+                "azdo": lambda r: self._get_provider_for_remote(r).grep(
                     project=str(project),
                     repo=repo,
                     pattern=pattern,
@@ -362,7 +408,7 @@ class SmithClient:
                     to_line=to_line,
                     no_clone=no_clone,
                 ),
-                "github": lambda: self._get_github().grep(
+                "github": lambda r: self._get_provider_for_remote(r).grep(
                     repo=repo,
                     pattern=pattern,
                     path=path,
@@ -375,7 +421,7 @@ class SmithClient:
                     to_line=to_line,
                     no_clone=no_clone,
                 ),
-                "gitlab": lambda: self._get_gitlab().grep(
+                "gitlab": lambda r: self._get_provider_for_remote(r).grep(
                     repo=repo,
                     pattern=pattern,
                     path=path,
@@ -408,9 +454,9 @@ class SmithClient:
     ) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="prs.list")
         return self._fanout(
-            provider=single_provider,
+            remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().list_pull_requests(
+                "azdo": lambda r: self._get_provider_for_remote(r).list_pull_requests(
                     projects=projects,
                     repos=repos,
                     statuses=statuses,
@@ -422,7 +468,7 @@ class SmithClient:
                     exclude_drafts=exclude_drafts,
                     include_labels=include_labels,
                 ),
-                "github": lambda: self._get_github().list_pull_requests(
+                "github": lambda r: self._get_provider_for_remote(r).list_pull_requests(
                     repos=repos or projects,
                     statuses=statuses,
                     creators=creators,
@@ -433,7 +479,7 @@ class SmithClient:
                     exclude_drafts=exclude_drafts,
                     include_labels=include_labels,
                 ),
-                "gitlab": lambda: self._get_gitlab().list_pull_requests(
+                "gitlab": lambda r: self._get_provider_for_remote(r).list_pull_requests(
                     repos=repos or projects,
                     statuses=statuses,
                     creators=creators,
@@ -457,18 +503,18 @@ class SmithClient:
     ) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="prs.get")
         return self._fanout(
-            provider=single_provider,
+            remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().get_pull_request(
+                "azdo": lambda r: self._get_provider_for_remote(r).get_pull_request(
                     project=str(project),
                     repo=repo,
                     pull_request_id=pull_request_id,
                 ),
-                "github": lambda: self._get_github().get_pull_request(
+                "github": lambda r: self._get_provider_for_remote(r).get_pull_request(
                     repo=repo,
                     pull_request_id=pull_request_id,
                 ),
-                "gitlab": lambda: self._get_gitlab().get_pull_request(
+                "gitlab": lambda r: self._get_provider_for_remote(r).get_pull_request(
                     repo=repo,
                     pull_request_id=pull_request_id,
                 ),
@@ -485,18 +531,18 @@ class SmithClient:
     ) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="prs.threads")
         return self._fanout(
-            provider=single_provider,
+            remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().get_pull_request_threads(
+                "azdo": lambda r: self._get_provider_for_remote(r).get_pull_request_threads(
                     project=str(project),
                     repo=repo,
                     pull_request_id=pull_request_id,
                 ),
-                "github": lambda: self._get_github().get_pull_request_threads(
+                "github": lambda r: self._get_provider_for_remote(r).get_pull_request_threads(
                     repo=repo,
                     pull_request_id=pull_request_id,
                 ),
-                "gitlab": lambda: self._get_gitlab().get_pull_request_threads(
+                "gitlab": lambda r: self._get_provider_for_remote(r).get_pull_request_threads(
                     repo=repo,
                     pull_request_id=pull_request_id,
                 ),
@@ -514,11 +560,11 @@ class SmithClient:
         single_provider = normalize_single_provider(provider, command="pipelines.logs.list")
         effective_repo = repo or project
         return self._fanout(
-            provider=single_provider,
+            remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().get_build_log(project=str(project), build_id=build_id),
-                "github": lambda: self._get_github().get_build_log(repo=str(effective_repo), build_id=build_id),
-                "gitlab": lambda: self._get_gitlab().get_build_log(repo=str(effective_repo), build_id=build_id),
+                "azdo": lambda r: self._get_provider_for_remote(r).get_build_log(project=str(project), build_id=build_id),
+                "github": lambda r: self._get_provider_for_remote(r).get_build_log(repo=str(effective_repo), build_id=build_id),
+                "gitlab": lambda r: self._get_provider_for_remote(r).get_build_log(repo=str(effective_repo), build_id=build_id),
             },
         )
 
@@ -540,9 +586,9 @@ class SmithClient:
         single_provider = normalize_single_provider(provider, command="pipelines.logs.grep")
         effective_repo = repo or project
         return self._fanout(
-            provider=single_provider,
+            remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().grep_build_log(
+                "azdo": lambda r: self._get_provider_for_remote(r).grep_build_log(
                     project=str(project),
                     build_id=build_id,
                     log_id=log_id,
@@ -553,7 +599,7 @@ class SmithClient:
                     from_line=from_line,
                     to_line=to_line,
                 ),
-                "github": lambda: self._get_github().grep_build_log(
+                "github": lambda r: self._get_provider_for_remote(r).grep_build_log(
                     repo=str(effective_repo),
                     build_id=build_id,
                     log_id=log_id,
@@ -564,7 +610,7 @@ class SmithClient:
                     from_line=from_line,
                     to_line=to_line,
                 ),
-                "gitlab": lambda: self._get_gitlab().grep_build_log(
+                "gitlab": lambda r: self._get_provider_for_remote(r).grep_build_log(
                     repo=str(effective_repo),
                     build_id=build_id,
                     log_id=log_id,
@@ -587,7 +633,7 @@ class SmithClient:
         build_id: int,
     ) -> dict[str, Any]:
         return self.execute_ci_logs(
-            provider=provider,
+            remote_or_provider=provider,
             project=project,
             repo=repo,
             build_id=build_id,
@@ -609,7 +655,7 @@ class SmithClient:
         to_line: int | None,
     ) -> dict[str, Any]:
         return self.execute_ci_grep(
-            provider=provider,
+            remote_or_provider=provider,
             project=project,
             repo=repo,
             build_id=build_id,
@@ -633,11 +679,11 @@ class SmithClient:
         single_provider = normalize_single_provider(provider, command="stories.get")
         effective_repo = repo or project
         return self._fanout(
-            provider=single_provider,
+            remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().get_ticket_by_id(project=str(project), work_item_id=work_item_id),
-                "github": lambda: self._get_github().get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
-                "gitlab": lambda: self._get_gitlab().get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
+                "azdo": lambda r: self._get_provider_for_remote(r).get_ticket_by_id(project=str(project), work_item_id=work_item_id),
+                "github": lambda r: self._get_provider_for_remote(r).get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
+                "gitlab": lambda r: self._get_provider_for_remote(r).get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
             },
         )
 
@@ -657,9 +703,9 @@ class SmithClient:
     ) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="stories.search")
         return self._fanout(
-            provider=single_provider,
+            remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().search_work_items(
+                "azdo": lambda r: self._get_provider_for_remote(r).search_work_items(
                     query=query,
                     project=project,
                     area=area,
@@ -669,7 +715,7 @@ class SmithClient:
                     skip=skip,
                     take=take,
                 ),
-                "github": lambda: self._get_github().search_work_items(
+                "github": lambda r: self._get_provider_for_remote(r).search_work_items(
                     query=query,
                     project=project,
                     repo=repo,
@@ -679,7 +725,7 @@ class SmithClient:
                     take=take,
                     include_closed=True,
                 ),
-                "gitlab": lambda: self._get_gitlab().search_work_items(
+                "gitlab": lambda r: self._get_provider_for_remote(r).search_work_items(
                     query=query,
                     project=project,
                     repo=repo,
@@ -704,22 +750,22 @@ class SmithClient:
     ) -> dict[str, Any]:
         single_provider = normalize_single_provider(provider, command="stories.mine")
         return self._fanout(
-            provider=single_provider,
+            remote_or_provider=single_provider,
             operations={
-                "azdo": lambda: self._get_azdo().get_my_work_items(
+                "azdo": lambda r: self._get_provider_for_remote(r).get_my_work_items(
                     project=project,
                     include_closed=include_closed,
                     skip=skip,
                     take=take,
                 ),
-                "github": lambda: self._get_github().get_my_work_items(
+                "github": lambda r: self._get_provider_for_remote(r).get_my_work_items(
                     project=project,
                     repo=repo,
                     include_closed=include_closed,
                     skip=skip,
                     take=take,
                 ),
-                "gitlab": lambda: self._get_gitlab().get_my_work_items(
+                "gitlab": lambda r: self._get_provider_for_remote(r).get_my_work_items(
                     project=project,
                     repo=repo,
                     include_closed=include_closed,
@@ -738,7 +784,7 @@ class SmithClient:
         work_item_id: int,
     ) -> dict[str, Any]:
         return self.execute_work_get(
-            provider=provider,
+            remote_or_provider=provider,
             project=project,
             repo=repo,
             work_item_id=work_item_id,
@@ -759,7 +805,7 @@ class SmithClient:
         take: int,
     ) -> dict[str, Any]:
         return self.execute_work_search(
-            provider=provider,
+            remote_or_provider=provider,
             query=query,
             project=project,
             repo=repo,
@@ -782,7 +828,7 @@ class SmithClient:
         take: int,
     ) -> dict[str, Any]:
         return self.execute_work_mine(
-            provider=provider,
+            remote_or_provider=provider,
             project=project,
             repo=repo,
             include_closed=include_closed,

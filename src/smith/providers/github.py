@@ -30,11 +30,20 @@ class GitHubProvider(
     GitHubIssueMixin,
     BaseProvider,
 ):
-    def __init__(self, *, config: RuntimeConfig, session: requests.Session) -> None:
-        super().__init__(config=config, session=session)
-        self.github_org = config.github_org
-        self.github_api_url = config.github_api_url
-        self.github_api_version = config.github_api_version
+    def __init__(
+        self,
+        *,
+        config: RuntimeConfig,
+        session: requests.Session,
+        github_org: str | None = None,
+        github_api_url: str | None = None,
+        github_api_version: str | None = None,
+        token_env: str | None = None,
+    ) -> None:
+        super().__init__(config=config, session=session, token_env=token_env)
+        self.github_org = github_org or config.github_org
+        self.github_api_url = github_api_url or config.github_api_url
+        self.github_api_version = github_api_version or config.github_api_version
         self.max_output_chars = config.max_output_chars
         self._github_token: str | None = None
         self._default_branch_cache: dict[str, str] = {}
@@ -47,7 +56,8 @@ class GitHubProvider(
         if self._github_token and not force_refresh:
             return self._github_token
 
-        env_token = os.getenv("GITHUB_TOKEN", "").strip()
+        token_env_var = self._token_env or "GITHUB_TOKEN"
+        env_token = os.getenv(token_env_var, "").strip()
         if env_token:
             self._github_token = env_token
             return self._github_token

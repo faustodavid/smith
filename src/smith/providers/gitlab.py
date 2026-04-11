@@ -25,10 +25,18 @@ class GitLabProvider(
     GitLabIssueMixin,
     BaseProvider,
 ):
-    def __init__(self, *, config: RuntimeConfig, session: requests.Session) -> None:
-        super().__init__(config=config, session=session)
-        self.gitlab_group = config.gitlab_group
-        self.gitlab_api_url = config.gitlab_api_url
+    def __init__(
+        self,
+        *,
+        config: RuntimeConfig,
+        session: requests.Session,
+        gitlab_group: str | None = None,
+        gitlab_api_url: str | None = None,
+        token_env: str | None = None,
+    ) -> None:
+        super().__init__(config=config, session=session, token_env=token_env)
+        self.gitlab_group = gitlab_group or config.gitlab_group
+        self.gitlab_api_url = gitlab_api_url or config.gitlab_api_url
         self.max_output_chars = config.max_output_chars
         self._gitlab_token: str | None = None
         self._default_branch_cache: dict[str, str] = {}
@@ -48,7 +56,8 @@ class GitLabProvider(
         if self._gitlab_token and not force_refresh:
             return self._gitlab_token
 
-        env_token = os.getenv("GITLAB_TOKEN", "").strip()
+        token_env_var = self._token_env or "GITLAB_TOKEN"
+        env_token = os.getenv(token_env_var, "").strip()
         if env_token:
             self._gitlab_token = env_token
             return self._gitlab_token

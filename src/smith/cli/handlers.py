@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 from smith.client import SmithClient
+from smith.config import SmithConfig, _default_config_path, load_config, save_config
 from smith.formatting import dumps_json, make_envelope, render_text
 
 EXIT_OK = 0
@@ -199,10 +200,179 @@ def _emit_error(
 
 
 def _client_from_args(args: argparse.Namespace) -> SmithClient:
-    return SmithClient(
-        azdo_org=getattr(args, "azdo_org", None),
-        github_org=getattr(args, "github_org", None),
-        gitlab_group=getattr(args, "gitlab_group", None),
+    azdo_org = getattr(args, "azdo_org", None)
+    github_org = getattr(args, "github_org", None)
+    gitlab_group = getattr(args, "gitlab_group", None)
+
+    if azdo_org or github_org or gitlab_group:
+        return SmithClient(
+            azdo_org=azdo_org,
+            github_org=github_org,
+            gitlab_group=gitlab_group,
+        )
+
+    config = load_config()
+    return SmithClient(smith_config=config)
+
+
+def handle_config_list(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    config = load_config()
+    remotes_list = [
+        {
+            "name": remote.name,
+            "provider": remote.provider,
+            "org": remote.org,
+            "host": remote.host,
+            "enabled": remote.enabled,
+        }
+        for remote in config.remotes.values()
+    ]
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data={"remotes": remotes_list},
+        partial=False,
+    )
+
+
+def handle_config_show(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    config = load_config()
+    remote_name = args.remote_name
+    remote = config.remotes.get(remote_name)
+    if not remote:
+        return _emit_error(
+            args=args,
+            command=args.command_id,
+            code="not_found",
+            message=f"Remote '{remote_name}' not found",
+            exit_code=EXIT_INVALID_ARGS,
+        )
+    data = {
+        "name": remote.name,
+        "provider": remote.provider,
+        "org": remote.org,
+        "host": remote.host,
+        "token_env": remote.token_env,
+        "enabled": remote.enabled,
+        "api_url": remote.api_url,
+    }
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=data,
+        partial=False,
+    )
+
+
+def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    path = _default_config_path()
+    if path.exists():
+        return _emit_error(
+            args=args,
+            command=args.command_id,
+            code="already_exists",
+            message=f"Config file already exists at {path}",
+            exit_code=EXIT_INVALID_ARGS,
+        )
+
+    env_config = load_config()
+    save_config(env_config, config_path=path)
+
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data={"path": str(path), "remotes_count": len(env_config.remotes)},
+        partial=False,
+    )
+
+
+def handle_config_path(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    path = _default_config_path()
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data={"path": str(path), "exists": path.exists()},
+        partial=False,
+    )
+
+
+def handle_config_enable(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    config = load_config()
+    remote_name = args.remote_name
+    remote = config.remotes.get(remote_name)
+    if not remote:
+        return _emit_error(
+            args=args,
+            command=args.command_id,
+            code="not_found",
+            message=f"Remote '{remote_name}' not found",
+            exit_code=EXIT_INVALID_ARGS,
+        )
+
+    if remote.enabled:
+        return _emit_success(
+            args=args,
+            command=args.command_id,
+            data={"message": f"Remote '{remote_name}' is already enabled"},
+            partial=False,
+        )
+
+    from dataclasses import replace
+
+    updated_remote = replace(remote, enabled=True)
+    updated_remotes = dict(config.remotes)
+    updated_remotes[remote_name] = updated_remote
+    updated_config = SmithConfig(remotes=updated_remotes, defaults=config.defaults)
+    save_config(updated_config)
+
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data={"message": f"Remote '{remote_name}' enabled"},
+        partial=False,
+    )
+
+
+def handle_config_disable(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    config = load_config()
+    remote_name = args.remote_name
+    remote = config.remotes.get(remote_name)
+    if not remote:
+        return _emit_error(
+            args=args,
+            command=args.command_id,
+            code="not_found",
+            message=f"Remote '{remote_name}' not found",
+            exit_code=EXIT_INVALID_ARGS,
+        )
+
+    if not remote.enabled:
+        return _emit_success(
+            args=args,
+            command=args.command_id,
+            data={"message": f"Remote '{remote_name}' is already disabled"},
+            partial=False,
+        )
+
+    from dataclasses import replace
+
+    updated_remote = replace(remote, enabled=False)
+    updated_remotes = dict(config.remotes)
+    updated_remotes[remote_name] = updated_remote
+    updated_config = SmithConfig(remotes=updated_remotes, defaults=config.defaults)
+    save_config(updated_config)
+
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data={"message": f"Remote '{remote_name}' disabled"},
+        partial=False,
     )
 
 

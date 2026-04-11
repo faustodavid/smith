@@ -39,9 +39,10 @@ def normalize_single_provider(provider: str | None, *, command: str) -> str:
 
 
 class BaseProvider(ABC):
-    def __init__(self, *, config: RuntimeConfig, session: requests.Session) -> None:
+    def __init__(self, *, config: RuntimeConfig, session: requests.Session, token_env: str | None = None) -> None:
         self._config = config
         self._session = session
+        self._token_env = token_env
         self._http_thread_local = threading.local()
 
     @abstractmethod

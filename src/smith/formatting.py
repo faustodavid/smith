@@ -358,10 +358,10 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
     queried = summary.get("queried") if isinstance(summary, dict) else []
     ordered = queried if isinstance(queried, list) and queried else list(providers.keys())
 
-    # Flatten single-provider results for cleaner developer UX.
+    # Flatten single-remote results for cleaner developer UX.
     if len(ordered) == 1:
-        provider = ordered[0]
-        entry = providers.get(provider, {})
+        remote_name = ordered[0]
+        entry = providers.get(remote_name, {})
         if not isinstance(entry, dict):
             return ""
 
@@ -386,37 +386,37 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
 
     output_lines: list[str] = []
 
-    for provider in ordered:
-        entry = providers.get(provider, {})
+    for remote_name in ordered:
+        entry = providers.get(remote_name, {})
         if not isinstance(entry, dict):
             continue
 
         if not bool(entry.get("ok", False)):
-            output_lines.append(f"[{provider}]")
+            output_lines.append(f"[{remote_name}]")
             error = entry.get("error") or {}
             message = error.get("message") if isinstance(error, dict) else error
             output_lines.append(f"error: {message}")
             output_lines.append("")
             continue
 
-        provider_data = entry.get("data")
+        remote_data = entry.get("data")
         if command == "code.search":
             matches_count = 0
             result_lines: list[Any] = []
-            if isinstance(provider_data, dict):
-                raw_matches = provider_data.get("matchesCount", 0)
+            if isinstance(remote_data, dict):
+                raw_matches = remote_data.get("matchesCount", 0)
                 try:
                     matches_count = int(raw_matches)
                 except (TypeError, ValueError):
                     matches_count = 0
-                raw_results = provider_data.get("results", [])
+                raw_results = remote_data.get("results", [])
                 if isinstance(raw_results, list):
                     result_lines = raw_results
-            output_lines.append(f"[{provider}] {_code_search_summary_line(matches_count, len(result_lines))}")
+            output_lines.append(f"[{remote_name}] {_code_search_summary_line(matches_count, len(result_lines))}")
             output_lines.extend(str(entry_line) for entry_line in result_lines)
         else:
-            output_lines.append(f"[{provider}]")
-            rendered = _render_single(command, provider_data)
+            output_lines.append(f"[{remote_name}]")
+            rendered = _render_single(command, remote_data)
             if rendered.strip():
                 output_lines.append(rendered)
 
