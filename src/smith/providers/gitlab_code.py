@@ -109,6 +109,74 @@ class GitLabCodeMixin:
 
         return self._full_project_path(repo) if repo else self._require_gitlab_group()
 
+    @staticmethod
+    def _pagination_header_int(
+        headers: Any,
+        name: str,
+        *,
+        allow_zero: bool = False,
+    ) -> int | None:
+        if headers is None:
+            return None
+
+        raw_value = ""
+        getter = getattr(headers, "get", None)
+        if callable(getter):
+            raw_value = str(getter(name, "") or "").strip()
+        if not raw_value:
+            return None
+
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            return None
+
+        if value > 0 or (allow_zero and value == 0):
+            return value
+        return None
+
+    def _search_code_page(
+        self: Any,
+        *,
+        query: str,
+        repo: str | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None, int | None]:
+        group = self._require_gitlab_group()
+        if repo:
+            path = f"/projects/{self._project_id(repo)}/search"
+        else:
+            path = f"/groups/{quote(group, safe='')}/search"
+
+        response = self._request_response(
+            "GET",
+            path,
+            params={"scope": "blobs", "search": query, "per_page": per_page, "page": page},
+        )
+        total_count = self._pagination_header_int(response.headers, "X-Total", allow_zero=True)
+        next_page = self._pagination_header_int(response.headers, "X-Next-Page")
+
+        if response.status_code == 204:
+            return [], total_count, next_page
+
+        body = response.text or ""
+        if not body.strip():
+            return [], total_count, next_page
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise SmithApiError(
+                f"Expected JSON response from {self._build_url(path)} but received invalid JSON"
+            ) from exc
+
+        if not isinstance(data, list):
+            return [], total_count, next_page
+
+        page_items = [{**entry, "_repo_hint": repo} for entry in data if isinstance(entry, dict)]
+        return page_items, total_count, next_page
+
     def search_code(
         self: Any,
         *,
@@ -120,43 +188,76 @@ class GitLabCodeMixin:
     ) -> dict[str, Any]:
         del project
 
-        group = self._require_gitlab_group()
         effective_repos = [item for item in (repos or []) if item]
         search_targets: list[str | None] = list(effective_repos) if effective_repos else [None]
-        desired = max(1, skip + take)
-        all_items: list[dict[str, Any]] = []
+        start = max(0, skip)
+        window_size = max(1, take)
+        stop = start + window_size
+        per_page = 100
+        total_matches = 0
+        page_items_for_output: list[dict[str, Any]] = []
 
         if not effective_repos:
             self.list_repositories()
 
         for target_repo in search_targets:
-            page = 1
-            while len(all_items) < desired:
-                remaining = max(1, desired - len(all_items))
-                per_page = min(100, remaining)
-                if target_repo:
-                    path = f"/projects/{self._project_id(target_repo)}/search"
-                else:
-                    path = f"/groups/{quote(group, safe='')}/search"
-                data = self._request(
-                    "GET",
-                    path,
-                    params={"scope": "blobs", "search": query, "per_page": per_page, "page": page},
-                    expect_json=True,
-                )
-                if not isinstance(data, list):
-                    break
-                page_items = [{**entry, "_repo_hint": target_repo} for entry in data if isinstance(entry, dict)]
-                if not page_items:
-                    break
-                all_items.extend(page_items)
-                if len(page_items) < per_page:
-                    break
-                page += 1
+            current_page = 1
+            first_page_items, target_total_header, next_page = self._search_code_page(
+                query=query,
+                repo=target_repo,
+                page=current_page,
+                per_page=per_page,
+            )
 
-        sliced = all_items[max(0, skip) : max(0, skip) + max(1, take)]
+            if target_total_header is not None:
+                target_total = max(target_total_header, len(first_page_items))
+                local_start = min(max(start - total_matches, 0), target_total)
+                local_stop = min(max(stop - total_matches, 0), target_total)
+
+                target_items = list(first_page_items)
+                while len(target_items) < local_stop and len(target_items) < target_total:
+                    next_page_num = next_page if next_page is not None else current_page + 1
+                    next_items, _ignored_total, next_page = self._search_code_page(
+                        query=query,
+                        repo=target_repo,
+                        page=next_page_num,
+                        per_page=per_page,
+                    )
+                    current_page = next_page_num
+                    if not next_items:
+                        break
+                    target_items.extend(next_items)
+
+                if local_start < local_stop:
+                    page_items_for_output.extend(target_items[local_start:local_stop])
+                total_matches += target_total
+                continue
+
+            target_seen = 0
+            current_items = list(first_page_items)
+            while True:
+                for item in current_items:
+                    global_index = total_matches + target_seen
+                    if start <= global_index < stop:
+                        page_items_for_output.append(item)
+                    target_seen += 1
+
+                next_page_num = next_page if next_page is not None else current_page + 1
+                next_items, _ignored_total, next_page = self._search_code_page(
+                    query=query,
+                    repo=target_repo,
+                    page=next_page_num,
+                    per_page=per_page,
+                )
+                current_page = next_page_num
+                if not next_items:
+                    break
+                current_items = next_items
+
+            total_matches += target_seen
+
         results: list[str] = []
-        for item in sliced:
+        for item in page_items_for_output:
             project_path = self._search_result_project_path(
                 item,
                 repo=str(item.get("_repo_hint") or "") or None,
@@ -165,7 +266,7 @@ class GitLabCodeMixin:
             results.append(f"{project_path}:{path}")
 
         return {
-            "matchesCount": max(len(all_items), max(0, skip) + len(results)),
+            "matchesCount": total_matches,
             "results": results,
         }
 
