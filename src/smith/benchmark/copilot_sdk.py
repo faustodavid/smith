@@ -9,7 +9,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.github_mcp import DEFAULT_GITHUB_MCP_URL, resolve_github_mcp_token
 from smith.benchmark.smith_cli import REPO_ROOT, build_smith_pythonpath
 
@@ -79,7 +78,6 @@ def build_smith_copilot_payload(
 ) -> dict[str, Any]:
     run_env = env or os.environ
     mcp_env: dict[str, str] = {
-        "GITHUB_ORG": BENCHMARK_GITHUB_ORG,
         "HOME": _env_placeholder("HOME"),
         "PATH": _env_placeholder("PATH"),
         "PYTHONPATH": build_smith_pythonpath(

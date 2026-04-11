@@ -7,6 +7,7 @@ from tests.support import make_runtime_config
 
 from smith import client as client_module
 from smith.client import SmithClient
+from smith.config import RemoteConfig, SmithConfig
 
 
 class _FakeProvider:
@@ -46,6 +47,41 @@ class _FakeGitHubProvider(_FakeProvider):
 class _FakeGitLabProvider(_FakeProvider):
     instances: list["_FakeGitLabProvider"] = []
     provider_name = "gitlab"
+
+
+def _make_smith_config(runtime: Any) -> SmithConfig:
+    remotes: dict[str, RemoteConfig] = {}
+    if runtime.github_org:
+        remotes["github"] = RemoteConfig(
+            name="github",
+            provider="github",
+            org=runtime.github_org,
+            host="github.com",
+            token_env="GITHUB_TOKEN",
+            enabled=True,
+            api_url=runtime.github_api_url,
+        )
+    if runtime.gitlab_group:
+        remotes["gitlab"] = RemoteConfig(
+            name="gitlab",
+            provider="gitlab",
+            org=runtime.gitlab_group,
+            host="gitlab.com",
+            token_env="GITLAB_TOKEN",
+            enabled=True,
+            api_url=runtime.gitlab_api_url,
+        )
+    if runtime.azdo_org:
+        remotes["azdo"] = RemoteConfig(
+            name="azdo",
+            provider="azdo",
+            org=runtime.azdo_org,
+            host="dev.azure.com",
+            token_env="AZURE_DEVOPS_PAT",
+            enabled=True,
+            api_url="https://dev.azure.com",
+        )
+    return SmithConfig(remotes=remotes, defaults={})
 
 
 def _install_client_fakes(monkeypatch: Any, runtime: Any) -> dict[str, Any]:
@@ -92,8 +128,8 @@ def test_client_requires_at_least_one_configured_provider(monkeypatch: Any) -> N
     runtime = make_runtime_config(azdo_org="", github_org="", gitlab_group="")
     monkeypatch.setattr(client_module, "parse_runtime_config", lambda **kwargs: runtime)
 
-    with pytest.raises(ValueError, match="No providers configured"):
-        SmithClient(session=object())
+    with pytest.raises(ValueError, match="No remotes configured"):
+        SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
 
 def test_client_initializes_runtime_and_configures_session(monkeypatch: Any) -> None:
@@ -101,30 +137,27 @@ def test_client_initializes_runtime_and_configures_session(monkeypatch: Any) -> 
     session = object()
     calls = _install_client_fakes(monkeypatch, runtime)
 
-    client = SmithClient(session=session)
+    client = SmithClient(session=session, smith_config=_make_smith_config(runtime))
 
     assert client._main_session is session
-    assert client.azdo_org == "acme"
     assert client.timeout_seconds == 45
-    assert client.github_timeout_seconds == 50
-    assert client.gitlab_timeout_seconds == 55
+    assert client.max_output_chars == runtime.max_output_chars
     assert calls["session"] == {"pool_connections": 16, "pool_maxsize": 32}
 
 
 def test_client_lazily_creates_and_caches_provider_instances(monkeypatch: Any) -> None:
     runtime = make_runtime_config(github_org="", gitlab_group="")
     _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
+    azdo_remote = client._config.remotes["azdo"]
 
-    azdo_first = client._get_azdo()
-    azdo_second = client._get_azdo()
+    azdo_first = client._get_provider_for_remote(azdo_remote)
+    azdo_second = client._get_provider_for_remote(azdo_remote)
 
     assert azdo_first is azdo_second
     assert len(_FakeAzdoProvider.instances) == 1
-    with pytest.raises(ValueError, match="GitHub is not configured"):
-        client._get_github()
-    with pytest.raises(ValueError, match="GitLab is not configured"):
-        client._get_gitlab()
+    assert "github" not in client._config.remotes
+    assert "gitlab" not in client._config.remotes
 
 
 def test_provider_entry_helpers_extract_warning_and_partial_state() -> None:
@@ -143,14 +176,14 @@ def test_provider_entry_helpers_extract_warning_and_partial_state() -> None:
 def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     calls = _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
     result = client._fanout(
-        provider="all",
+        remote_or_provider="all",
         operations={
-            "azdo": lambda: {"provider": "azdo"},
-            "github": lambda: {"provider": "github"},
-            "gitlab": lambda: {"provider": "gitlab"},
+            "azdo": lambda remote: {"provider": remote.provider},
+            "github": lambda remote: {"provider": remote.provider},
+            "gitlab": lambda remote: {"provider": remote.provider},
         },
     )
 
@@ -182,12 +215,12 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
 @pytest.mark.parametrize(
     ("method_name", "kwargs", "expected_provider", "expected_method", "expected_kwargs"),
     [
-        ("execute_discover_projects", {"provider": "azdo"}, "azdo", "list_projects", {}),
-        ("execute_discover_projects", {"provider": "gitlab"}, "gitlab", "list_projects", {}),
+        ("execute_discover_projects", {"remote_or_provider": "azdo"}, "azdo", "list_projects", {}),
+        ("execute_discover_projects", {"remote_or_provider": "gitlab"}, "gitlab", "list_projects", {}),
         (
             "execute_code_grep",
             {
-                "provider": "github",
+                "remote_or_provider": "github",
                 "project": "proj-a",
                 "repo": "repo-a",
                 "pattern": "error",
@@ -219,42 +252,42 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         ),
         (
             "execute_pr_get",
-            {"provider": "github", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
+            {"remote_or_provider": "github", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
             "github",
             "get_pull_request",
             {"repo": "repo-a", "pull_request_id": 17},
         ),
         (
             "execute_pr_get",
-            {"provider": "gitlab", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
+            {"remote_or_provider": "gitlab", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
             "gitlab",
             "get_pull_request",
             {"repo": "repo-a", "pull_request_id": 17},
         ),
         (
             "execute_pr_threads",
-            {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
+            {"remote_or_provider": "azdo", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
             "azdo",
             "get_pull_request_threads",
             {"project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
         ),
         (
             "execute_pr_threads",
-            {"provider": "gitlab", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
+            {"remote_or_provider": "gitlab", "project": "proj-a", "repo": "repo-a", "pull_request_id": 17},
             "gitlab",
             "get_pull_request_threads",
             {"repo": "repo-a", "pull_request_id": 17},
         ),
         (
             "execute_ci_logs",
-            {"provider": "github", "project": "proj-a", "repo": None, "build_id": 19},
+            {"remote_or_provider": "github", "project": "proj-a", "repo": None, "build_id": 19},
             "github",
             "get_build_log",
             {"repo": "proj-a", "build_id": 19},
         ),
         (
             "execute_ci_logs",
-            {"provider": "gitlab", "project": "proj-a", "repo": None, "build_id": 19},
+            {"remote_or_provider": "gitlab", "project": "proj-a", "repo": None, "build_id": 19},
             "gitlab",
             "get_build_log",
             {"repo": "proj-a", "build_id": 19},
@@ -262,7 +295,7 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         (
             "execute_ci_grep",
             {
-                "provider": "github",
+                "remote_or_provider": "github",
                 "project": "proj-a",
                 "repo": None,
                 "build_id": 19,
@@ -291,7 +324,7 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         (
             "execute_ci_grep",
             {
-                "provider": "gitlab",
+                "remote_or_provider": "gitlab",
                 "project": "proj-a",
                 "repo": None,
                 "build_id": 19,
@@ -319,14 +352,14 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         ),
         (
             "execute_work_get",
-            {"provider": "github", "project": "proj-a", "repo": None, "work_item_id": 21},
+            {"remote_or_provider": "github", "project": "proj-a", "repo": None, "work_item_id": 21},
             "github",
             "get_ticket_by_id",
             {"repo": "proj-a", "work_item_id": 21},
         ),
         (
             "execute_work_get",
-            {"provider": "gitlab", "project": "proj-a", "repo": None, "work_item_id": 21},
+            {"remote_or_provider": "gitlab", "project": "proj-a", "repo": None, "work_item_id": 21},
             "gitlab",
             "get_ticket_by_id",
             {"repo": "proj-a", "work_item_id": 21},
@@ -334,7 +367,7 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         (
             "execute_work_search",
             {
-                "provider": "github",
+                "remote_or_provider": "github",
                 "query": "incident",
                 "project": "proj-a",
                 "repo": "repo-a",
@@ -361,7 +394,7 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         (
             "execute_work_search",
             {
-                "provider": "gitlab",
+                "remote_or_provider": "gitlab",
                 "query": "incident",
                 "project": "proj-a",
                 "repo": "repo-a",
@@ -387,14 +420,14 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         ),
         (
             "execute_work_mine",
-            {"provider": "azdo", "project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
+            {"remote_or_provider": "azdo", "project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
             "azdo",
             "get_my_work_items",
             {"project": "proj-a", "include_closed": False, "skip": 1, "take": 5},
         ),
         (
             "execute_work_mine",
-            {"provider": "gitlab", "project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
+            {"remote_or_provider": "gitlab", "project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
             "gitlab",
             "get_my_work_items",
             {"project": "proj-a", "repo": "repo-a", "include_closed": False, "skip": 1, "take": 5},
@@ -411,7 +444,7 @@ def test_execute_methods_dispatch_to_provider_operations(
 ) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
     result = getattr(client, method_name)(**kwargs)
 
@@ -423,9 +456,9 @@ def test_execute_methods_dispatch_to_provider_operations(
 def test_execute_discover_repos_for_azdo_project_calls_list_repositories(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
-    result = client.execute_discover_repos(provider="azdo", project="proj-a")
+    result = client.execute_discover_repos(remote_or_provider="azdo", project="proj-a")
 
     provider_entry = result["providers"]["azdo"]["data"]
     assert provider_entry == [
@@ -441,13 +474,13 @@ def test_execute_discover_repos_for_azdo_project_calls_list_repositories(monkeyp
 def test_execute_discover_repos_for_azdo_without_project_fans_out_projects(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
-    azdo = client._get_azdo()
+    azdo = client._get_provider_for_remote(client._config.remotes["azdo"])
     azdo.list_projects = lambda: [{"name": "proj-a"}, {"name": "proj-b"}]  # type: ignore[method-assign]
     azdo.list_repositories = lambda project: [{"name": f"{project}-repo"}]  # type: ignore[method-assign]
 
-    result = client.execute_discover_repos(provider="azdo", project=None)
+    result = client.execute_discover_repos(remote_or_provider="azdo", project=None)
 
     assert result["providers"]["azdo"]["data"] == [
         {"name": "proj-a-repo", "projectName": "proj-a"},
@@ -458,10 +491,10 @@ def test_execute_discover_repos_for_azdo_without_project_fans_out_projects(monke
 def test_execute_code_search_runs_all_provider_operations(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
     result = client.execute_code_search(
-        provider="all",
+        remote_or_provider="all",
         query="grafana",
         project="proj-a",
         repos=["repo-a"],
@@ -478,10 +511,10 @@ def test_execute_code_search_runs_all_provider_operations(monkeypatch: Any) -> N
 def test_execute_code_search_all_skips_unconfigured_providers(monkeypatch: Any) -> None:
     runtime = make_runtime_config(azdo_org="", github_org="", gitlab_group="platform")
     calls = _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
     result = client.execute_code_search(
-        provider="all",
+        remote_or_provider="all",
         query="grafana",
         project=None,
         repos=None,
@@ -501,10 +534,10 @@ def test_execute_code_search_all_skips_unconfigured_providers(monkeypatch: Any) 
 def test_execute_pr_list_uses_projects_as_repo_fallback(monkeypatch: Any, provider: str) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
     result = client.execute_pr_list(
-        provider=provider,
+        remote_or_provider=provider,
         projects=["repo-from-project"],
         repos=None,
         statuses=["active"],
@@ -522,11 +555,11 @@ def test_execute_pr_list_uses_projects_as_repo_fallback(monkeypatch: Any, provid
 def test_legacy_wrapper_methods_delegate_to_canonical_operations(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
-    client = SmithClient(session=object())
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
-    discover_projects = client.execute_projects_list(provider="gitlab")
-    ci_logs = client.execute_build_logs(provider="gitlab", project=None, repo="repo-a", build_id=1)
-    work_get = client.execute_board_ticket(provider="gitlab", project=None, repo="repo-a", work_item_id=2)
+    discover_projects = client.execute_projects_list(remote_or_provider="gitlab")
+    ci_logs = client.execute_build_logs(remote_or_provider="gitlab", project=None, repo="repo-a", build_id=1)
+    work_get = client.execute_board_ticket(remote_or_provider="gitlab", project=None, repo="repo-a", work_item_id=2)
 
     assert discover_projects["providers"]["gitlab"]["data"]["method"] == "list_projects"
     assert ci_logs["providers"]["gitlab"]["data"]["method"] == "get_build_log"

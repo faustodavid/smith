@@ -108,7 +108,7 @@ def test_github_requires_org_and_maps_project_repository_views(monkeypatch: Any)
         }
     ]
 
-    with pytest.raises(ValueError, match="Missing GITHUB_ORG"):
+    with pytest.raises(ValueError, match="GitHub remote is missing an org in the Smith config"):
         _provider(make_runtime_config(github_org=""))._require_github_org()
 
 

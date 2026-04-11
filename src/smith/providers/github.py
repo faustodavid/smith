@@ -246,7 +246,7 @@ class GitHubProvider(
     def _require_github_org(self) -> str:
         org = (self.github_org or "").strip()
         if not org:
-            raise ValueError("Missing GITHUB_ORG. Example: export GITHUB_ORG=<org>")
+            raise ValueError("GitHub remote is missing an org in the Smith config.")
         return org
 
     def _repo_prefix(self, repo: str) -> str:

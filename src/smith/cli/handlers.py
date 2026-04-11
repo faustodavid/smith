@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from typing import Any
 
@@ -21,27 +20,38 @@ def _csv_list(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _selected_remote(args: argparse.Namespace) -> str:
+    remote = getattr(args, "remote", None)
+    if remote is not None and str(remote).strip():
+        return str(remote).strip()
+    return str(getattr(args, "provider", "") or "").strip()
+
+
+def _selected_provider(args: argparse.Namespace) -> str:
+    provider = str(getattr(args, "provider", "") or "").strip().lower()
+    if provider:
+        return provider
+
+    remote_name = _selected_remote(args)
+    if not remote_name or remote_name == "all":
+        return ""
+
+    try:
+        config = load_config()
+    except Exception:
+        return ""
+
+    remote = config.remotes.get(remote_name)
+    if not remote:
+        return ""
+    return remote.provider
+
+
 def _selected_providers(provider: str) -> list[str]:
     normalized = (provider or "azdo").strip().lower()
     if normalized == "all":
         return ["github", "gitlab", "azdo"]
     return [normalized]
-
-
-def _requires_github_org(provider: str) -> bool:
-    return "github" in _selected_providers(provider)
-
-
-def _provider_is_configured(args: argparse.Namespace, provider: str) -> bool:
-    if provider == "github":
-        return bool(str(getattr(args, "github_org", "") or "").strip() or os.getenv("GITHUB_ORG", "").strip())
-    if provider == "azdo":
-        return bool(str(getattr(args, "azdo_org", "") or "").strip() or os.getenv("AZURE_DEVOPS_ORG", "").strip())
-    if provider == "gitlab":
-        cli_group = str(getattr(args, "gitlab_group", "") or "").strip().strip("/")
-        env_group = os.getenv("GITLAB_GROUP", "").strip().strip("/")
-        return bool(cli_group or env_group)
-    return False
 
 
 def _is_partial_result(data: Any) -> bool:
@@ -69,84 +79,27 @@ def _is_partial_result(data: Any) -> bool:
     return False
 
 
-def _cli_warnings(args: argparse.Namespace) -> list[str]:
-    warnings: list[str] = []
-    alias_used = str(getattr(args, "alias_used", "") or "").strip()
-    primary_path = str(getattr(args, "primary_path", "") or "").strip()
-    if alias_used:
-        if primary_path:
-            warnings.append(f"`{alias_used}` is deprecated; use `{primary_path}`.")
-        else:
-            warnings.append(f"`{alias_used}` is deprecated.")
-
-    deprecated_flags = getattr(args, "deprecated_flags", None) or []
-    if isinstance(deprecated_flags, list):
-        for flag in deprecated_flags:
-            flag_name = str(flag or "").strip()
-            if not flag_name:
-                continue
-            if flag_name == "--repos":
-                warnings.append("`--repos` is deprecated; repeat `--repo` instead.")
-            else:
-                warnings.append(f"`{flag_name}` is deprecated.")
-    return warnings
-
-
 def _command_meta(
     args: argparse.Namespace,
     meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload_meta = dict(meta or {})
-    alias_used = str(getattr(args, "alias_used", "") or "").strip()
-    if alias_used:
-        payload_meta["alias_used"] = alias_used
-
-    deprecated_flags = getattr(args, "deprecated_flags", None) or []
-    if isinstance(deprecated_flags, list) and deprecated_flags:
-        payload_meta["deprecated_flags"] = [str(flag) for flag in deprecated_flags if str(flag).strip()]
-
-    warnings = _cli_warnings(args)
-    if warnings:
-        payload_meta["warnings"] = warnings
-    return payload_meta
-
-
-def _emit_cli_warnings(args: argparse.Namespace) -> None:
-    if getattr(args, "output_format", "text") != "text":
-        return
-    for warning in _cli_warnings(args):
-        print(f"warning: {warning}", file=sys.stderr)
+    del args
+    return dict(meta or {})
 
 
 def validate_args_for_provider(args: argparse.Namespace) -> None:
     command = str(getattr(args, "command_id", ""))
-    provider = str(getattr(args, "provider", "") or "").strip().lower()
+    remote = _selected_remote(args).lower()
+    provider = _selected_provider(args)
 
-    if not provider:
+    if not remote:
         return
 
-    if command != "code.search" and provider == "all":
-        raise ValueError(f"{command} does not support provider 'all'. Use azdo, github, or gitlab.")
+    if command != "code.search" and remote == "all":
+        raise ValueError(f"{command} does not support remote 'all'. Use a configured remote name.")
 
     if command == "code.search" and not str(getattr(args, "query", "") or "").strip():
         raise ValueError('code search requires a query. Example: smith code search "grafana.*"')
-
-    selected = _selected_providers(provider)
-    if command == "code.search" and provider == "all":
-        selected = [provider_name for provider_name in selected if _provider_is_configured(args, provider_name)]
-
-    github_org = str(getattr(args, "github_org", "") or "").strip()
-    azdo_org = str(getattr(args, "azdo_org", "") or "").strip()
-    gitlab_group = str(getattr(args, "gitlab_group", "") or "").strip().strip("/")
-    if "github" in selected and not os.getenv("GITHUB_ORG", "").strip() and not github_org:
-        raise ValueError("Missing GITHUB_ORG. Example: export GITHUB_ORG=<org>  (or use --github-org)")
-    if "azdo" in selected and not os.getenv("AZURE_DEVOPS_ORG", "").strip() and not azdo_org:
-        raise ValueError(
-            "Missing AZURE_DEVOPS_ORG. "
-            "Example: export AZURE_DEVOPS_ORG=<your-org>  (or use --azdo-org)"
-        )
-    if "gitlab" in selected and not os.getenv("GITLAB_GROUP", "").strip().strip("/") and not gitlab_group:
-        raise ValueError("Missing GITLAB_GROUP. Example: export GITLAB_GROUP=<group>  (or use --gitlab-group)")
 
     if command == "code.search" and provider == "github" and str(getattr(args, "project", "") or "").strip():
         raise ValueError("GitHub code search does not support `--project`. Use `--repo` instead.")
@@ -167,7 +120,6 @@ def _emit_success(
         payload = make_envelope(ok=True, command=command, data=data, meta=payload_meta, error=None)
         print(dumps_json(payload))
     else:
-        _emit_cli_warnings(args)
         print(render_text(command, data))
 
     if partial:
@@ -194,23 +146,12 @@ def _emit_error(
         )
         print(dumps_json(payload))
     else:
-        _emit_cli_warnings(args)
         print(message, file=sys.stderr)
     return exit_code
 
 
 def _client_from_args(args: argparse.Namespace) -> SmithClient:
-    azdo_org = getattr(args, "azdo_org", None)
-    github_org = getattr(args, "github_org", None)
-    gitlab_group = getattr(args, "gitlab_group", None)
-
-    if azdo_org or github_org or gitlab_group:
-        return SmithClient(
-            azdo_org=azdo_org,
-            github_org=github_org,
-            gitlab_group=gitlab_group,
-        )
-
+    del args
     config = load_config()
     return SmithClient(smith_config=config)
 
@@ -278,13 +219,13 @@ def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> 
             exit_code=EXIT_INVALID_ARGS,
         )
 
-    env_config = load_config()
-    save_config(env_config, config_path=path)
+    config = SmithConfig(remotes={}, defaults={})
+    save_config(config, config_path=path)
 
     return _emit_success(
         args=args,
         command=args.command_id,
-        data={"path": str(path), "remotes_count": len(env_config.remotes)},
+        data={"path": str(path), "remotes_count": 0},
         partial=False,
     )
 
@@ -389,7 +330,7 @@ def handle_cache_clean(client: SmithClient | None, args: argparse.Namespace) -> 
 
 
 def handle_discover_projects(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_discover_projects(provider=args.provider)
+    data = client.execute_discover_projects(remote_or_provider=_selected_remote(args))
     return _emit_success(
         args=args,
         command=args.command_id,
@@ -399,7 +340,7 @@ def handle_discover_projects(client: SmithClient, args: argparse.Namespace) -> i
 
 
 def handle_discover_repos(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_discover_repos(provider=args.provider, project=getattr(args, "project", None))
+    data = client.execute_discover_repos(remote_or_provider=_selected_remote(args), project=getattr(args, "project", None))
     return _emit_success(
         args=args,
         command=args.command_id,
@@ -410,7 +351,7 @@ def handle_discover_repos(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_code_search(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_code_search(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         query=args.query,
         project=args.project,
         repos=args.repos,
@@ -427,7 +368,7 @@ def handle_code_search(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_code_grep(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_code_grep(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         project=getattr(args, "project", None),
         repo=getattr(args, "repo"),
         pattern=args.pattern,
@@ -450,7 +391,7 @@ def handle_code_grep(client: SmithClient, args: argparse.Namespace) -> int:
 
 
 def handle_pr_list(client: SmithClient, args: argparse.Namespace) -> int:
-    if args.provider == "azdo":
+    if _selected_provider(args) == "azdo":
         projects = [args.project]
         repos = [args.repo]
     else:
@@ -458,7 +399,7 @@ def handle_pr_list(client: SmithClient, args: argparse.Namespace) -> int:
         repos = [args.repo]
 
     data = client.execute_pr_list(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         projects=projects,
         repos=repos,
         statuses=args.status,
@@ -480,7 +421,7 @@ def handle_pr_list(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_pr_get(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_pr_get(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         project=getattr(args, "project", None),
         repo=args.repo,
         pull_request_id=args.id,
@@ -495,7 +436,7 @@ def handle_pr_get(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_pr_threads(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_pr_threads(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         project=getattr(args, "project", None),
         repo=args.repo,
         pull_request_id=args.id,
@@ -510,7 +451,7 @@ def handle_pr_threads(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_ci_logs(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_ci_logs(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
         build_id=args.id,
@@ -525,7 +466,7 @@ def handle_ci_logs(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_ci_grep(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_ci_grep(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
         build_id=args.id,
@@ -547,7 +488,7 @@ def handle_ci_grep(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_work_get(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_work_get(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
         work_item_id=args.id,
@@ -562,7 +503,7 @@ def handle_work_get(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_work_search(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_work_search(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         query=args.query,
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
@@ -583,7 +524,7 @@ def handle_work_search(client: SmithClient, args: argparse.Namespace) -> int:
 
 def handle_work_mine(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_work_mine(
-        provider=args.provider,
+        remote_or_provider=_selected_remote(args),
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
         include_closed=args.include_closed,

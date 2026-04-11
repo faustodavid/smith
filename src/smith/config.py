@@ -268,7 +268,7 @@ def load_config(*, config_path: Path | None = None) -> SmithConfig:
     path = config_path or _default_config_path()
 
     if not path.exists():
-        return _load_config_from_env()
+        raise ValueError(f"Config file not found at {path}. Run `smith config init` to create it.")
 
     try:
         with open(path, encoding="utf-8") as f:
@@ -318,70 +318,15 @@ def load_config(*, config_path: Path | None = None) -> SmithConfig:
     if not isinstance(defaults, dict):
         defaults = {}
 
-    env_remotes = _load_remotes_from_env()
-    for env_name, env_remote in env_remotes.items():
-        if env_name not in remotes_dict:
-            remotes_dict[env_name] = env_remote
-
     return SmithConfig(remotes=remotes_dict, defaults=defaults)
 
 
-def _load_config_from_env() -> SmithConfig:
-    remotes = _load_remotes_from_env()
-    return SmithConfig(remotes=remotes, defaults={})
-
-
-def _load_remotes_from_env() -> dict[str, RemoteConfig]:
-    remotes: dict[str, RemoteConfig] = {}
-
-    github_org = os.getenv("GITHUB_ORG", "").strip()
-    if github_org:
-        remotes["github"] = RemoteConfig(
-            name="github",
-            provider="github",
-            org=github_org,
-            host="github.com",
-            token_env="GITHUB_TOKEN",
-            enabled=True,
-            api_url="https://api.github.com",
-        )
-
-    gitlab_group = os.getenv("GITLAB_GROUP", "").strip().strip("/")
-    if gitlab_group:
-        remotes["gitlab"] = RemoteConfig(
-            name="gitlab",
-            provider="gitlab",
-            org=gitlab_group,
-            host="gitlab.com",
-            token_env="GITLAB_TOKEN",
-            enabled=True,
-            api_url="https://gitlab.com/api/v4",
-        )
-
-    azdo_org = os.getenv("AZURE_DEVOPS_ORG", "").strip()
-    if azdo_org:
-        remotes["azdo"] = RemoteConfig(
-            name="azdo",
-            provider="azdo",
-            org=azdo_org,
-            host="dev.azure.com",
-            token_env="AZURE_DEVOPS_PAT",
-            enabled=True,
-            api_url="https://dev.azure.com",
-        )
-
-    return remotes
-
-
-def save_config(config: SmithConfig, *, config_path: Path | None = None, save_env_remotes: bool = True) -> None:
+def save_config(config: SmithConfig, *, config_path: Path | None = None) -> None:
     path = config_path or _default_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     remotes_dict: dict[str, dict[str, Any]] = {}
     for name, remote in config.remotes.items():
-        if not save_env_remotes and name in {"github", "gitlab", "azdo"}:
-            continue
-
         remote_dict: dict[str, Any] = {
             "provider": remote.provider,
             "enabled": remote.enabled,
@@ -426,8 +371,8 @@ def parse_runtime_config(
     gitlab_group: str | None = None,
     gitlab_api_url_default: str,
 ) -> RuntimeConfig:
-    resolved_azdo_org = (azdo_org or os.getenv("AZURE_DEVOPS_ORG", "") or "").strip()
-    resolved_gitlab_group = (gitlab_group or os.getenv("GITLAB_GROUP", "") or "").strip().strip("/")
+    resolved_azdo_org = (azdo_org or "").strip()
+    resolved_gitlab_group = (gitlab_group or "").strip().strip("/")
 
     resolved_api_version = api_version or os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1"
     timeout = parse_int_env(
@@ -459,7 +404,7 @@ def parse_runtime_config(
             min_value=100,
             max_value=100_000,
         ),
-        github_org=(github_org or os.getenv("GITHUB_ORG", "") or "").strip(),
+        github_org=(github_org or "").strip(),
         github_api_url=os.getenv("GITHUB_API_URL", github_api_url_default).rstrip("/"),
         github_api_version=os.getenv("GITHUB_API_VERSION", github_api_version_default),
         github_timeout_seconds=parse_int_env(

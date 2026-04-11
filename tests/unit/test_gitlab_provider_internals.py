@@ -77,7 +77,7 @@ def test_gitlab_token_rejects_empty_cli_token_and_requires_group(monkeypatch: An
     )
     assert provider._build_url("https://example.test/projects") == "https://example.test/projects"
 
-    with pytest.raises(ValueError, match="Missing GITLAB_GROUP"):
+    with pytest.raises(ValueError, match="GitLab remote is missing a group in the Smith config"):
         _provider(make_runtime_config(gitlab_group=""))._require_gitlab_group()
 
 

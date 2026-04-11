@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from smith.config import parse_bool_env, parse_int_env, parse_runtime_config
+from smith.config import load_config, parse_bool_env, parse_int_env, parse_runtime_config
 
 
 @pytest.mark.parametrize(
@@ -212,7 +213,7 @@ def test_parse_runtime_config_github_org_override(monkeypatch: Any) -> None:
     assert runtime.github_configured is True
 
 
-def test_parse_runtime_config_github_org_env_fallback(monkeypatch: Any) -> None:
+def test_parse_runtime_config_github_org_ignores_legacy_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
 
     runtime = parse_runtime_config(
@@ -225,7 +226,7 @@ def test_parse_runtime_config_github_org_env_fallback(monkeypatch: Any) -> None:
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
-    assert runtime.github_org == "env-gh-org"
+    assert runtime.github_org == ""
 
 
 def test_parse_runtime_config_github_org_override_wins_over_env(monkeypatch: Any) -> None:
@@ -263,7 +264,7 @@ def test_parse_runtime_config_gitlab_group_override(monkeypatch: Any) -> None:
     assert runtime.gitlab_configured is True
 
 
-def test_parse_runtime_config_gitlab_group_env_fallback(monkeypatch: Any) -> None:
+def test_parse_runtime_config_gitlab_group_ignores_legacy_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("GITLAB_GROUP", "platform/subgroup/")
 
     runtime = parse_runtime_config(
@@ -276,7 +277,7 @@ def test_parse_runtime_config_gitlab_group_env_fallback(monkeypatch: Any) -> Non
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
-    assert runtime.gitlab_group == "platform/subgroup"
+    assert runtime.gitlab_group == ""
 
 
 def test_parse_runtime_config_gitlab_group_override_wins_over_env(monkeypatch: Any) -> None:
@@ -317,7 +318,6 @@ def test_parse_runtime_config_gitlab_host_env_fallback(monkeypatch: Any) -> None
 
 
 def test_parse_runtime_config_gitlab_glab_host_fallback(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "example-group")
     monkeypatch.delenv("GITLAB_HOST", raising=False)
     monkeypatch.delenv("GITLAB_API_URL", raising=False)
     calls: list[list[str]] = []
@@ -351,6 +351,7 @@ def test_parse_runtime_config_gitlab_glab_host_fallback(monkeypatch: Any) -> Non
         max_output_chars=None,
         github_api_url_default="https://api.github.com/",
         github_api_version_default="2022-11-28",
+        gitlab_group="example-group",
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
@@ -363,7 +364,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback(monkeypatch: Any) -> Non
 
 
 def test_parse_runtime_config_gitlab_glab_host_fallback_preserves_api_protocol(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "example-group")
     monkeypatch.delenv("GITLAB_HOST", raising=False)
     monkeypatch.delenv("GITLAB_API_URL", raising=False)
     calls: list[list[str]] = []
@@ -395,6 +395,7 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_preserves_api_protocol(m
         max_output_chars=None,
         github_api_url_default="https://api.github.com/",
         github_api_version_default="2022-11-28",
+        gitlab_group="example-group",
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
@@ -407,7 +408,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_preserves_api_protocol(m
 
 
 def test_parse_runtime_config_gitlab_glab_host_fallback_supports_single_label_hosts(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "example-group")
     monkeypatch.delenv("GITLAB_HOST", raising=False)
     monkeypatch.delenv("GITLAB_API_URL", raising=False)
     calls: list[list[str]] = []
@@ -439,6 +439,7 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_supports_single_label_ho
         max_output_chars=None,
         github_api_url_default="https://api.github.com/",
         github_api_version_default="2022-11-28",
+        gitlab_group="example-group",
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
@@ -451,7 +452,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_supports_single_label_ho
 
 
 def test_parse_runtime_config_gitlab_glab_host_fallback_without_status_all_support(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "example-group")
     monkeypatch.delenv("GITLAB_HOST", raising=False)
     monkeypatch.delenv("GITLAB_API_URL", raising=False)
     calls: list[list[str]] = []
@@ -487,6 +487,7 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_without_status_all_suppo
         max_output_chars=None,
         github_api_url_default="https://api.github.com/",
         github_api_version_default="2022-11-28",
+        gitlab_group="example-group",
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
@@ -586,3 +587,10 @@ def test_parse_runtime_config_bounds_grep_max_files(
     )
 
     assert runtime.grep_max_files == expected
+
+
+def test_load_config_requires_existing_file(tmp_path: Path) -> None:
+    missing_path = tmp_path / "config.yaml"
+
+    with pytest.raises(ValueError, match="Config file not found"):
+        load_config(config_path=missing_path)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -41,7 +42,7 @@ def _write_benchmark_run(
 def test_validate_smith_cli_command_injects_github_provider_for_code_search():
     tokens = validate_smith_cli_command('code search "otelcol.exporter.loki" --take 5')
 
-    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--provider", "github"]
+    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--remote", "github"]
 
 
 def test_validate_smith_cli_command_rejects_non_github_grep():
@@ -50,19 +51,18 @@ def test_validate_smith_cli_command_rejects_non_github_grep():
 
 
 def test_validate_smith_cli_command_allows_prefixed_smith_global_flags():
-    tokens = validate_smith_cli_command(
-        'smith --github-org openai --verbose --format json code search "otelcol.exporter.loki" --take 5'
-    )
+    tokens = validate_smith_cli_command('smith --verbose --format json code search "otelcol.exporter.loki" --take 5')
 
-    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--provider", "github"]
+    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--remote", "github"]
 
 
-def test_build_smith_cli_subprocess_injects_benchmark_org_and_local_src_path():
+def test_build_smith_cli_subprocess_injects_benchmark_config_and_local_src_path():
     argv, env = build_smith_cli_subprocess("repos github")
 
     assert argv[:3] == [argv[0], "-m", "smith.cli.main"]
     assert argv[3:] == ["repos", "github"]
-    assert env["GITHUB_ORG"] == BENCHMARK_GITHUB_ORG
+    config_text = Path(env["SMITH_CONFIG"]).read_text()
+    assert BENCHMARK_GITHUB_ORG in config_text
     assert "src" in env["PYTHONPATH"]
 
 

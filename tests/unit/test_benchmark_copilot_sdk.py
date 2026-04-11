@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.copilot_sdk import (
     GITHUB_AUTH_HEADER_ENV,
     GITHUB_MCP_SERVER_NAME,
@@ -29,7 +28,6 @@ def test_build_smith_copilot_payload_uses_local_mcp_and_single_tool():
 
     assert payload["availableTools"] == [expected_tool]
     assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["tools"] == ["smith_cli"]
-    assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["GITHUB_ORG"] == BENCHMARK_GITHUB_ORG
     assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["GH_TOKEN"] == "__ENV__:GH_TOKEN"
     assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["GITHUB_TOKEN"] == "__ENV__:GITHUB_TOKEN"
     assert payload["mcpServers"][SMITH_MCP_SERVER_NAME]["env"]["PYTHONPATH"] == "/tmp/smith/src:/existing/path"

@@ -5,10 +5,12 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Iterator
+from urllib.parse import urlparse
 
 from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.cli.handlers import (
@@ -20,6 +22,7 @@ from smith.cli.handlers import (
 )
 from smith.cli.parser import build_parser
 from smith.client import SmithClient
+from smith.config import RemoteConfig, SmithConfig, save_config
 from smith.errors import SmithApiError, SmithAuthError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -29,7 +32,7 @@ _DEFAULT_RUNNER: InProcessSmithCliRunner | None = None
 
 def _strip_benchmark_global_flags(tokens: list[str]) -> list[str]:
     root_commands = {"code", "repos", "orgs"}
-    ignored_flags = {"--github-org", "--azdo-org", "--format"}
+    ignored_flags = {"--format"}
     ignored_switches = {"--verbose", "-v"}
     output: list[str] = []
     index = 0
@@ -44,7 +47,7 @@ def _strip_benchmark_global_flags(tokens: list[str]) -> list[str]:
         if token in ignored_flags:
             index += 2
             continue
-        if token.startswith("--github-org=") or token.startswith("--azdo-org=") or token.startswith("--format="):
+        if token.startswith("--format="):
             index += 1
             continue
         output.extend(tokens[index:])
@@ -66,11 +69,13 @@ def validate_smith_cli_command(command: str) -> list[str]:
         if "--project" in tokens:
             raise ValueError("smith_cli only supports GitHub code search for this benchmark.")
         if "--provider" in tokens:
-            provider_index = tokens.index("--provider") + 1
-            if provider_index >= len(tokens) or tokens[provider_index] != "github":
-                raise ValueError("smith_cli only allows --provider github for code search.")
+            raise ValueError("smith_cli no longer accepts --provider for code search; use --remote github.")
+        if "--remote" in tokens:
+            remote_index = tokens.index("--remote") + 1
+            if remote_index >= len(tokens) or tokens[remote_index] != "github":
+                raise ValueError("smith_cli only allows --remote github for code search.")
         else:
-            tokens.extend(["--provider", "github"])
+            tokens.extend(["--remote", "github"])
         return tokens
 
     if len(tokens) >= 3 and tokens[:3] == ["code", "grep", "github"]:
@@ -99,6 +104,34 @@ def _patched_environment(env: dict[str, str]) -> Iterator[None]:
         os.environ.update(original)
 
 
+def _benchmark_smith_config(*, api_url: str | None = None) -> SmithConfig:
+    resolved_api_url = (api_url or "https://api.github.com").strip().rstrip("/")
+    parsed = urlparse(resolved_api_url)
+    host = parsed.netloc or "github.com"
+    return SmithConfig(
+        remotes={
+            "github": RemoteConfig(
+                name="github",
+                provider="github",
+                org=BENCHMARK_GITHUB_ORG,
+                host=host,
+                token_env="GITHUB_TOKEN",
+                enabled=True,
+                api_url=resolved_api_url,
+            )
+        },
+        defaults={},
+    )
+
+
+def _benchmark_config_path(*, run_env: dict[str, str]) -> Path:
+    api_url = run_env.get("GITHUB_API_URL")
+    config_key = abs(hash((BENCHMARK_GITHUB_ORG, api_url or "")))
+    path = Path(tempfile.gettempdir()) / f"smith-benchmark-{config_key}.yaml"
+    save_config(_benchmark_smith_config(api_url=api_url), config_path=path)
+    return path
+
+
 class InProcessSmithCliRunner:
     def __init__(
         self,
@@ -108,8 +141,9 @@ class InProcessSmithCliRunner:
     ) -> None:
         self._repo_root = repo_root
         self._env_overrides = dict(env or {})
-        self._parser = build_parser()
+        self._parser = build_parser(smith_config=_benchmark_smith_config())
         self._client: SmithClient | None = None
+        self._client_key: tuple[str, ...] | None = None
         self._lock = threading.RLock()
         self._success_cache: dict[tuple[tuple[str, ...], tuple[tuple[str, str], ...]], str] = {}
 
@@ -118,19 +152,23 @@ class InProcessSmithCliRunner:
         run_env.update(self._env_overrides)
         if env:
             run_env.update(env)
-        run_env["GITHUB_ORG"] = BENCHMARK_GITHUB_ORG
+        run_env["SMITH_CONFIG"] = str(_benchmark_config_path(run_env=run_env))
         run_env["PYTHONPATH"] = build_smith_pythonpath(
             repo_root=self._repo_root,
             existing_pythonpath=run_env.get("PYTHONPATH"),
         )
         return run_env
 
-    def _get_or_create_client(self, args: Any) -> SmithClient:
-        if self._client is None:
+    def _get_or_create_client(self, run_env: dict[str, str]) -> SmithClient:
+        client_key = (
+            (run_env.get("GITHUB_API_URL") or "").strip().rstrip("/"),
+            run_env.get("SMITH_CONFIG", ""),
+        )
+        if self._client is None or self._client_key != client_key:
             self._client = SmithClient(
-                azdo_org=getattr(args, "azdo_org", None),
-                github_org=getattr(args, "github_org", None),
+                smith_config=_benchmark_smith_config(api_url=run_env.get("GITHUB_API_URL")),
             )
+            self._client_key = client_key
         return self._client
 
     def _run_once(self, tokens: list[str], *, run_env: dict[str, str]) -> tuple[int, str, str]:
@@ -151,7 +189,7 @@ class InProcessSmithCliRunner:
                         command_id = str(getattr(args, "command_id", "unknown"))
                         try:
                             validate_args_for_provider(args)
-                            client = self._get_or_create_client(args)
+                            client = self._get_or_create_client(run_env)
                             code = int(handler(client, args))
                         except ValueError as exc:
                             code = _emit_error(
@@ -243,7 +281,7 @@ def build_smith_cli_subprocess(
     run_env = os.environ.copy()
     if env:
         run_env.update(env)
-    run_env["GITHUB_ORG"] = BENCHMARK_GITHUB_ORG
+    run_env["SMITH_CONFIG"] = str(_benchmark_config_path(run_env=run_env))
     run_env["PYTHONPATH"] = build_smith_pythonpath(
         repo_root=repo_root,
         existing_pythonpath=run_env.get("PYTHONPATH"),

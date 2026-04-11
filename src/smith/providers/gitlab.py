@@ -124,7 +124,7 @@ class GitLabProvider(
     def _require_gitlab_group(self) -> str:
         group = (self.gitlab_group or "").strip().strip("/")
         if not group:
-            raise ValueError("Missing GITLAB_GROUP. Example: export GITLAB_GROUP=<group>")
+            raise ValueError("GitLab remote is missing a group in the Smith config.")
         return group
 
     def _gitlab_web_url(self) -> str:
