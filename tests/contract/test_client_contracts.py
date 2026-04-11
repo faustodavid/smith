@@ -92,25 +92,26 @@ def _install_client_fakes(monkeypatch: Any, runtime: Any) -> dict[str, Any]:
 
     def _fake_run_fanout(
         *,
-        providers: list[str],
-        requested_provider: str,
+        remotes: list[str],
+        requested_remote: str,
         operations: dict[str, Any],
-        provider_entry_success: Any,
-        provider_entry_error: Any,
+        remote_entry_success: Any,
+        remote_entry_error: Any,
     ) -> dict[str, Any]:
-        provider_payloads = {}
-        for provider in providers:
-            provider_payloads[provider] = provider_entry_success(operations[provider]())
+        del remote_entry_error
+        remote_payloads = {}
+        for remote in remotes:
+            remote_payloads[remote] = remote_entry_success(operations[remote]())
         calls["run_fanout"] = {
-            "providers": providers,
-            "requested_provider": requested_provider,
+            "remotes": remotes,
+            "requested_remote": requested_remote,
         }
         return {
-            "providers": provider_payloads,
+            "remotes": remote_payloads,
             "summary": {
-                "requested_provider": requested_provider,
-                "queried": providers,
-                "succeeded": providers,
+                "requested_remote": requested_remote,
+                "queried": remotes,
+                "succeeded": remotes,
                 "failed": [],
             },
         }
@@ -145,7 +146,7 @@ def test_client_initializes_runtime_and_configures_session(monkeypatch: Any) -> 
     assert calls["session"] == {"pool_connections": 16, "pool_maxsize": 32}
 
 
-def test_client_lazily_creates_and_caches_provider_instances(monkeypatch: Any) -> None:
+def test_client_lazily_creates_and_caches_remote_provider_instances(monkeypatch: Any) -> None:
     runtime = make_runtime_config(github_org="", gitlab_group="")
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
@@ -160,20 +161,20 @@ def test_client_lazily_creates_and_caches_provider_instances(monkeypatch: Any) -
     assert "gitlab" not in client._config.remotes
 
 
-def test_provider_entry_helpers_extract_warning_and_partial_state() -> None:
-    warnings, partial = SmithClient._provider_warnings_and_partial({"warnings": ["", "warn", 7], "partial": 1})
-    success = SmithClient._provider_entry_success({"warnings": ["warn"], "partial": True})
-    error = SmithClient._provider_entry_error("api_error", "boom")
+def test_remote_entry_helpers_extract_warning_and_partial_state() -> None:
+    warnings, partial = SmithClient._remote_warnings_and_partial({"warnings": ["", "warn", 7], "partial": 1})
+    success = SmithClient._remote_entry_success({"warnings": ["warn"], "partial": True})
+    error = SmithClient._remote_entry_error("api_error", "boom")
 
     assert warnings == ["warn", "7"]
     assert partial is True
     assert success["warnings"] == ["warn"]
     assert success["partial"] is True
     assert error["error"] == {"code": "api_error", "message": "boom"}
-    assert SmithClient._provider_warnings_and_partial(["not-a-dict"]) == ([], False)
+    assert SmithClient._remote_warnings_and_partial(["not-a-dict"]) == ([], False)
 
 
-def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> None:
+def test_fanout_normalizes_remote_and_preserves_order(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     calls = _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
@@ -187,10 +188,10 @@ def test_fanout_normalizes_provider_and_preserves_order(monkeypatch: Any) -> Non
         },
     )
 
-    assert calls["run_fanout"] == {"providers": ["github", "gitlab", "azdo"], "requested_provider": "all"}
-    assert result["providers"]["github"]["data"]["provider"] == "github"
-    assert result["providers"]["gitlab"]["data"]["provider"] == "gitlab"
-    assert result["providers"]["azdo"]["data"]["provider"] == "azdo"
+    assert calls["run_fanout"] == {"remotes": ["github", "gitlab", "azdo"], "requested_remote": "all"}
+    assert result["remotes"]["github"]["data"]["provider"] == "github"
+    assert result["remotes"]["gitlab"]["data"]["provider"] == "gitlab"
+    assert result["remotes"]["azdo"]["data"]["provider"] == "azdo"
 
 
 def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_path: Any) -> None:
@@ -202,7 +203,11 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
     monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))
     monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(gitlab_cache))
 
-    result = SmithClient.execute_cache_clean(provider="github")
+    runtime = make_runtime_config()
+    result = SmithClient.execute_cache_clean(
+        remote="github",
+        smith_config=_make_smith_config(runtime),
+    )
 
     assert result == {
         "cleaned": [str(github_cache)],
@@ -434,7 +439,7 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         ),
     ],
 )
-def test_execute_methods_dispatch_to_provider_operations(
+def test_execute_methods_dispatch_to_remote_operations(
     monkeypatch: Any,
     method_name: str,
     kwargs: dict[str, Any],
@@ -448,9 +453,9 @@ def test_execute_methods_dispatch_to_provider_operations(
 
     result = getattr(client, method_name)(**kwargs)
 
-    provider_entry = result["providers"][expected_provider]["data"]
-    assert provider_entry["method"] == expected_method
-    assert provider_entry["kwargs"] == expected_kwargs
+    remote_entry = result["remotes"][expected_provider]["data"]
+    assert remote_entry["method"] == expected_method
+    assert remote_entry["kwargs"] == expected_kwargs
 
 
 def test_execute_discover_repos_for_azdo_project_calls_list_repositories(monkeypatch: Any) -> None:
@@ -460,8 +465,8 @@ def test_execute_discover_repos_for_azdo_project_calls_list_repositories(monkeyp
 
     result = client.execute_discover_repos(remote_or_provider="azdo", project="proj-a")
 
-    provider_entry = result["providers"]["azdo"]["data"]
-    assert provider_entry == [
+    remote_entry = result["remotes"]["azdo"]["data"]
+    assert remote_entry == [
         {
             "provider": "azdo",
             "method": "list_repositories",
@@ -482,13 +487,13 @@ def test_execute_discover_repos_for_azdo_without_project_fans_out_projects(monke
 
     result = client.execute_discover_repos(remote_or_provider="azdo", project=None)
 
-    assert result["providers"]["azdo"]["data"] == [
+    assert result["remotes"]["azdo"]["data"] == [
         {"name": "proj-a-repo", "projectName": "proj-a"},
         {"name": "proj-b-repo", "projectName": "proj-b"},
     ]
 
 
-def test_execute_code_search_runs_all_provider_operations(monkeypatch: Any) -> None:
+def test_execute_code_search_runs_all_remote_operations(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
@@ -503,12 +508,12 @@ def test_execute_code_search_runs_all_provider_operations(monkeypatch: Any) -> N
     )
 
     assert result["summary"]["queried"] == ["github", "gitlab", "azdo"]
-    assert result["providers"]["github"]["data"]["method"] == "search_code"
-    assert result["providers"]["gitlab"]["data"]["method"] == "search_code"
-    assert result["providers"]["azdo"]["data"]["kwargs"]["repos"] == ["repo-a"]
+    assert result["remotes"]["github"]["data"]["method"] == "search_code"
+    assert result["remotes"]["gitlab"]["data"]["method"] == "search_code"
+    assert result["remotes"]["azdo"]["data"]["kwargs"]["repos"] == ["repo-a"]
 
 
-def test_execute_code_search_all_skips_unconfigured_providers(monkeypatch: Any) -> None:
+def test_execute_code_search_all_skips_unconfigured_remotes(monkeypatch: Any) -> None:
     runtime = make_runtime_config(azdo_org="", github_org="", gitlab_group="platform")
     calls = _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
@@ -522,9 +527,9 @@ def test_execute_code_search_all_skips_unconfigured_providers(monkeypatch: Any) 
         take=5,
     )
 
-    assert calls["run_fanout"] == {"providers": ["gitlab"], "requested_provider": "all"}
+    assert calls["run_fanout"] == {"remotes": ["gitlab"], "requested_remote": "all"}
     assert result["summary"]["queried"] == ["gitlab"]
-    assert set(result["providers"]) == {"gitlab"}
+    assert set(result["remotes"]) == {"gitlab"}
     assert _FakeAzdoProvider.instances == []
     assert _FakeGitHubProvider.instances == []
     assert len(_FakeGitLabProvider.instances) == 1
@@ -550,17 +555,17 @@ def test_execute_pr_list_uses_projects_as_repo_fallback(monkeypatch: Any, provid
         include_labels=False,
     )
 
-    assert result["providers"][provider]["data"]["kwargs"]["repos"] == ["repo-from-project"]
+    assert result["remotes"][provider]["data"]["kwargs"]["repos"] == ["repo-from-project"]
 
-def test_legacy_wrapper_methods_delegate_to_canonical_operations(monkeypatch: Any) -> None:
+def test_canonical_methods_cover_removed_wrapper_behavior(monkeypatch: Any) -> None:
     runtime = make_runtime_config()
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
-    discover_projects = client.execute_projects_list(remote_or_provider="gitlab")
-    ci_logs = client.execute_build_logs(remote_or_provider="gitlab", project=None, repo="repo-a", build_id=1)
-    work_get = client.execute_board_ticket(remote_or_provider="gitlab", project=None, repo="repo-a", work_item_id=2)
+    discover_projects = client.execute_discover_projects(remote_or_provider="gitlab")
+    ci_logs = client.execute_ci_logs(remote_or_provider="gitlab", project=None, repo="repo-a", build_id=1)
+    work_get = client.execute_work_get(remote_or_provider="gitlab", project=None, repo="repo-a", work_item_id=2)
 
-    assert discover_projects["providers"]["gitlab"]["data"]["method"] == "list_projects"
-    assert ci_logs["providers"]["gitlab"]["data"]["method"] == "get_build_log"
-    assert work_get["providers"]["gitlab"]["data"]["method"] == "get_ticket_by_id"
+    assert discover_projects["remotes"]["gitlab"]["data"]["method"] == "list_projects"
+    assert ci_logs["remotes"]["gitlab"]["data"]["method"] == "get_build_log"
+    assert work_get["remotes"]["gitlab"]["data"]["method"] == "get_ticket_by_id"

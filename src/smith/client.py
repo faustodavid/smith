@@ -18,7 +18,7 @@ from smith.providers.base import BaseProvider
 from smith.providers.github import GITHUB_DEFAULT_API_URL, GITHUB_DEFAULT_API_VERSION, GitHubProvider
 from smith.providers.gitlab import GITLAB_DEFAULT_API_URL, GitLabProvider
 
-_NO_PROVIDERS_CONFIGURED_MESSAGE = (
+_NO_REMOTES_CONFIGURED_MESSAGE = (
     "No remotes configured in ~/.config/smith/config.yaml. "
     "Add at least one remote under `remotes:` or run `smith config init`."
 )
@@ -41,15 +41,13 @@ class SmithClient:
             api_version=api_version,
             timeout_seconds=timeout_seconds or self._config.defaults.get("timeout_seconds"),
             max_output_chars=max_output_chars or self._config.defaults.get("max_output_chars"),
-            github_org=None,
             github_api_url_default=GITHUB_DEFAULT_API_URL,
             github_api_version_default=GITHUB_DEFAULT_API_VERSION,
-            gitlab_group=None,
             gitlab_api_url_default=GITLAB_DEFAULT_API_URL,
         )
 
         if not self._config.remotes:
-            raise ValueError(_NO_PROVIDERS_CONFIGURED_MESSAGE)
+            raise ValueError(_NO_REMOTES_CONFIGURED_MESSAGE)
 
         main_session = session or requests.Session()
         configure_http_session(
@@ -70,9 +68,9 @@ class SmithClient:
     def _require_single_target(remote_or_provider: str, *, command: str) -> str:
         target = str(remote_or_provider or "").strip()
         if not target:
-            raise ValueError(f"{command} requires a remote or provider.")
+            raise ValueError(f"{command} requires a remote.")
         if target == "all":
-            raise ValueError(f"{command} does not support target 'all'. Use a remote name or provider.")
+            raise ValueError(f"{command} does not support target 'all'. Use a configured remote name.")
         return target
 
     def _get_provider_for_remote(self, remote: RemoteConfig) -> BaseProvider:
@@ -85,7 +83,7 @@ class SmithClient:
                 session=self._main_session,
                 github_org=remote.org,
                 github_api_url=remote.api_url,
-                github_api_version=GITHUB_DEFAULT_API_VERSION,
+                github_api_version=self._runtime.github_api_version,
                 token_env=remote.token_env,
             )
         elif remote.provider == "gitlab":
@@ -120,7 +118,7 @@ class SmithClient:
         return cast(GitLabProvider, self._get_provider_for_remote(remote))
 
     @staticmethod
-    def _provider_warnings_and_partial(payload: Any) -> tuple[list[str], bool]:
+    def _remote_warnings_and_partial(payload: Any) -> tuple[list[str], bool]:
         if not isinstance(payload, dict):
             return [], False
         warnings = payload.get("warnings")
@@ -132,8 +130,8 @@ class SmithClient:
         return warning_list, partial
 
     @staticmethod
-    def _provider_entry_success(payload: Any) -> dict[str, Any]:
-        warnings, partial = SmithClient._provider_warnings_and_partial(payload)
+    def _remote_entry_success(payload: Any) -> dict[str, Any]:
+        warnings, partial = SmithClient._remote_warnings_and_partial(payload)
         return {
             "ok": True,
             "data": payload,
@@ -143,7 +141,7 @@ class SmithClient:
         }
 
     @staticmethod
-    def _provider_entry_error(code: str, message: str) -> dict[str, Any]:
+    def _remote_entry_error(code: str, message: str) -> dict[str, Any]:
         return {
             "ok": False,
             "data": None,
@@ -153,18 +151,12 @@ class SmithClient:
         }
 
     def _resolve_remotes(self, remote_or_provider: str) -> list[RemoteConfig]:
+        if remote_or_provider == "all":
+            return [r for r in self._config.remotes.values() if r.enabled]
+
         if remote_or_provider in self._config.remotes:
             remote = self._config.remotes[remote_or_provider]
             return [remote] if remote.enabled else []
-
-        if remote_or_provider in {"github", "gitlab", "azdo"}:
-            return [
-                r for r in self._config.remotes.values()
-                if r.provider == remote_or_provider and r.enabled
-            ]
-
-        if remote_or_provider == "all":
-            return [r for r in self._config.remotes.values() if r.enabled]
 
         return []
 
@@ -176,7 +168,7 @@ class SmithClient:
     ) -> dict[str, Any]:
         remotes = self._resolve_remotes(remote_or_provider)
         if not remotes:
-            raise ValueError(f"No enabled remotes found for '{remote_or_provider}'")
+            raise ValueError(f"No enabled remote found for '{remote_or_provider}'")
 
         remote_operations: dict[str, Callable[[], Any]] = {}
 
@@ -190,81 +182,95 @@ class SmithClient:
             remote_operations[remote.name] = _make_operation(remote)
 
         return run_fanout(
-            providers=[r.name for r in remotes],
-            requested_provider=remote_or_provider,
+            remotes=[r.name for r in remotes],
+            requested_remote=remote_or_provider,
             operations=remote_operations,
-            provider_entry_success=self._provider_entry_success,
-            provider_entry_error=self._provider_entry_error,
+            remote_entry_success=self._remote_entry_success,
+            remote_entry_error=self._remote_entry_error,
         )
 
     @staticmethod
-    def _github_grep_cache_root() -> str:
-        configured = (os.getenv("SMITH_GITHUB_GREP_CACHE_DIR") or "").strip()
-        if configured:
-            return configured
-        return str(Path.home() / ".cache" / "smith" / "github-grep")
+    def _annotate_azdo_repositories(repositories: Any, *, project: str) -> list[Any]:
+        if isinstance(repositories, list):
+            items = repositories
+        elif repositories is None:
+            items = []
+        else:
+            items = [repositories]
+
+        annotated: list[Any] = []
+        for repository in items:
+            if isinstance(repository, dict):
+                repository_entry = dict(repository)
+                repository_entry.setdefault("projectName", project)
+                annotated.append(repository_entry)
+            else:
+                annotated.append(repository)
+        return annotated
+
+    def _list_azdo_repositories(self, *, azdo: AzdoProvider, project: str | None) -> list[Any]:
+        if project:
+            return self._annotate_azdo_repositories(
+                azdo.list_repositories(project=project),
+                project=project,
+            )
+
+        repositories: list[Any] = []
+        for project_entry in azdo.list_projects():
+            if not isinstance(project_entry, dict):
+                continue
+            project_name = str(project_entry.get("name", "") or "").strip()
+            if not project_name:
+                continue
+            repositories.extend(
+                self._annotate_azdo_repositories(
+                    azdo.list_repositories(project=project_name),
+                    project=project_name,
+                )
+            )
+        return repositories
 
     @staticmethod
-    def _gitlab_grep_cache_root() -> str:
-        configured = (os.getenv("SMITH_GITLAB_GREP_CACHE_DIR") or "").strip()
-        if configured:
-            return configured
-        return str(Path.home() / ".cache" / "smith" / "gitlab-grep")
-
-    @classmethod
-    def _cache_clean_roots(cls, *, provider: str | None) -> list[str]:
-        normalized = (provider or "all").strip().lower()
-        if normalized not in {"all", "github", "gitlab"}:
-            raise ValueError("cache clean supports provider values: github, gitlab, all")
+    def _cache_clean_roots(
+        *,
+        remote: str,
+        smith_config: SmithConfig | None = None,
+    ) -> list[str]:
+        target = str(remote or "all").strip()
+        if not target or target == "all":
+            providers = ["github", "gitlab"]
+        else:
+            config = smith_config or load_config()
+            remote_config = config.remotes.get(target)
+            if remote_config is None:
+                raise ValueError(f"Unknown remote '{target}'")
+            providers = [remote_config.provider]
 
         roots: list[str] = []
-        if normalized in {"all", "github"}:
-            roots.append(cls._github_grep_cache_root())
-        if normalized in {"all", "gitlab"}:
-            roots.append(cls._gitlab_grep_cache_root())
+        if "github" in providers:
+            roots.append(os.getenv("SMITH_GITHUB_GREP_CACHE_DIR") or str(Path.home() / ".cache" / "smith" / "github-grep"))
+        if "gitlab" in providers:
+            roots.append(os.getenv("SMITH_GITLAB_GREP_CACHE_DIR") or str(Path.home() / ".cache" / "smith" / "gitlab-grep"))
         return roots
 
-    @classmethod
-    def execute_cache_clean(cls, *, provider: str | None = None) -> dict[str, Any]:
+    @staticmethod
+    def execute_cache_clean(
+        *,
+        remote: str,
+        smith_config: SmithConfig | None = None,
+    ) -> dict[str, Any]:
         cleaned: list[str] = []
         missing: list[str] = []
 
-        for cache_root in cls._cache_clean_roots(provider=provider):
-            if os.path.isdir(cache_root):
-                shutil.rmtree(cache_root)
-                cleaned.append(cache_root)
-                continue
-            if os.path.exists(cache_root):
-                os.remove(cache_root)
-                cleaned.append(cache_root)
-                continue
-            missing.append(cache_root)
+        for root in SmithClient._cache_clean_roots(remote=remote, smith_config=smith_config):
+            path = Path(root)
+            if path.exists():
+                shutil.rmtree(path)
+                cleaned.append(str(path))
+            else:
+                missing.append(str(path))
 
-        return {
-            "cleaned": cleaned,
-            "missing": missing,
-        }
-
-    def _list_azdo_repositories(self, *, azdo: AzdoProvider, project: str | None) -> list[dict[str, Any]]:
-        def _normalize_repo_rows(payload: Any) -> list[dict[str, Any]]:
-            if isinstance(payload, dict):
-                return [payload]
-            if isinstance(payload, list):
-                return [row for row in payload if isinstance(row, dict)]
-            return []
-
-        if project:
-            repos = _normalize_repo_rows(azdo.list_repositories(project=project))
-            return [{**repo, "projectName": project} for repo in repos]
-
-        results: list[dict[str, Any]] = []
-        for project_row in azdo.list_projects():
-            project_name = str(project_row.get("name") or "").strip()
-            if not project_name:
-                continue
-            repos = _normalize_repo_rows(azdo.list_repositories(project=project_name))
-            results.extend({**repo, "projectName": project_name} for repo in repos)
-        return results
+        return {"cleaned": cleaned, "missing": missing}
 
     def execute_discover_projects(self, *, remote_or_provider: str) -> dict[str, Any]:
         target = self._require_single_target(remote_or_provider, command="orgs")
@@ -292,17 +298,6 @@ class SmithClient:
                 "gitlab": lambda r: self._gitlab_provider(r).list_repositories(),
             },
         )
-
-    def execute_projects_list(self, *, remote_or_provider: str) -> dict[str, Any]:
-        return self.execute_discover_projects(remote_or_provider=remote_or_provider)
-
-    def execute_repos_list(
-        self,
-        *,
-        remote_or_provider: str,
-        project: str | None,
-    ) -> dict[str, Any]:
-        return self.execute_discover_repos(remote_or_provider=remote_or_provider, project=project)
 
     def execute_code_search(
         self,
@@ -592,50 +587,6 @@ class SmithClient:
             },
         )
 
-    def execute_build_logs(
-        self,
-        *,
-        remote_or_provider: str,
-        project: str | None,
-        repo: str | None,
-        build_id: int,
-    ) -> dict[str, Any]:
-        return self.execute_ci_logs(
-            remote_or_provider=remote_or_provider,
-            project=project,
-            repo=repo,
-            build_id=build_id,
-        )
-
-    def execute_build_grep(
-        self,
-        *,
-        remote_or_provider: str,
-        project: str | None,
-        repo: str | None,
-        build_id: int,
-        log_id: int | None,
-        pattern: str | None,
-        output_mode: Literal["content", "logs_with_matches", "count"],
-        case_insensitive: bool,
-        context_lines: int | None,
-        from_line: int | None,
-        to_line: int | None,
-    ) -> dict[str, Any]:
-        return self.execute_ci_grep(
-            remote_or_provider=remote_or_provider,
-            project=project,
-            repo=repo,
-            build_id=build_id,
-            log_id=log_id,
-            pattern=pattern,
-            output_mode=output_mode,
-            case_insensitive=case_insensitive,
-            context_lines=context_lines,
-            from_line=from_line,
-            to_line=to_line,
-        )
-
     def execute_work_get(
         self,
         *,
@@ -741,67 +692,6 @@ class SmithClient:
                     take=take,
                 ),
             },
-        )
-
-    def execute_board_ticket(
-        self,
-        *,
-        remote_or_provider: str,
-        project: str | None,
-        repo: str | None,
-        work_item_id: int,
-    ) -> dict[str, Any]:
-        return self.execute_work_get(
-            remote_or_provider=remote_or_provider,
-            project=project,
-            repo=repo,
-            work_item_id=work_item_id,
-        )
-
-    def execute_board_search(
-        self,
-        *,
-        remote_or_provider: str,
-        query: str,
-        project: str | None,
-        repo: str | None,
-        area: str | None,
-        work_item_type: str | None,
-        state: str | None,
-        assigned_to: str | None,
-        skip: int,
-        take: int,
-    ) -> dict[str, Any]:
-        return self.execute_work_search(
-            remote_or_provider=remote_or_provider,
-            query=query,
-            project=project,
-            repo=repo,
-            area=area,
-            work_item_type=work_item_type,
-            state=state,
-            assigned_to=assigned_to,
-            skip=skip,
-            take=take,
-        )
-
-    def execute_board_mine(
-        self,
-        *,
-        remote_or_provider: str,
-        project: str | None,
-        repo: str | None,
-        include_closed: bool,
-        skip: int,
-        take: int,
-    ) -> dict[str, Any]:
-        return self.execute_work_mine(
-            remote_or_provider=remote_or_provider,
-            project=project,
-            repo=repo,
-            include_closed=include_closed,
-            skip=skip,
-            take=take,
         )
 
 

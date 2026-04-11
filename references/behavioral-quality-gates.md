@@ -15,11 +15,11 @@ A `smith` investigation is acceptable only if all gates pass.
 - Unknown structure uses `smith code grep ... ".*" --output-mode files_with_matches`.
 - Final evidence comes from focused `smith code grep`.
 - `prs`, `pipelines logs`, and `stories` are used only when primary or corroborating evidence is needed.
-- Provider syntax is explicit:
-  - `smith code grep azdo <project> <repo> "<regex>"`
-  - `smith code grep github <repo> "<regex>"`
-  - `smith code grep gitlab <repo> "<regex>"`
-  - `smith pipelines logs list github <repo> <id>`
+- Remote syntax is explicit:
+  - `smith code grep <azdo-remote> <project> <repo> "<regex>"`
+  - `smith code grep <github-remote> <repo> "<regex>"`
+  - `smith code grep <gitlab-remote> <repo> "<regex>"`
+  - `smith pipelines logs list <github-remote> <repo> <id>`
 - GitHub repo arguments stay bare:
   - Search results may look like `org/repo:path`
   - Follow-up GitHub commands still take `<repo>`, not `org/repo`
@@ -31,7 +31,7 @@ A `smith` investigation is acceptable only if all gates pass.
 
 - The answer cites exact `project/repository:path`, `org/repository:path`, or `group/repository:path` evidence.
 - The answer ends with a `Sources` section.
-- Single-provider answers stay flat; multi-provider answers split by provider.
+- Single-remote answers stay flat; multi-remote answers split by remote.
 - Unresolved answers include `not enough evidence` plus one next command.
 - If a caller explicitly requires `repo:path`, the `Sources` section follows that contract.
 

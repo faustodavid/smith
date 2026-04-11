@@ -349,19 +349,19 @@ def _render_single(command: str, data: Any) -> str:
     return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=True)
 
 
-def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
-    providers = payload.get("providers", {})
-    if not isinstance(providers, dict):
+def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
+    remotes = payload.get("remotes", {})
+    if not isinstance(remotes, dict):
         return _render_single(command, payload)
 
     summary = payload.get("summary", {})
     queried = summary.get("queried") if isinstance(summary, dict) else []
-    ordered = queried if isinstance(queried, list) and queried else list(providers.keys())
+    ordered = queried if isinstance(queried, list) and queried else list(remotes.keys())
 
     # Flatten single-remote results for cleaner developer UX.
     if len(ordered) == 1:
         remote_name = ordered[0]
-        entry = providers.get(remote_name, {})
+        entry = remotes.get(remote_name, {})
         if not isinstance(entry, dict):
             return ""
 
@@ -370,9 +370,9 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
             message = error.get("message") if isinstance(error, dict) else error
             return f"error: {message}".rstrip()
 
-        provider_data = entry.get("data")
+        remote_data = entry.get("data")
         lines: list[str] = []
-        rendered = _render_single(command, provider_data)
+        rendered = _render_single(command, remote_data)
         if rendered.strip():
             lines.append(rendered)
 
@@ -387,7 +387,7 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
     output_lines: list[str] = []
 
     for remote_name in ordered:
-        entry = providers.get(remote_name, {})
+        entry = remotes.get(remote_name, {})
         if not isinstance(entry, dict):
             continue
 
@@ -432,6 +432,6 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
 
 
 def render_text(command: str, data: Any) -> str:
-    if isinstance(data, dict) and "providers" in data and "summary" in data:
-        return _render_provider_grouped(command, data)
+    if isinstance(data, dict) and "remotes" in data and "summary" in data:
+        return _render_remote_grouped(command, data)
     return _render_single(command, data)

@@ -13,9 +13,9 @@ def test_json_envelope_shape() -> None:
     assert '"error": null' in rendered
 
 
-def test_single_provider_rendering_flattens() -> None:
+def test_single_remote_rendering_flattens() -> None:
     grouped = {
-        "providers": {
+        "remotes": {
             "azdo": {
                 "ok": True,
                 "data": [{"name": "repo-a"}],
@@ -25,7 +25,7 @@ def test_single_provider_rendering_flattens() -> None:
             }
         },
         "summary": {
-            "requested_provider": "azdo",
+            "requested_remote": "azdo",
             "queried": ["azdo"],
             "succeeded": ["azdo"],
             "failed": [],

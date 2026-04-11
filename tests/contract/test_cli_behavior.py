@@ -83,7 +83,7 @@ def test_success_exit_code_zero(monkeypatch: Any, capsys: Any) -> None:
 
 def test_partial_exit_code_five(monkeypatch: Any, capsys: Any) -> None:
     payload = {
-        "providers": {
+        "remotes": {
             "azdo": {
                 "ok": True,
                 "data": [{"name": "proj-a"}],
@@ -93,7 +93,7 @@ def test_partial_exit_code_five(monkeypatch: Any, capsys: Any) -> None:
             }
         },
         "summary": {
-            "requested_provider": "azdo",
+            "requested_remote": "azdo",
             "queried": ["azdo"],
             "succeeded": ["azdo"],
             "failed": [],
@@ -147,7 +147,7 @@ def test_code_search_without_config_file_reports_config_error(monkeypatch: Any, 
     assert "Missing GITHUB_ORG" not in captured.err
 
 
-def test_cache_clean_succeeds_without_configured_providers(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
+def test_cache_clean_succeeds_without_configured_remotes(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
     github_cache = tmp_path / "github-grep"
     github_cache.mkdir()
 
@@ -158,7 +158,7 @@ def test_cache_clean_succeeds_without_configured_providers(monkeypatch: Any, cap
         lambda args: (_ for _ in ()).throw(AssertionError("client should not be created")),
     )
 
-    code = cli_main.main(["cache", "clean", "--provider", "github"])
+    code = cli_main.main(["cache", "clean"])
     captured = capsys.readouterr()
 
     assert code == 0

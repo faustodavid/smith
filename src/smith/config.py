@@ -365,14 +365,11 @@ def parse_runtime_config(
     api_version: str | None,
     timeout_seconds: int | None,
     max_output_chars: int | None,
-    github_org: str | None = None,
     github_api_url_default: str,
     github_api_version_default: str,
-    gitlab_group: str | None = None,
     gitlab_api_url_default: str,
 ) -> RuntimeConfig:
     resolved_azdo_org = (azdo_org or "").strip()
-    resolved_gitlab_group = (gitlab_group or "").strip().strip("/")
 
     resolved_api_version = api_version or os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1"
     timeout = parse_int_env(
@@ -404,7 +401,7 @@ def parse_runtime_config(
             min_value=100,
             max_value=100_000,
         ),
-        github_org=(github_org or "").strip(),
+        github_org="",
         github_api_url=os.getenv("GITHUB_API_URL", github_api_url_default).rstrip("/"),
         github_api_version=os.getenv("GITHUB_API_VERSION", github_api_version_default),
         github_timeout_seconds=parse_int_env(
@@ -425,10 +422,10 @@ def parse_runtime_config(
             min_value=1,
             max_value=900,
         ),
-        gitlab_group=resolved_gitlab_group,
+        gitlab_group="",
         gitlab_api_url=resolve_gitlab_api_url(
             default=gitlab_api_url_default,
-            enable_auto_discovery=bool(resolved_gitlab_group),
+            enable_auto_discovery=True,
         ),
         gitlab_timeout_seconds=parse_int_env(
             "GITLAB_TIMEOUT_SECONDS",

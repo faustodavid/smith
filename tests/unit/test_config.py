@@ -195,24 +195,6 @@ def test_parse_runtime_config_falls_back_for_invalid_retry_backoff(monkeypatch: 
     assert runtime.http_retry_backoff_seconds == pytest.approx(0.4)
 
 
-def test_parse_runtime_config_github_org_override(monkeypatch: Any) -> None:
-    monkeypatch.delenv("GITHUB_ORG", raising=False)
-
-    runtime = parse_runtime_config(
-        azdo_org="example",
-        api_version=None,
-        timeout_seconds=None,
-        max_output_chars=None,
-        github_org="override-gh-org",
-        github_api_url_default="https://api.github.com/",
-        github_api_version_default="2022-11-28",
-        gitlab_api_url_default="https://gitlab.com/api/v4/",
-    )
-
-    assert runtime.github_org == "override-gh-org"
-    assert runtime.github_configured is True
-
-
 def test_parse_runtime_config_github_org_ignores_legacy_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
 
@@ -227,41 +209,7 @@ def test_parse_runtime_config_github_org_ignores_legacy_env(monkeypatch: Any) ->
     )
 
     assert runtime.github_org == ""
-
-
-def test_parse_runtime_config_github_org_override_wins_over_env(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
-
-    runtime = parse_runtime_config(
-        azdo_org="example",
-        api_version=None,
-        timeout_seconds=None,
-        max_output_chars=None,
-        github_org="cli-override",
-        github_api_url_default="https://api.github.com/",
-        github_api_version_default="2022-11-28",
-        gitlab_api_url_default="https://gitlab.com/api/v4/",
-    )
-
-    assert runtime.github_org == "cli-override"
-
-
-def test_parse_runtime_config_gitlab_group_override(monkeypatch: Any) -> None:
-    monkeypatch.delenv("GITLAB_GROUP", raising=False)
-
-    runtime = parse_runtime_config(
-        azdo_org="example",
-        api_version=None,
-        timeout_seconds=None,
-        max_output_chars=None,
-        github_api_url_default="https://api.github.com/",
-        github_api_version_default="2022-11-28",
-        gitlab_group="platform",
-        gitlab_api_url_default="https://gitlab.com/api/v4/",
-    )
-
-    assert runtime.gitlab_group == "platform"
-    assert runtime.gitlab_configured is True
+    assert runtime.github_configured is False
 
 
 def test_parse_runtime_config_gitlab_group_ignores_legacy_env(monkeypatch: Any) -> None:
@@ -278,26 +226,7 @@ def test_parse_runtime_config_gitlab_group_ignores_legacy_env(monkeypatch: Any) 
     )
 
     assert runtime.gitlab_group == ""
-
-
-def test_parse_runtime_config_gitlab_group_override_wins_over_env(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GITLAB_GROUP", "env-group")
-    monkeypatch.delenv("GITLAB_HOST", raising=False)
-    monkeypatch.delenv("GITLAB_API_URL", raising=False)
-
-    runtime = parse_runtime_config(
-        azdo_org="example",
-        api_version=None,
-        timeout_seconds=None,
-        max_output_chars=None,
-        github_api_url_default="https://api.github.com/",
-        github_api_version_default="2022-11-28",
-        gitlab_group="cli-group",
-        gitlab_api_url_default="https://gitlab.example.com/api/v4/",
-    )
-
-    assert runtime.gitlab_group == "cli-group"
-    assert runtime.gitlab_api_url == "https://gitlab.example.com/api/v4"
+    assert runtime.gitlab_configured is False
 
 
 def test_parse_runtime_config_gitlab_host_env_fallback(monkeypatch: Any) -> None:
@@ -351,7 +280,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback(monkeypatch: Any) -> Non
         max_output_chars=None,
         github_api_url_default="https://api.github.com/",
         github_api_version_default="2022-11-28",
-        gitlab_group="example-group",
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
@@ -395,7 +323,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_preserves_api_protocol(m
         max_output_chars=None,
         github_api_url_default="https://api.github.com/",
         github_api_version_default="2022-11-28",
-        gitlab_group="example-group",
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
@@ -439,7 +366,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_supports_single_label_ho
         max_output_chars=None,
         github_api_url_default="https://api.github.com/",
         github_api_version_default="2022-11-28",
-        gitlab_group="example-group",
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
@@ -487,7 +413,6 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_without_status_all_suppo
         max_output_chars=None,
         github_api_url_default="https://api.github.com/",
         github_api_version_default="2022-11-28",
-        gitlab_group="example-group",
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 

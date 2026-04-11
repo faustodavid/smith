@@ -31,14 +31,16 @@ export GITLAB_TOKEN="<token>"
 az login
 
 smith config list
-smith repos github
-smith repos gitlab
-smith code search "grafana" --provider all
+smith repos github-public
+smith repos gitlab-platform
+smith code search "grafana" --remote all
 ```
 
 ## Configuration
 
 Smith reads remotes from `~/.config/smith/config.yaml` by default. You can override the location with `SMITH_CONFIG=/path/to/config.yaml`.
+
+Commands take configured remote names such as `github-public`, `gitlab-platform`, or `azdo-main`.
 
 Create the file:
 
@@ -105,19 +107,19 @@ Usage examples:
 
 ```bash
 # Search across every enabled remote
-smith code search "grafana" --provider all
+smith code search "grafana" --remote all
 
-# Search only enabled GitHub remotes
-smith code search "grafana" --provider github
+# Search only one configured remote
+smith code search "grafana" --remote github-public
 
-# List repositories for all enabled GitLab remotes
-smith repos gitlab
+# List repositories for one configured GitLab remote
+smith repos gitlab-platform
 
-# Grep a repository across all enabled GitHub remotes
-smith code grep github repo-a "TODO"
+# Grep a repository through one configured GitHub remote
+smith code grep github-public repo-a "TODO"
 
 # Azure DevOps commands still take a project plus repo
-smith code grep azdo SRE repo-a "timeout"
+smith code grep azdo-main SRE repo-a "timeout"
 ```
 
 When multiple remotes are queried, Smith labels results with the remote name.

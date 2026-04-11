@@ -119,7 +119,7 @@ def _set_remote_defaults(
     *,
     remote: RemoteConfig,
 ) -> None:
-    parser.set_defaults(provider=remote.provider, remote=remote.name, remote_or_provider=remote.name)
+    parser.set_defaults(remote=remote.name, remote_provider=remote.provider)
 
 
 def _add_parser(
@@ -374,17 +374,18 @@ def _add_config_group(root_subparsers: Any) -> None:
     )
 
 
-def _add_cache_group(root_subparsers: Any) -> None:
+def _add_cache_group(root_subparsers: Any, *, remotes: list[RemoteConfig]) -> None:
     cache = _add_parser(root_subparsers, "cache", help_text="Manage local grep caches")
     cache_sub = cache.add_subparsers(dest="action", required=True)
 
     cache_clean = _add_parser(cache_sub, "clean", help_text="Remove local grep caches")
+    remote_choices = ["all", *[remote.name for remote in remotes]]
     cache_clean.add_argument(
-        "--provider",
-        dest="cache_provider",
-        choices=["github", "gitlab", "all"],
+        "--remote",
+        dest="cache_remote",
+        choices=remote_choices,
         default="all",
-        help="Cache provider to clean (default: all)",
+        help="Remote whose grep cache should be cleaned (default: all)",
     )
     _add_output_format(cache_clean)
     _set_handler(
@@ -633,7 +634,7 @@ def build_parser(*, smith_config: SmithConfig | None = None) -> argparse.Argumen
     _add_orgs_group(root_subparsers, remotes=remotes)
     _add_code_group(root_subparsers, remotes=remotes, remote_hint=remote_hint)
     _add_config_group(root_subparsers)
-    _add_cache_group(root_subparsers)
+    _add_cache_group(root_subparsers, remotes=remotes)
     _add_pr_group(root_subparsers, remotes=remotes)
     _add_ci_group(root_subparsers, remotes=remotes)
     _add_stories_group(root_subparsers, remotes=remotes)

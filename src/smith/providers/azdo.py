@@ -35,6 +35,11 @@ class AzdoProvider(
         super().__init__(config=config, session=session, token_env=token_env)
         self.org_name = azdo_org or config.azdo_org
         self.org_url = f"https://dev.azure.com/{self.org_name}" if self.org_name else config.azdo_org_url
+        self._almsearch_base_url = (
+            f"https://almsearch.dev.azure.com/{self.org_name}"
+            if self.org_name
+            else config.azdo_search_url
+        )
         self.api_version = config.api_version
         self.max_output_chars = config.max_output_chars
         self._credential = credential or DefaultAzureCredential(
@@ -61,4 +66,4 @@ class AzdoProvider(
         return "Authentication rejected with HTTP 401/403. Run `az login` and retry."
 
     def _almsearch_url(self, suffix: str) -> str:
-        return f"{self._config.azdo_search_url}{suffix}"
+        return f"{self._almsearch_base_url}{suffix}"

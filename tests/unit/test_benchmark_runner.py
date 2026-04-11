@@ -8,6 +8,7 @@ import pytest
 from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.runner import BenchmarkEval, aggregate_workspace
 from smith.benchmark.smith_cli import build_smith_cli_subprocess, validate_smith_cli_command
+from smith.config import RemoteConfig, SmithConfig, save_config
 
 
 def _write_benchmark_run(
@@ -39,7 +40,7 @@ def _write_benchmark_run(
     (outputs_dir / "metrics.json").write_text(json.dumps({"total_tool_calls": 1, "errors_encountered": 0}))
 
 
-def test_validate_smith_cli_command_injects_github_provider_for_code_search():
+def test_validate_smith_cli_command_injects_github_remote_for_code_search() -> None:
     tokens = validate_smith_cli_command('code search "otelcol.exporter.loki" --take 5')
 
     assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--remote", "github"]
@@ -56,6 +57,34 @@ def test_validate_smith_cli_command_allows_prefixed_smith_global_flags():
     assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--remote", "github"]
 
 
+def test_validate_smith_cli_command_uses_configured_github_remote(tmp_path: Path) -> None:
+    config_path = tmp_path / "smith.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github-public": RemoteConfig(
+                    name="github-public",
+                    provider="github",
+                    org=BENCHMARK_GITHUB_ORG,
+                    host="github.com",
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url="https://api.github.com",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    tokens = validate_smith_cli_command(
+        'code search "otelcol.exporter.loki" --take 5',
+        env={"SMITH_CONFIG": str(config_path)},
+    )
+
+    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--remote", "github-public"]
+
+
 def test_build_smith_cli_subprocess_injects_benchmark_config_and_local_src_path():
     argv, env = build_smith_cli_subprocess("repos github")
 
@@ -64,6 +93,35 @@ def test_build_smith_cli_subprocess_injects_benchmark_config_and_local_src_path(
     config_text = Path(env["SMITH_CONFIG"]).read_text()
     assert BENCHMARK_GITHUB_ORG in config_text
     assert "src" in env["PYTHONPATH"]
+
+
+def test_build_smith_cli_subprocess_preserves_explicit_smith_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "smith.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github-public": RemoteConfig(
+                    name="github-public",
+                    provider="github",
+                    org=BENCHMARK_GITHUB_ORG,
+                    host="github.com",
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url="https://api.github.com",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    argv, env = build_smith_cli_subprocess(
+        "repos github-public",
+        env={"SMITH_CONFIG": str(config_path)},
+    )
+
+    assert argv[3:] == ["repos", "github-public"]
+    assert env["SMITH_CONFIG"] == str(config_path)
 
 
 def test_aggregate_workspace_skips_missing_configs_for_single_config_run(tmp_path):

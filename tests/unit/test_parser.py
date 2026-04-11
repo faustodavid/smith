@@ -67,16 +67,16 @@ def test_cache_clean_parser_defaults() -> None:
     args = parser.parse_args(["cache", "clean"])
 
     assert args.command_id == "cache.clean"
-    assert args.cache_provider == "all"
+    assert args.cache_remote == "all"
     assert args.requires_client is False
 
 
-def test_cache_clean_parser_accepts_provider_override() -> None:
+def test_cache_clean_parser_accepts_remote_override() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(["cache", "clean", "--provider", "github"])
+    args = parser.parse_args(["cache", "clean", "--remote", "github"])
 
     assert args.command_id == "cache.clean"
-    assert args.cache_provider == "github"
+    assert args.cache_remote == "github"
 
 
 def test_stories_group_parses_to_stories_command() -> None:
@@ -85,7 +85,7 @@ def test_stories_group_parses_to_stories_command() -> None:
 
     assert args.command_id == "stories.get"
     assert args.remote == "azdo"
-    assert args.provider == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 123
 
@@ -97,7 +97,7 @@ def test_orgs_parser_uses_canonical_command_id(provider: str) -> None:
 
     assert args.command_id == "orgs"
     assert args.remote == provider
-    assert args.provider == provider
+    assert args.remote_provider == provider
 
 
 def test_repos_parser_uses_canonical_command_id() -> None:
@@ -106,7 +106,7 @@ def test_repos_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "repos"
     assert args.remote == "github"
-    assert args.provider == "github"
+    assert args.remote_provider == "github"
     assert args.project is None
 
 
@@ -116,7 +116,7 @@ def test_repos_gitlab_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "repos"
     assert args.remote == "gitlab"
-    assert args.provider == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.project is None
 
 
@@ -126,7 +126,7 @@ def test_repos_parser_accepts_named_remote() -> None:
 
     assert args.command_id == "repos"
     assert args.remote == "gitlab-infra"
-    assert args.provider == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.project is None
 
 
@@ -136,7 +136,7 @@ def test_prs_list_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "prs.list"
     assert args.remote == "azdo"
-    assert args.provider == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.repo == "repo-a"
 
@@ -147,7 +147,7 @@ def test_prs_get_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "prs.get"
     assert args.remote == "github"
-    assert args.provider == "github"
+    assert args.remote_provider == "github"
     assert args.repo == "repo-a"
     assert args.id == 42
 
@@ -158,7 +158,7 @@ def test_prs_get_gitlab_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "prs.get"
     assert args.remote == "gitlab"
-    assert args.provider == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.id == 42
 
@@ -169,7 +169,7 @@ def test_prs_threads_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "prs.threads"
     assert args.remote == "azdo"
-    assert args.provider == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.repo == "repo-a"
     assert args.id == 42
@@ -181,7 +181,7 @@ def test_pipelines_logs_list_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "pipelines.logs.list"
     assert args.remote == "azdo"
-    assert args.provider == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 42
 
@@ -192,7 +192,7 @@ def test_code_grep_parser_uses_required_positional_pattern() -> None:
 
     assert args.command_id == "code.grep"
     assert args.remote == "github"
-    assert args.provider == "github"
+    assert args.remote_provider == "github"
     assert args.repo == "repo-a"
     assert args.path == "/src"
     assert args.pattern == "error"
@@ -205,7 +205,7 @@ def test_code_grep_parser_accepts_no_clone() -> None:
 
     assert args.command_id == "code.grep"
     assert args.remote == "github"
-    assert args.provider == "github"
+    assert args.remote_provider == "github"
     assert args.repo == "repo-a"
     assert args.pattern == "error"
     assert args.no_clone is True
@@ -217,7 +217,7 @@ def test_code_grep_gitlab_parser_uses_required_positional_pattern() -> None:
 
     assert args.command_id == "code.grep"
     assert args.remote == "gitlab"
-    assert args.provider == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.path == "/src"
     assert args.pattern == "error"
@@ -230,7 +230,7 @@ def test_code_grep_parser_accepts_named_remote() -> None:
 
     assert args.command_id == "code.grep"
     assert args.remote == "gitlab-infra"
-    assert args.provider == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.path == "/src"
     assert args.pattern == "error"
@@ -242,7 +242,7 @@ def test_pipelines_logs_grep_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "pipelines.logs.grep"
     assert args.remote == "github"
-    assert args.provider == "github"
+    assert args.remote_provider == "github"
     assert args.repo == "repo-a"
     assert args.id == 42
     assert args.pattern == "error"
@@ -254,7 +254,7 @@ def test_pipelines_logs_grep_gitlab_parser_uses_canonical_command_id() -> None:
 
     assert args.command_id == "pipelines.logs.grep"
     assert args.remote == "gitlab"
-    assert args.provider == "gitlab"
+    assert args.remote_provider == "gitlab"
     assert args.repo == "repo-a"
     assert args.id == 42
     assert args.pattern == "error"
@@ -266,7 +266,7 @@ def test_pipelines_logs_grep_parser_accepts_log_id_before_pattern() -> None:
 
     assert args.command_id == "pipelines.logs.grep"
     assert args.remote == "azdo"
-    assert args.provider == "azdo"
+    assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 42
     assert args.log_id == 18
@@ -307,6 +307,7 @@ def test_grep_commands_fail_when_pattern_contract_is_not_met(argv: list[str]) ->
         ["--github-org", "g-org", "repos", "github"],
         ["--gitlab-group", "platform", "repos", "gitlab"],
         ["code", "search", "grafana", "--provider", "github"],
+        ["cache", "clean", "--provider", "github"],
         ["work", "get", "azdo", "SRE", "123"],
         ["pr", "list", "github", "repo-a"],
         ["pr", "get", "github", "repo-a", "42"],

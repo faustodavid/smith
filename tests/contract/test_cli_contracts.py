@@ -14,7 +14,7 @@ def _make_args(**overrides: Any) -> Namespace:
     defaults = {
         "output_format": "text",
         "remote": None,
-        "provider": "azdo",
+        "remote_provider": "azdo",
         "command_id": "orgs",
         "primary_path": "orgs",
         "alias_used": None,
@@ -44,7 +44,7 @@ def _make_args(**overrides: Any) -> Namespace:
         "from_line": 10,
         "to_line": 20,
         "no_clone": False,
-        "cache_provider": "all",
+        "cache_remote": "all",
         "id": 42,
         "log_id": 9,
         "wiql": "SELECT [System.Id] FROM WorkItems",
@@ -74,15 +74,17 @@ class _RecordingClient:
         return _inner
 
 
-def test_csv_list_and_provider_helpers() -> None:
+def test_csv_list_and_remote_helpers() -> None:
+    args = _make_args(remote="github", remote_provider="github")
+
     assert handlers._csv_list(" a, ,b , c ") == ["a", "b", "c"]
-    assert handlers._selected_providers("all") == ["github", "gitlab", "azdo"]
-    assert handlers._selected_providers("github") == ["github"]
+    assert handlers._selected_remote(args) == "github"
+    assert handlers._selected_remote_provider(args) == "github"
 
 
 def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
     grouped_warning = {
-        "providers": {
+        "remotes": {
             "github": {
                 "ok": True,
                 "warnings": ["rate limited"],
@@ -90,7 +92,7 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
             }
         }
     }
-    grouped_failure = {"providers": {"azdo": {"ok": False, "warnings": [], "partial": False}}}
+    grouped_failure = {"remotes": {"azdo": {"ok": False, "warnings": [], "partial": False}}}
     flat_warning = {"warnings": ["warning"]}
     flat_partial = {"partial": True}
 
@@ -98,35 +100,35 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
     assert handlers._is_partial_result(grouped_failure) is True
     assert handlers._is_partial_result(flat_warning) is True
     assert handlers._is_partial_result(flat_partial) is True
-    assert handlers._is_partial_result({"providers": []}) is False
+    assert handlers._is_partial_result({"remotes": []}) is False
     assert handlers._is_partial_result({"warnings": []}) is False
 
 
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (_make_args(command_id="repos", provider="all"), "does not support remote 'all'"),
+        (_make_args(command_id="repos", remote="all", remote_provider=""), "does not support remote 'all'"),
         (_make_args(command_id="code.search", query="   "), "code search requires a query"),
-        (_make_args(command_id="code.search", provider="github", project="proj-a"), "GitHub code search does not support `--project`"),
-        (_make_args(command_id="code.search", provider="gitlab", project="proj-a"), "GitLab code search does not support `--project`"),
+        (_make_args(command_id="code.search", remote="github", remote_provider="github", project="proj-a"), "GitHub code search does not support `--project`"),
+        (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project="proj-a"), "GitLab code search does not support `--project`"),
     ],
 )
-def test_validate_args_for_provider_rejects_invalid_inputs(
+def test_validate_args_for_remote_rejects_invalid_inputs(
     args: Namespace,
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        handlers.validate_args_for_provider(args)
+        handlers.validate_args_for_remote(args)
 
 
-def test_validate_args_for_provider_allows_code_search_all() -> None:
-    args = _make_args(command_id="code.search", provider="all")
+def test_validate_args_for_remote_allows_code_search_all() -> None:
+    args = _make_args(command_id="code.search", remote="all", remote_provider="")
 
-    handlers.validate_args_for_provider(args)
+    handlers.validate_args_for_remote(args)
 
 
-def test_validate_args_for_provider_resolves_remote_type_from_config(monkeypatch: Any) -> None:
-    args = _make_args(command_id="code.search", remote="gitlab-infra", provider="", project="proj-a")
+def test_validate_args_for_remote_resolves_remote_type_from_config(monkeypatch: Any) -> None:
+    args = _make_args(command_id="code.search", remote="gitlab-infra", remote_provider="", project="proj-a")
     monkeypatch.setattr(
         handlers,
         "load_config",
@@ -147,12 +149,12 @@ def test_validate_args_for_provider_resolves_remote_type_from_config(monkeypatch
     )
 
     with pytest.raises(ValueError, match="GitLab code search does not support `--project`"):
-        handlers.validate_args_for_provider(args)
+        handlers.validate_args_for_remote(args)
 
 
-def test_handle_code_grep_prefers_named_remote_over_provider(monkeypatch: Any, capsys: Any) -> None:
+def test_handle_code_grep_uses_named_remote(monkeypatch: Any, capsys: Any) -> None:
     client = _RecordingClient(payload={"marker": "code-grep"})
-    args = _make_args(command_id="code.grep", remote="gitlab-infra", provider="gitlab", project=None)
+    args = _make_args(command_id="code.grep", remote="gitlab-infra", remote_provider="gitlab", project=None)
     monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
 
     handlers.handle_code_grep(client, args)
@@ -248,7 +250,7 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
         ),
         (
             "handle_code_search",
-            _make_args(command_id="code.search", provider="all"),
+            _make_args(command_id="code.search", remote="all", remote_provider=""),
             "execute_code_search",
             {
                 "remote_or_provider": "all",
@@ -372,12 +374,12 @@ def test_handlers_forward_expected_arguments(
     assert client.calls == [(expected_method, expected_kwargs)]
 
 
-def test_handle_cache_clean_cleans_requested_provider_cache(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
+def test_handle_cache_clean_cleans_requested_remote_cache(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
     github_cache = tmp_path / "github-grep"
     gitlab_cache = tmp_path / "gitlab-grep"
     github_cache.mkdir()
     gitlab_cache.mkdir()
-    args = _make_args(command_id="cache.clean", output_format="text", cache_provider="github")
+    args = _make_args(command_id="cache.clean", output_format="text", cache_remote="all")
 
     monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))
     monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(gitlab_cache))
@@ -387,9 +389,9 @@ def test_handle_cache_clean_cleans_requested_provider_cache(monkeypatch: Any, ca
     output = capsys.readouterr()
 
     assert exit_code == handlers.EXIT_OK
-    assert output.out.strip() == f"cache.clean:{github_cache}"
+    assert output.out.strip() == f"cache.clean:{github_cache},{gitlab_cache}"
     assert not github_cache.exists()
-    assert gitlab_cache.exists()
+    assert not gitlab_cache.exists()
 
 
 @pytest.mark.parametrize(
@@ -408,7 +410,7 @@ def test_handle_pr_list_branches_by_provider(
     expected_repos: list[str] | None,
 ) -> None:
     client = _RecordingClient(payload={"marker": provider})
-    args = _make_args(command_id="prs.list", provider=provider)
+    args = _make_args(command_id="prs.list", remote=provider, remote_provider=provider)
     monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
 
     exit_code = handlers.handle_pr_list(client, args)
@@ -445,8 +447,12 @@ def test_client_from_args_loads_config_and_passes_smith_config(monkeypatch: Any)
             captured.update(kwargs)
 
     monkeypatch.setattr(handlers, "SmithClient", _FakeClient)
-    monkeypatch.setattr(handlers, "load_config", lambda: fake_config)
+    monkeypatch.setattr(
+        handlers,
+        "load_config",
+        lambda: (_ for _ in ()).throw(AssertionError("load_config should not be called")),
+    )
 
     handlers._client_from_args(SimpleNamespace())
 
-    assert captured == {"smith_config": fake_config}
+    assert captured == {}
