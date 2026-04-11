@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
-from smith.config import load_config, parse_bool_env, parse_int_env, parse_runtime_config
+from smith.config import RemoteConfig, SmithConfig, load_config, parse_bool_env, parse_int_env, parse_runtime_config, save_config
 
 
 @pytest.mark.parametrize(
@@ -519,3 +520,90 @@ def test_load_config_requires_existing_file(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Config file not found"):
         load_config(config_path=missing_path)
+
+
+def test_load_config_preserves_explicit_github_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  github-stub:
+    provider: github
+    org: octo-org
+    host: 127.0.0.1:4010
+    token_env: GITHUB_TOKEN
+    enabled: true
+    api_url: http://127.0.0.1:4010/api/github
+defaults: {}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["github-stub"].host == "127.0.0.1:4010"
+    assert config.remotes["github-stub"].api_url == "http://127.0.0.1:4010/api/github"
+
+
+@pytest.mark.parametrize(
+    ("host", "api_url"),
+    [
+        ("127.0.0.1:4010", "http://127.0.0.1:4010/api/github"),
+        ("github.example.test", "https://github.example.test/custom/api"),
+    ],
+)
+def test_save_config_persists_non_derivable_github_api_url_override(
+    tmp_path: Path,
+    host: str,
+    api_url: str,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github-stub": RemoteConfig(
+                    name="github-stub",
+                    provider="github",
+                    org="octo-org",
+                    host=host,
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url=api_url,
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["github-stub"]["api_url"] == api_url
+    assert reloaded.remotes["github-stub"].api_url == api_url
+
+
+def test_save_config_omits_derived_github_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github-enterprise": RemoteConfig(
+                    name="github-enterprise",
+                    provider="github",
+                    org="octo-org",
+                    host="github.example.test",
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url="https://github.example.test/api/v3",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert "api_url" not in saved["remotes"]["github-enterprise"]

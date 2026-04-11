@@ -16,16 +16,16 @@ A `smith` investigation is acceptable only if all gates pass.
 - Final evidence comes from focused `smith code grep`.
 - `prs`, `pipelines logs`, and `stories` are used only when primary or corroborating evidence is needed.
 - Remote syntax is explicit:
-  - `smith code grep <azdo-remote> <project> <repo> "<regex>"`
-  - `smith code grep <github-remote> <repo> "<regex>"`
-  - `smith code grep <gitlab-remote> <repo> "<regex>"`
-  - `smith pipelines logs list <github-remote> <repo> <id>`
+  - `smith code grep <azdo-remote-name> <project> <repo> "<regex>"`
+  - `smith code grep <github-remote-name> <repo> "<regex>"`
+  - `smith code grep <gitlab-remote-name> <repo> "<regex>"`
+  - `smith pipelines logs list <github-remote-name> <repo> <id>`
 - GitHub repo arguments stay bare:
   - Search results may look like `org/repo:path`
   - Follow-up GitHub commands still take `<repo>`, not `org/repo`
 - GitLab repo arguments stay group-relative:
   - Search results may look like `group/repo:path`
-  - Follow-up GitLab commands take `<repo>` relative to configured `GITLAB_GROUP`, not full `group/repo`
+  - Follow-up GitLab commands take `<repo>` relative to the configured remote's group, not full `group/repo`
 
 ## Gate 3: Answer Quality
 

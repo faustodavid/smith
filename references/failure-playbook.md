@@ -4,8 +4,8 @@ Use this when a read command fails. Use `references/auth-troubleshooting.md` for
 
 ## 401 or 403
 
-- Confirm `AZURE_DEVOPS_ORG` or `GITHUB_ORG` is set for the target provider.
-- Confirm `GITLAB_GROUP` is set for GitLab targets.
+- Confirm the target remote exists in the active Smith config.
+- Confirm the token env var referenced by that remote is set.
 - Run `az login`.
 - For GitHub, use `export GITHUB_TOKEN="<token>"` or `gh auth login`.
 - For GitLab, use `export GITLAB_TOKEN="<token>"` or `glab auth login`.
@@ -39,7 +39,7 @@ Then remap the repo and path, and continue with focused grep.
 
 For GitHub commands, if you copied `org/repo` from search output and got a 404, rerun the command with the bare `<repo>` slug.
 
-For GitLab commands, if you copied full `group/repo` from search output and got a 404, rerun the command with `<repo>` relative to configured `GITLAB_GROUP`.
+For GitLab commands, if you copied full `group/repo` from search output and got a 404, rerun the command with `<repo>` relative to the configured remote's group.
 
 ## Unsupported Provider Flow
 

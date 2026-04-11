@@ -7,8 +7,8 @@ import pytest
 
 from smith.benchmark.constants import BENCHMARK_GITHUB_ORG
 from smith.benchmark.runner import BenchmarkEval, aggregate_workspace
-from smith.benchmark.smith_cli import build_smith_cli_subprocess, validate_smith_cli_command
-from smith.config import RemoteConfig, SmithConfig, save_config
+from smith.benchmark.smith_cli import InProcessSmithCliRunner, build_smith_cli_subprocess, validate_smith_cli_command
+from smith.config import RemoteConfig, SmithConfig, load_config, save_config
 
 
 def _write_benchmark_run(
@@ -122,6 +122,50 @@ def test_build_smith_cli_subprocess_preserves_explicit_smith_config(tmp_path: Pa
 
     assert argv[3:] == ["repos", "github-public"]
     assert env["SMITH_CONFIG"] == str(config_path)
+
+
+def test_build_smith_cli_subprocess_preserves_explicit_benchmark_github_api_url() -> None:
+    api_url = "http://127.0.0.1:4010/api/github"
+
+    argv, env = build_smith_cli_subprocess(
+        "repos github",
+        env={"GITHUB_API_URL": api_url},
+    )
+
+    loaded_config = load_config(config_path=Path(env["SMITH_CONFIG"]))
+
+    assert argv[3:] == ["repos", "github"]
+    assert loaded_config.remotes["github"].api_url == api_url
+
+
+def test_in_process_runner_client_cache_keys_on_api_url_and_smith_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_clients: list[object] = []
+
+    def _fake_client() -> object:
+        client = object()
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr("smith.benchmark.smith_cli.SmithClient", _fake_client)
+    runner = InProcessSmithCliRunner()
+
+    first = runner._get_or_create_client(
+        {"GITHUB_API_URL": "http://127.0.0.1:4010/api/github", "SMITH_CONFIG": "/tmp/config-a.yaml"}
+    )
+    second = runner._get_or_create_client(
+        {"GITHUB_API_URL": "http://127.0.0.1:4010/api/github/", "SMITH_CONFIG": "/tmp/config-a.yaml"}
+    )
+    third = runner._get_or_create_client(
+        {"GITHUB_API_URL": "http://127.0.0.1:4020/api/github", "SMITH_CONFIG": "/tmp/config-a.yaml"}
+    )
+    fourth = runner._get_or_create_client(
+        {"GITHUB_API_URL": "http://127.0.0.1:4020/api/github", "SMITH_CONFIG": "/tmp/config-b.yaml"}
+    )
+
+    assert first is second
+    assert third is not second
+    assert fourth is not third
+    assert len(created_clients) == 3
 
 
 def test_aggregate_workspace_skips_missing_configs_for_single_config_run(tmp_path):

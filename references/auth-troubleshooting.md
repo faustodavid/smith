@@ -2,23 +2,25 @@
 
 Use this only when env or credentials block progress.
 
-## Missing `AZURE_DEVOPS_ORG`
+## Missing Remote Configuration
 
 ```bash
-export AZURE_DEVOPS_ORG="<org>"
+smith config path
+smith config list
+smith config show <configured-remote-name>
 ```
 
-## Missing `GITHUB_ORG`
+If the needed remote is missing, add it to the active Smith config or point `SMITH_CONFIG` at the correct config file.
+
+## Missing Token Env Var
 
 ```bash
-export GITHUB_ORG="<org>"
+printenv GITHUB_TOKEN
+printenv GITLAB_TOKEN
+printenv AZURE_DEVOPS_PAT
 ```
 
-## Missing `GITLAB_GROUP`
-
-```bash
-export GITLAB_GROUP="<group>"
-```
+Use the token env var named by the remote's `token_env` field.
 
 ## Azure Login Or Token Failure
 
@@ -52,5 +54,5 @@ glab auth status
 
 - Confirm your account can access the target org, project, or repo.
 - Validate the Azure DevOps org URL: `https://dev.azure.com/<org>`.
-- Validate the GitLab group path configured in `GITLAB_GROUP`.
+- Validate the GitLab group path configured on the target remote.
 - Retry once.

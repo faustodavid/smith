@@ -249,6 +249,26 @@ def _compute_api_url_for_remote(provider: str, host: str) -> str:
     return ""
 
 
+def _normalize_config_api_url(raw_api_url: Any) -> str:
+    return str(raw_api_url or "").strip().rstrip("/")
+
+
+def _load_remote_api_url(*, provider: str, remote: dict[str, Any], host: str) -> str:
+    explicit_api_url = _normalize_config_api_url(remote.get("api_url", ""))
+    if provider == "github" and explicit_api_url:
+        return explicit_api_url
+    return _compute_api_url_for_remote(provider, host)
+
+
+def _should_persist_api_url(remote: RemoteConfig) -> bool:
+    if remote.provider != "github":
+        return False
+    normalized_api_url = _normalize_config_api_url(remote.api_url)
+    if not normalized_api_url:
+        return False
+    return normalized_api_url != _compute_api_url_for_remote(remote.provider, remote.host)
+
+
 def _validate_remote_dict(name: str, remote: dict[str, Any]) -> None:
     provider = remote.get("provider", "").strip().lower()
     if provider not in {"github", "gitlab", "azdo"}:
@@ -299,10 +319,10 @@ def load_config(*, config_path: Path | None = None) -> SmithConfig:
                 host = "gitlab.com"
             elif provider == "azdo":
                 host = "dev.azure.com"
-
+        
         token_env = remote.get("token_env", "").strip() or None
         enabled = bool(remote.get("enabled", True))
-        api_url = _compute_api_url_for_remote(provider, host)
+        api_url = _load_remote_api_url(provider=provider, remote=remote, host=host)
 
         remotes_dict[name] = RemoteConfig(
             name=name,
@@ -346,6 +366,9 @@ def save_config(config: SmithConfig, *, config_path: Path | None = None) -> None
 
         if remote.token_env:
             remote_dict["token_env"] = remote.token_env
+
+        if _should_persist_api_url(remote):
+            remote_dict["api_url"] = _normalize_config_api_url(remote.api_url)
 
         remotes_dict[name] = remote_dict
 

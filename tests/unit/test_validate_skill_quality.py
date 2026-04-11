@@ -49,4 +49,4 @@ def test_behavior_fixture_covers_github_repo_shape_rule() -> None:
 
     assert any(case.get("required_phrase") == "bare `<repo>`" for case in cases)
     assert any(case.get("required_phrase") == "not `org/repo`" for case in cases)
-    assert any(case.get("required_phrase") == "relative to configured `GITLAB_GROUP`" for case in cases)
+    assert any(case.get("required_phrase") == "relative to the configured remote's group" for case in cases)
