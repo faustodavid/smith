@@ -131,6 +131,42 @@ class BaseProvider(ABC):
         expect_json: bool = True,
         session: requests.Session | None = None,
     ) -> Any:
+        response = self._request_response(
+            method,
+            url,
+            params=params,
+            json_body=json_body,
+            headers=headers,
+            session=session,
+        )
+
+        if not expect_json:
+            return response.text
+
+        if response.status_code == 204:
+            return {}
+
+        body = response.text or ""
+        if not body.strip():
+            return {}
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise SmithApiError(
+                f"Expected JSON response from {self._build_url(url)} but received invalid JSON"
+            ) from exc
+
+    def _request_response(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        session: requests.Session | None = None,
+    ) -> Any:
         method_upper = method.upper()
         max_attempts = self._config.http_retry_max_attempts
         is_retryable_get = method_upper == "GET" and max_attempts > 1
@@ -215,22 +251,7 @@ class BaseProvider(ABC):
                 status_code=response.status_code,
             )
 
-        if not expect_json:
-            return response.text
-
-        if response.status_code == 204:
-            return {}
-
-        body = response.text or ""
-        if not body.strip():
-            return {}
-
-        try:
-            return response.json()
-        except ValueError as exc:
-            raise SmithApiError(
-                f"Expected JSON response from {resolved_url} but received invalid JSON"
-            ) from exc
+        return response
 
     def _request_json(
         self,

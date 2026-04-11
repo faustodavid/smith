@@ -167,10 +167,17 @@ def _render_discover_repos(data: Any) -> str:
     return "\n".join(lines)
 
 
+def _code_search_summary_line(matches_count: int, shown_count: int) -> str:
+    if shown_count < matches_count:
+        return f"matches: {matches_count} (showing {shown_count})"
+    return f"matches: {matches_count}"
+
+
 def _render_code_search(data: Any) -> str:
     matches_count = int(data.get("matchesCount", 0))
-    result_lines = data.get("results", [])
-    lines = [f"matches: {matches_count}"]
+    raw_results = data.get("results", [])
+    result_lines = raw_results if isinstance(raw_results, list) else []
+    lines = [_code_search_summary_line(matches_count, len(result_lines))]
     lines.extend(str(entry) for entry in result_lines)
     return "\n".join(lines)
 
@@ -405,7 +412,7 @@ def _render_provider_grouped(command: str, payload: dict[str, Any]) -> str:
                 raw_results = provider_data.get("results", [])
                 if isinstance(raw_results, list):
                     result_lines = raw_results
-            output_lines.append(f"[{provider}] matches: {matches_count}")
+            output_lines.append(f"[{provider}] {_code_search_summary_line(matches_count, len(result_lines))}")
             output_lines.extend(str(entry_line) for entry_line in result_lines)
         else:
             output_lines.append(f"[{provider}]")

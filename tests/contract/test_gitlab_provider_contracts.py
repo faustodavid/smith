@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -37,6 +38,23 @@ def _cache_git_output(
     return _fake_git_output
 
 
+class _FakeJsonResponse:
+    def __init__(
+        self,
+        payload: Any,
+        *,
+        headers: dict[str, str] | None = None,
+        status_code: int = 200,
+    ) -> None:
+        self._payload = payload
+        self.headers = headers or {}
+        self.status_code = status_code
+        self.text = json.dumps(payload)
+
+    def json(self) -> Any:
+        return self._payload
+
+
 def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) -> None:
     provider = _provider()
     calls: list[dict[str, Any]] = []
@@ -54,14 +72,17 @@ def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) ->
         ],
     )
 
-    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
         calls.append({"method": method, "path": path, "params": params})
-        return [
-            {"path": "src/app.py"},
-            {"path": "src/util.py"},
-        ]
+        return _FakeJsonResponse(
+            [
+                {"path": "src/app.py"},
+                {"path": "src/util.py"},
+            ],
+            headers={"X-Total": "2"},
+        )
 
-    monkeypatch.setattr(provider, "_request", _fake_request)
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
 
     assert provider.list_projects() == [
         {
@@ -87,8 +108,83 @@ def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) ->
         {
             "method": "GET",
             "path": "/projects/gitlab-org%2Frepo-a/search",
-            "params": {"scope": "blobs", "search": "grafana", "per_page": 2, "page": 1},
+            "params": {"scope": "blobs", "search": "grafana", "per_page": 100, "page": 1},
         }
+    ]
+
+
+def test_gitlab_search_code_uses_pagination_headers_for_exact_total(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        page = int((params or {}).get("page", 1))
+        if page != 1:
+            raise AssertionError("did not expect additional pages when the first page already covers the requested window")
+        return _FakeJsonResponse(
+            [{"path": "src/app.py"}],
+            headers={"X-Total": "25", "X-Next-Page": "2"},
+        )
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+
+    result = provider.search_code(query="grafana", project=None, repos=["repo-a"], skip=0, take=1)
+
+    assert result == {"matchesCount": 25, "results": ["gitlab-org/repo-a:/src/app.py"]}
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/search",
+            "params": {"scope": "blobs", "search": "grafana", "per_page": 100, "page": 1},
+        }
+    ]
+
+
+def test_gitlab_search_code_falls_back_to_complete_pagination_for_exact_total(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+    page_one = [{"path": f"src/file-{index:03d}.py"} for index in range(100)]
+    page_two = [{"path": f"src/file-{100 + index:03d}.py"} for index in range(5)]
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        page = int((params or {}).get("page", 1))
+        if page == 1:
+            return _FakeJsonResponse(page_one)
+        if page == 2:
+            return _FakeJsonResponse(page_two)
+        if page == 3:
+            return _FakeJsonResponse([])
+        raise AssertionError(f"unexpected page request: {page}")
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+
+    result = provider.search_code(query="grafana", project=None, repos=["repo-a"], skip=100, take=2)
+
+    assert result == {
+        "matchesCount": 105,
+        "results": [
+            "gitlab-org/repo-a:/src/file-100.py",
+            "gitlab-org/repo-a:/src/file-101.py",
+        ],
+    }
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/search",
+            "params": {"scope": "blobs", "search": "grafana", "per_page": 100, "page": 1},
+        },
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/search",
+            "params": {"scope": "blobs", "search": "grafana", "per_page": 100, "page": 2},
+        },
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/search",
+            "params": {"scope": "blobs", "search": "grafana", "per_page": 100, "page": 3},
+        },
     ]
 
 

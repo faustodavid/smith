@@ -149,6 +149,22 @@ def test_render_text_renders_prs_pipeline_and_story_views() -> None:
     assert work_search == "id | type | state | title\n9 | Bug | Active | Fix login\nreturned_count: 1\nhas_more: False"
 
 
+def test_render_text_code_search_shows_total_and_displayed_counts() -> None:
+    rendered = render_text(
+        "code.search",
+        {
+            "matchesCount": 5,
+            "results": ["octo/repo:/src/app.py", "octo/repo:/src/lib.py"],
+        },
+    )
+
+    assert rendered == (
+        "matches: 5 (showing 2)\n"
+        "octo/repo:/src/app.py\n"
+        "octo/repo:/src/lib.py"
+    )
+
+
 def test_render_text_grouped_provider_output_preserves_order_warnings_and_errors() -> None:
     payload = {
         "providers": {
@@ -171,7 +187,7 @@ def test_render_text_grouped_provider_output_preserves_order_warnings_and_errors
     }
 
     assert render_text("code.search", payload) == (
-        "[github] matches: 2\n"
+        "[github] matches: 2 (showing 1)\n"
         "octo/repo:/src/app.py\n"
         "\n"
         "[azdo]\n"
