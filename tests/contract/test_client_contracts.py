@@ -65,7 +65,7 @@ def _make_smith_config(runtime: Any) -> SmithConfig:
         remotes["gitlab"] = RemoteConfig(
             name="gitlab",
             provider="gitlab",
-            org="",
+            org="gitlab-org",
             host="gitlab.com",
             token_env="GITLAB_TOKEN",
             enabled=True,
@@ -566,6 +566,7 @@ def test_execute_code_search_all_skips_unconfigured_remotes(monkeypatch: Any) ->
     assert _FakeAzdoProvider.instances == []
     assert _FakeGitHubProvider.instances == []
     assert len(_FakeGitLabProvider.instances) == 1
+    assert _FakeGitLabProvider.instances[0].kwargs["gitlab_org"] == "gitlab-org"
 
 
 @pytest.mark.parametrize("provider", ["github", "gitlab"])

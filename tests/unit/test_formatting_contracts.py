@@ -165,6 +165,23 @@ def test_render_text_code_search_shows_total_and_displayed_counts() -> None:
     )
 
 
+def test_render_text_code_search_shows_plus_for_lower_bound_totals() -> None:
+    rendered = render_text(
+        "code.search",
+        {
+            "matchesCount": 200,
+            "matchesCountLowerBound": True,
+            "results": ["repo:/src/app.py", "repo:/src/lib.py"],
+        },
+    )
+
+    assert rendered == (
+        "matches: 200+ (showing 2)\n"
+        "repo:/src/app.py\n"
+        "repo:/src/lib.py"
+    )
+
+
 def test_render_text_grouped_remote_output_preserves_order_warnings_and_errors() -> None:
     payload = {
         "remotes": {
@@ -192,6 +209,33 @@ def test_render_text_grouped_remote_output_preserves_order_warnings_and_errors()
         "\n"
         "[azdo]\n"
         "error: rate limited"
+    )
+
+
+def test_render_text_grouped_code_search_hides_lower_bound_warning_and_shows_plus() -> None:
+    payload = {
+        "remotes": {
+            "gitlab": {
+                "ok": True,
+                "data": {
+                    "matchesCount": 200,
+                    "matchesCountLowerBound": True,
+                    "results": ["repo:/src/app.py"],
+                },
+                "warnings": [
+                    "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "
+                    "Narrow with `--repo group/project` for exact counts."
+                ],
+                "partial": True,
+                "error": None,
+            }
+        },
+        "summary": {"queried": ["gitlab"]},
+    }
+
+    assert render_text("code.search", payload) == (
+        "matches: 200+ (showing 1)\n"
+        "repo:/src/app.py"
     )
 
 

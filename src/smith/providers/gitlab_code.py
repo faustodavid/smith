@@ -384,7 +384,9 @@ class GitLabCodeMixin:
         if repo:
             path = f"/projects/{self._project_id(repo)}/search"
         else:
-            path = "/search"
+            group_getter = getattr(self, "_configured_gitlab_group", None)
+            group = group_getter() if callable(group_getter) else None
+            path = f"/groups/{quote(group, safe='')}/search" if group else "/search"
 
         response = self._request_response(
             "GET",
@@ -435,6 +437,7 @@ class GitLabCodeMixin:
         page_items_for_output: list[dict[str, Any]] = []
         warnings: list[str] = []
         partial = False
+        matches_count_lower_bound = False
 
         for target_repo in search_targets:
             current_page = 1
@@ -485,6 +488,7 @@ class GitLabCodeMixin:
                     if checked_extra_page_after_window or not maybe_more:
                         if checked_extra_page_after_window and maybe_more:
                             partial = True
+                            matches_count_lower_bound = True
                             warning = (
                                 "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "
                                 "Narrow with `--repo group/project` for exact counts."
@@ -525,6 +529,8 @@ class GitLabCodeMixin:
             result["warnings"] = warnings
         if partial:
             result["partial"] = True
+        if matches_count_lower_bound:
+            result["matchesCountLowerBound"] = True
         return result
 
     def _get_file_metadata(

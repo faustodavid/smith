@@ -14,10 +14,15 @@ from smith.errors import SmithApiError
 from smith.providers.gitlab import GitLabProvider
 
 _FULL_REPO = "gitlab-org/repo-a"
+_FULL_GROUP = "gitlab-org"
 
 
-def _provider(config: Any | None = None) -> GitLabProvider:
-    return GitLabProvider(config=config or make_runtime_config(), session=requests.Session())
+def _provider(config: Any | None = None, *, gitlab_org: str | None = _FULL_GROUP) -> GitLabProvider:
+    return GitLabProvider(
+        config=config or make_runtime_config(),
+        session=requests.Session(),
+        gitlab_org=gitlab_org,
+    )
 
 
 def _cache_git_output(
@@ -712,8 +717,37 @@ def test_gitlab_search_code_falls_back_to_complete_pagination_for_exact_total(mo
     ]
 
 
-def test_gitlab_search_code_limits_broad_search_when_total_is_unknown(monkeypatch: Any) -> None:
+def test_gitlab_search_code_uses_group_scoped_search_for_broad_queries(monkeypatch: Any) -> None:
     provider = _provider()
+    calls: list[dict[str, Any]] = []
+    page_one = [{"path": f"src/file-{index:03d}.py", "path_with_namespace": _FULL_REPO} for index in range(100)]
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        page = int((params or {}).get("page", 1))
+        if page == 1:
+            return _FakeJsonResponse(page_one, headers={"X-Total": "200", "X-Next-Page": "2"})
+        raise AssertionError(f"did not expect additional pages when the first page already covers the requested window: {page}")
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+
+    result = provider.search_code(query="grafana", project=None, repos=None, skip=0, take=20)
+
+    assert result == {
+        "matchesCount": 200,
+        "results": [f"{_FULL_REPO}:/src/file-{index:03d}.py" for index in range(20)],
+    }
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/groups/gitlab-org/search",
+            "params": {"scope": "blobs", "search": "grafana", "per_page": 100, "page": 1},
+        },
+    ]
+
+
+def test_gitlab_search_code_global_fallback_keeps_lower_bound_warning_without_group(monkeypatch: Any) -> None:
+    provider = _provider(gitlab_org=None)
     calls: list[dict[str, Any]] = []
     page_one = [{"path": f"src/file-{index:03d}.py", "path_with_namespace": _FULL_REPO} for index in range(100)]
     page_two = [{"path": f"src/file-{100 + index:03d}.py", "path_with_namespace": _FULL_REPO} for index in range(100)]
@@ -733,6 +767,7 @@ def test_gitlab_search_code_limits_broad_search_when_total_is_unknown(monkeypatc
 
     assert result == {
         "matchesCount": 200,
+        "matchesCountLowerBound": True,
         "results": [f"{_FULL_REPO}:/src/file-{index:03d}.py" for index in range(20)],
         "warnings": [
             "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "

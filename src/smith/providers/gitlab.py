@@ -31,10 +31,12 @@ class GitLabProvider(
         *,
         config: RuntimeConfig,
         session: requests.Session,
+        gitlab_org: str | None = None,
         gitlab_api_url: str | None = None,
         token_env: str | None = None,
     ) -> None:
         super().__init__(config=config, session=session, token_env=token_env)
+        self.gitlab_org = (gitlab_org or "").strip().strip("/")
         self.gitlab_api_url = gitlab_api_url or config.gitlab_api_url
         self.max_output_chars = config.max_output_chars
         self._gitlab_token: str | None = None
@@ -120,6 +122,9 @@ class GitLabProvider(
         if path.startswith("http"):
             return path
         return f"{self.gitlab_api_url}{path}"
+
+    def _configured_gitlab_group(self) -> str | None:
+        return self.gitlab_org or None
 
     def _gitlab_web_url(self) -> str:
         if self.gitlab_api_url.endswith("/api/v4"):

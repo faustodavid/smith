@@ -133,6 +133,12 @@ def _fmt_table_line(columns: list[str]) -> str:
     return " | ".join(columns)
 
 
+_GITLAB_CODE_SEARCH_LOWER_BOUND_WARNING = (
+    "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "
+    "Narrow with `--repo group/project` for exact counts."
+)
+
+
 def _render_name_list(data: Any) -> str:
     if isinstance(data, dict) and isinstance(data.get("results"), list):
         rows = data.get("results", [])
@@ -173,19 +179,34 @@ def _render_discover_repos(data: Any) -> str:
     return "\n".join(lines)
 
 
-def _code_search_summary_line(matches_count: int, shown_count: int) -> str:
-    if shown_count < matches_count:
-        return f"matches: {matches_count} (showing {shown_count})"
-    return f"matches: {matches_count}"
+def _code_search_summary_line(matches_count: int, shown_count: int, *, lower_bound: bool = False) -> str:
+    suffix = "+" if lower_bound else ""
+    if shown_count < matches_count or lower_bound:
+        return f"matches: {matches_count}{suffix} (showing {shown_count})"
+    return f"matches: {matches_count}{suffix}"
 
 
 def _render_code_search(data: Any) -> str:
     matches_count = int(data.get("matchesCount", 0))
+    lower_bound = bool(data.get("matchesCountLowerBound", False))
     raw_results = data.get("results", [])
     result_lines = raw_results if isinstance(raw_results, list) else []
-    lines = [_code_search_summary_line(matches_count, len(result_lines))]
+    lines = [_code_search_summary_line(matches_count, len(result_lines), lower_bound=lower_bound)]
     lines.extend(str(entry) for entry in result_lines)
     return "\n".join(lines)
+
+
+def _visible_remote_warnings(command: str, remote_data: Any, warnings: Any) -> list[str]:
+    warning_list = [str(warning) for warning in warnings if str(warning).strip()] if isinstance(warnings, list) else []
+    if command != "code.search":
+        return warning_list
+
+    lower_bound = False
+    if isinstance(remote_data, dict):
+        lower_bound = bool(remote_data.get("matchesCountLowerBound", False))
+    if lower_bound:
+        return [warning for warning in warning_list if warning != _GITLAB_CODE_SEARCH_LOWER_BOUND_WARNING]
+    return warning_list
 
 
 def _render_grep(data: Any) -> str:
@@ -384,9 +405,9 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
         if rendered.strip():
             lines.append(rendered)
 
-        warnings = entry.get("warnings") or []
+        warnings = _visible_remote_warnings(command, remote_data, entry.get("warnings") or [])
         if command not in {"code.grep", "pipelines.logs.grep"}:
-            for warning in warnings if isinstance(warnings, list) else []:
+            for warning in warnings:
                 lines.append(f"warning: {warning}")
         return "\n".join(lines).rstrip()
 
@@ -408,6 +429,7 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
         remote_data = entry.get("data")
         if command == "code.search":
             matches_count = 0
+            lower_bound = False
             result_lines: list[Any] = []
             if isinstance(remote_data, dict):
                 raw_matches = remote_data.get("matchesCount", 0)
@@ -415,10 +437,13 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
                     matches_count = int(raw_matches)
                 except (TypeError, ValueError):
                     matches_count = 0
+                lower_bound = bool(remote_data.get("matchesCountLowerBound", False))
                 raw_results = remote_data.get("results", [])
                 if isinstance(raw_results, list):
                     result_lines = raw_results
-            output_lines.append(f"[{remote_name}] {_code_search_summary_line(matches_count, len(result_lines))}")
+            output_lines.append(
+                f"[{remote_name}] {_code_search_summary_line(matches_count, len(result_lines), lower_bound=lower_bound)}"
+            )
             output_lines.extend(str(entry_line) for entry_line in result_lines)
         else:
             output_lines.append(f"[{remote_name}]")
@@ -426,9 +451,9 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
             if rendered.strip():
                 output_lines.append(rendered)
 
-        warnings = entry.get("warnings") or []
+        warnings = _visible_remote_warnings(command, remote_data, entry.get("warnings") or [])
         if command not in {"code.grep", "pipelines.logs.grep"}:
-            for warning in warnings if isinstance(warnings, list) else []:
+            for warning in warnings:
                 output_lines.append(f"warning: {warning}")
         output_lines.append("")
 

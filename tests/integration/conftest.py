@@ -69,9 +69,11 @@ def gitlab_smoke_env() -> dict[str, Any]:
 
 @pytest.fixture
 def gitlab_provider(gitlab_smoke_env: dict[str, Any]) -> GitLabProvider:
+    gitlab_org = gitlab_smoke_env["SMITH_TEST_GITLAB_REPO"].rsplit("/", 1)[0]
     return GitLabProvider(
         config=make_runtime_config(),
         session=requests.Session(),
+        gitlab_org=gitlab_org,
     )
 
 

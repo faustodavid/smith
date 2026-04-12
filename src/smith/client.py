@@ -91,6 +91,7 @@ class SmithClient:
             provider = GitLabProvider(
                 config=self._runtime,
                 session=self._main_session,
+                gitlab_org=remote.org,
                 gitlab_api_url=remote.api_url,
                 token_env=remote.token_env,
             )
