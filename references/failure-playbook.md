@@ -39,7 +39,7 @@ Then remap the repo and path, and continue with focused grep.
 
 For GitHub commands, if you copied `org/repo` from search output and got a 404, rerun the command with the bare `<repo>` slug.
 
-For GitLab commands, if you copied full `group/repo` from search output and got a 404, rerun the command with `<repo>` relative to the configured remote's group.
+For GitLab commands, if you used a short repo name and got a 404, rerun the command with the full `group/project` path, not a short repo name.
 
 ## Unsupported Provider Flow
 

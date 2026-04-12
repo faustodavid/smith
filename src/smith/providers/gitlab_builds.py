@@ -33,13 +33,13 @@ class GitLabBuildMixin:
             )
 
         metadata = {
-            "project_name": self._require_gitlab_group(),
+            "project_name": self._project_namespace(repo),
             "build_id": build_id,
             "build_number": pipeline.get("iid") or pipeline.get("id"),
             "status": pipeline.get("status"),
             "result": pipeline.get("status"),
             "definition_name": pipeline.get("name") or pipeline.get("ref") or "pipeline",
-            "repository_name": repo,
+            "repository_name": self._project_short_name(repo),
             "branch": pipeline.get("ref"),
             "commit": pipeline.get("sha"),
         }

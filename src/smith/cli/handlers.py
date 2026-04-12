@@ -53,6 +53,11 @@ def _selected_target(args: argparse.Namespace) -> str:
     return _selected_remote_provider(args)
 
 
+def _is_full_gitlab_repo_path(value: str) -> bool:
+    normalized = str(value or "").strip().strip("/")
+    return "/" in normalized
+
+
 def _is_partial_result(data: Any) -> bool:
     if isinstance(data, dict) and "remotes" in data:
         remotes = data.get("remotes", {})
@@ -90,9 +95,16 @@ def validate_args_for_remote(args: argparse.Namespace) -> None:
     command = str(getattr(args, "command_id", ""))
     remote = _selected_remote(args).lower()
     provider = _selected_remote_provider(args)
+    repo_filters = getattr(args, "repos", None)
+    has_repo_filters = isinstance(repo_filters, list) and any(str(item or "").strip() for item in repo_filters)
+    has_project_filter = bool(str(getattr(args, "project", "") or "").strip())
 
     if command == "code.search" and not str(getattr(args, "query", "") or "").strip():
         raise ValueError('code search requires a query. Example: smith code search "grafana.*"')
+    if command == "code.search" and remote == "all" and has_project_filter:
+        raise ValueError("`smith code search` searches all remotes and does not support `--project`. Use `smith <remote> code search`.")
+    if command == "code.search" and remote == "all" and has_repo_filters:
+        raise ValueError("`smith code search` searches all remotes and does not support `--repo`. Use `smith <remote> code search`.")
 
     if not remote:
         return
@@ -104,6 +116,15 @@ def validate_args_for_remote(args: argparse.Namespace) -> None:
         raise ValueError("GitHub code search does not support `--project`. Use `--repo` instead.")
     if command == "code.search" and provider == "gitlab" and str(getattr(args, "project", "") or "").strip():
         raise ValueError("GitLab code search does not support `--project`. Use `--repo` instead.")
+    if provider == "gitlab":
+        repo = str(getattr(args, "repo", "") or "").strip()
+        if repo and not _is_full_gitlab_repo_path(repo):
+            raise ValueError("GitLab repositories must use full `group/project` paths.")
+
+        if isinstance(repo_filters, list):
+            for repo_filter in repo_filters:
+                if str(repo_filter or "").strip() and not _is_full_gitlab_repo_path(str(repo_filter)):
+                    raise ValueError("GitLab repositories must use full `group/project` paths.")
 
 
 def _emit_success(
@@ -334,7 +355,21 @@ def handle_discover_projects(client: SmithClient, args: argparse.Namespace) -> i
 
 
 def handle_discover_repos(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_discover_repos(remote_or_provider=_selected_target(args), project=getattr(args, "project", None))
+    data = client.execute_discover_repos(
+        remote_or_provider=_selected_target(args),
+        project=getattr(args, "project", None),
+        group=getattr(args, "group", None),
+    )
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=data,
+        partial=_is_partial_result(data),
+    )
+
+
+def handle_list_groups(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_list_groups(remote_or_provider=_selected_target(args))
     return _emit_success(
         args=args,
         command=args.command_id,

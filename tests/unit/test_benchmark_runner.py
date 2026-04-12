@@ -40,24 +40,24 @@ def _write_benchmark_run(
     (outputs_dir / "metrics.json").write_text(json.dumps({"total_tool_calls": 1, "errors_encountered": 0}))
 
 
-def test_validate_smith_cli_command_injects_github_remote_for_code_search() -> None:
+def test_validate_smith_cli_command_accepts_global_code_search() -> None:
     tokens = validate_smith_cli_command('code search "otelcol.exporter.loki" --take 5')
 
-    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--remote", "github"]
+    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5"]
 
 
 def test_validate_smith_cli_command_rejects_non_github_grep():
     with pytest.raises(ValueError):
-        validate_smith_cli_command("code grep azdo SRE repo pattern")
+        validate_smith_cli_command("azdo code grep SRE repo pattern")
 
 
 def test_validate_smith_cli_command_allows_prefixed_smith_global_flags():
     tokens = validate_smith_cli_command('smith --verbose --format json code search "otelcol.exporter.loki" --take 5')
 
-    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--remote", "github"]
+    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5"]
 
 
-def test_validate_smith_cli_command_uses_configured_github_remote(tmp_path: Path) -> None:
+def test_validate_smith_cli_command_accepts_configured_github_remote_search(tmp_path: Path) -> None:
     config_path = tmp_path / "smith.yaml"
     save_config(
         SmithConfig(
@@ -78,18 +78,18 @@ def test_validate_smith_cli_command_uses_configured_github_remote(tmp_path: Path
     )
 
     tokens = validate_smith_cli_command(
-        'code search "otelcol.exporter.loki" --take 5',
+        'github-public code search "otelcol.exporter.loki" --take 5',
         env={"SMITH_CONFIG": str(config_path)},
     )
 
-    assert tokens == ["code", "search", "otelcol.exporter.loki", "--take", "5", "--remote", "github-public"]
+    assert tokens == ["github-public", "code", "search", "otelcol.exporter.loki", "--take", "5"]
 
 
 def test_build_smith_cli_subprocess_injects_benchmark_config_and_local_src_path():
-    argv, env = build_smith_cli_subprocess("repos github")
+    argv, env = build_smith_cli_subprocess("github repos")
 
     assert argv[:3] == [argv[0], "-m", "smith.cli.main"]
-    assert argv[3:] == ["repos", "github"]
+    assert argv[3:] == ["github", "repos"]
     config_text = Path(env["SMITH_CONFIG"]).read_text()
     assert BENCHMARK_GITHUB_ORG in config_text
     assert "src" in env["PYTHONPATH"]
@@ -116,11 +116,11 @@ def test_build_smith_cli_subprocess_preserves_explicit_smith_config(tmp_path: Pa
     )
 
     argv, env = build_smith_cli_subprocess(
-        "repos github-public",
+        "github-public repos",
         env={"SMITH_CONFIG": str(config_path)},
     )
 
-    assert argv[3:] == ["repos", "github-public"]
+    assert argv[3:] == ["github-public", "repos"]
     assert env["SMITH_CONFIG"] == str(config_path)
 
 
@@ -128,13 +128,13 @@ def test_build_smith_cli_subprocess_preserves_explicit_benchmark_github_api_url(
     api_url = "http://127.0.0.1:4010/api/github"
 
     argv, env = build_smith_cli_subprocess(
-        "repos github",
+        "github repos",
         env={"GITHUB_API_URL": api_url},
     )
 
     loaded_config = load_config(config_path=Path(env["SMITH_CONFIG"]))
 
-    assert argv[3:] == ["repos", "github"]
+    assert argv[3:] == ["github", "repos"]
     assert loaded_config.remotes["github"].api_url == api_url
 
 

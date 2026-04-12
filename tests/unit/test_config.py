@@ -86,7 +86,6 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
         "GITHUB_TIMEOUT_SECONDS",
         "GITHUB_MAX_CONCURRENT_REQUESTS",
         "GITHUB_RATE_LIMIT_MAX_SLEEP_SECONDS",
-        "GITLAB_GROUP",
         "GITLAB_HOST",
         "GITLAB_API_URL",
         "GITLAB_TIMEOUT_SECONDS",
@@ -119,7 +118,6 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
     assert runtime.github_timeout_seconds == 30
     assert runtime.github_max_concurrent_requests == 2
     assert runtime.github_rate_limit_max_sleep_seconds == 120
-    assert runtime.gitlab_group == ""
     assert runtime.gitlab_api_url == "https://gitlab.com/api/v4"
     assert runtime.gitlab_timeout_seconds == 30
     assert runtime.http_pool_maxsize == 32
@@ -213,8 +211,9 @@ def test_parse_runtime_config_github_org_ignores_legacy_env(monkeypatch: Any) ->
     assert runtime.github_configured is False
 
 
-def test_parse_runtime_config_gitlab_group_ignores_legacy_env(monkeypatch: Any) -> None:
+def test_parse_runtime_config_removes_gitlab_group_from_runtime(monkeypatch: Any) -> None:
     monkeypatch.setenv("GITLAB_GROUP", "platform/subgroup/")
+    monkeypatch.setenv("GITLAB_API_URL", "https://gitlab.com/api/v4")
 
     runtime = parse_runtime_config(
         azdo_org="example",
@@ -226,8 +225,8 @@ def test_parse_runtime_config_gitlab_group_ignores_legacy_env(monkeypatch: Any) 
         gitlab_api_url_default="https://gitlab.com/api/v4/",
     )
 
-    assert runtime.gitlab_group == ""
-    assert runtime.gitlab_configured is False
+    assert not hasattr(runtime, "gitlab_group")
+    assert runtime.gitlab_api_url == "https://gitlab.com/api/v4"
 
 
 def test_parse_runtime_config_gitlab_host_env_fallback(monkeypatch: Any) -> None:

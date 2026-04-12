@@ -23,14 +23,12 @@ class Scenario:
 SCENARIOS: list[Scenario] = [
     Scenario(
         key="code_search_webhook_secret",
-        description='smith code search "OPENAI_WEBHOOK_SECRET" --provider github --take 20',
+        description='smith code search "OPENAI_WEBHOOK_SECRET" --take 20',
         command=[
             "smith",
             "code",
             "search",
             "OPENAI_WEBHOOK_SECRET",
-            "--provider",
-            "github",
             "--take",
             "20",
         ],
@@ -38,12 +36,12 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario(
         key="code_grep_webhook_python",
-        description='smith code grep github openai-python "OPENAI_WEBHOOK_SECRET|def unwrap|def verify_signature" --path /src/openai --output-mode files_with_matches',
+        description='smith github code grep openai-python "OPENAI_WEBHOOK_SECRET|def unwrap|def verify_signature" --path /src/openai --output-mode files_with_matches',
         command=[
             "smith",
+            "github",
             "code",
             "grep",
-            "github",
             "openai-python",
             "OPENAI_WEBHOOK_SECRET|def unwrap|def verify_signature",
             "--path",
@@ -55,12 +53,12 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario(
         key="code_grep_webhook_node",
-        description='smith code grep github openai-node "OPENAI_WEBHOOK_SECRET|unwrap|verifySignature" --path /src --output-mode files_with_matches',
+        description='smith github code grep openai-node "OPENAI_WEBHOOK_SECRET|unwrap|verifySignature" --path /src --output-mode files_with_matches',
         command=[
             "smith",
+            "github",
             "code",
             "grep",
-            "github",
             "openai-node",
             "OPENAI_WEBHOOK_SECRET|unwrap|verifySignature",
             "--path",

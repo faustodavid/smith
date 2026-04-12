@@ -5,9 +5,7 @@ Scope: read-only provider-aware investigation only.
 
 Preflight:
 ```bash
-: "${AZURE_DEVOPS_ORG:?Set AZURE_DEVOPS_ORG first (for azdo)}"
-: "${GITHUB_ORG:?Set GITHUB_ORG first (for github/all)}"
-: "${GITLAB_GROUP:?Set GITLAB_GROUP first (for gitlab/all)}"
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" config list
 az account show >/dev/null
 gh auth status >/dev/null
 glab auth status >/dev/null
@@ -17,6 +15,8 @@ Required arguments:
 - Query text only, for example `loki retention ttl`.
 - Keep initial queries plain and high-signal.
 - Do not assume wildcard repo qualifiers such as `org:openai/openai-*`.
+- Broad search uses `code search` and always searches all configured remotes.
+- To target one remote, rerun with `<remote> code search`.
 
 First command to run:
 ```bash
@@ -29,9 +29,9 @@ If no results:
 ```bash
 python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search "$ARGUMENTS" --take 50
 ```
-3. Optionally scope provider:
+3. If you need one remote only, switch to a remote-scoped search:
 ```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" code search "$ARGUMENTS" --provider github
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" <github-remote-name> code search "$ARGUMENTS" --repo <repo>
 ```
 4. If still empty, report "not enough evidence" and suggest the next narrower domain keyword.
 

@@ -23,7 +23,6 @@ def make_runtime_config(**overrides: Any) -> RuntimeConfig:
         github_timeout_seconds=30,
         github_max_concurrent_requests=2,
         github_rate_limit_max_sleep_seconds=120,
-        gitlab_group="gitlab-org",
         gitlab_api_url="https://gitlab.com/api/v4",
         gitlab_timeout_seconds=30,
         http_pool_maxsize=32,

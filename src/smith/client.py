@@ -90,7 +90,6 @@ class SmithClient:
             provider = GitLabProvider(
                 config=self._runtime,
                 session=self._main_session,
-                gitlab_group=remote.org,
                 gitlab_api_url=remote.api_url,
                 token_env=remote.token_env,
             )
@@ -288,6 +287,7 @@ class SmithClient:
         *,
         remote_or_provider: str,
         project: str | None,
+        group: str | None = None,
     ) -> dict[str, Any]:
         target = self._require_single_target(remote_or_provider, command="repos")
         return self._fanout(
@@ -295,7 +295,16 @@ class SmithClient:
             operations={
                 "azdo": lambda r: self._list_azdo_repositories(azdo=self._azdo_provider(r), project=project),
                 "github": lambda r: self._github_provider(r).list_repositories(),
-                "gitlab": lambda r: self._gitlab_provider(r).list_repositories(),
+                "gitlab": lambda r: self._gitlab_provider(r).list_repositories(group=group),
+            },
+        )
+
+    def execute_list_groups(self, *, remote_or_provider: str) -> dict[str, Any]:
+        target = self._require_single_target(remote_or_provider, command="groups.list")
+        return self._fanout(
+            remote_or_provider=target,
+            operations={
+                "gitlab": lambda r: self._gitlab_provider(r).list_groups(),
             },
         )
 

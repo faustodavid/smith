@@ -19,6 +19,7 @@ from smith.cli.handlers import (
     handle_config_show,
     handle_discover_projects,
     handle_discover_repos,
+    handle_list_groups,
     handle_pr_get,
     handle_pr_list,
     handle_pr_threads,
@@ -42,6 +43,7 @@ class SmithArgumentParser(argparse.ArgumentParser):
             "argument remote" in message
             or "argument --remote" in message
             or "required: remote" in message
+            or "invalid choice" in message
         ):
             message = f"{message}\n{self._remote_hint}"
         super().error(message)
@@ -72,29 +74,6 @@ def _add_output_format(parser: argparse.ArgumentParser) -> None:
         choices=["text", "json"],
         default="text",
         help="Output format (default: text)",
-    )
-
-
-def _add_search_remote_option(
-    parser: argparse.ArgumentParser,
-    *,
-    remotes: list[RemoteConfig],
-    remote_hint: str | None,
-) -> None:
-    remote_names = [remote.name for remote in remotes]
-    if remote_names:
-        parser.add_argument(
-            "--remote",
-            choices=["all", *remote_names],
-            default="all",
-            help="Remote target (default: all)",
-        )
-        return
-
-    parser.add_argument(
-        "--remote",
-        default="all",
-        help=f"Remote target (default: all). {remote_hint or _NO_REMOTES_CONFIGURED_HINT}",
     )
 
 
@@ -139,7 +118,7 @@ def _add_parser(
 def _add_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "pattern",
-        help='Regex pattern. Use ".*" to match all. Form: smith code grep <remote> <scope> "<regex>"',
+        help='Regex pattern. Use ".*" to match all. Form: smith <remote> code grep <scope> "<regex>"',
     )
     parser.add_argument("--path", help="Path scope (default: /)")
     parser.add_argument("--branch", help="Branch name")
@@ -175,7 +154,7 @@ def _add_ci_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--log-id", type=int)
     parser.add_argument(
         "pattern",
-        help='Regex pattern. Use ".*" to match all. Form: smith pipelines logs grep <remote> <scope> <id> "<regex>"',
+        help='Regex pattern. Use ".*" to match all. Form: smith <remote> pipelines logs grep <scope> <id> "<regex>"',
     )
     parser.add_argument(
         "--output-mode",
@@ -197,118 +176,26 @@ def _add_work_search_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--take", type=int, default=20)
 
 
-def _add_repos_group(
-    root_subparsers: Any,
-    *,
-    remotes: list[RemoteConfig],
-) -> None:
-    repos = _add_parser(
-        root_subparsers,
-        "repos",
-        help_text="List repositories",
-    )
-    repos_remote = repos.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        help_text = f"List repositories from {remote.provider} remote '{remote.name}'"
-        remote_parser = _add_parser(repos_remote, remote.name, help_text=help_text)
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project", nargs="?", help="Azure DevOps project name")
-        else:
-            remote_parser.set_defaults(project=None)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_output_format(remote_parser)
-        _set_handler(
-            remote_parser,
-            handle_discover_repos,
-            "repos",
-            primary_path="repos",
-        )
-
-
-def _add_orgs_group(
-    root_subparsers: Any,
-    *,
-    remotes: list[RemoteConfig],
-) -> None:
-    orgs = _add_parser(
-        root_subparsers,
-        "orgs",
-        help_text="List the configured org, group, or project scope for a remote",
-    )
-    orgs_remote = orgs.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        help_text = f"Show the configured scope for remote '{remote.name}'"
-        remote_parser = _add_parser(orgs_remote, remote.name, help_text=help_text)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_output_format(remote_parser)
-        _set_handler(
-            remote_parser,
-            handle_discover_projects,
-            "orgs",
-            primary_path="orgs",
-        )
-
-
-def _add_code_group(
-    root_subparsers: Any,
-    *,
-    remotes: list[RemoteConfig],
-    remote_hint: str | None,
-) -> None:
-    code = _add_parser(root_subparsers, "code", help_text="Search and grep across remotes and repos")
-    code_sub = code.add_subparsers(dest="action", required=True)
+def _add_global_code_group(root_subparsers: Any) -> None:
+    code = _add_parser(root_subparsers, "code", help_text="Search code across all configured remotes")
+    code_sub = code.add_subparsers(dest="global_code_action", required=True)
 
     code_search = _add_parser(
         code_sub,
         "search",
-        help_text="Broad code search across configured remotes",
+        help_text="Search code across all configured remotes",
     )
     code_search.add_argument("query", nargs="?", help="Search query text")
-    code_search.add_argument("--project", help="Azure DevOps project filter")
-    code_search.add_argument(
-        "--repo",
-        dest="repos",
-        action="append",
-        default=None,
-        metavar="REPO",
-        help="Repository filter (repeatable)",
-    )
     code_search.add_argument("--skip", type=int, default=0, help="Results offset")
     code_search.add_argument("--take", type=int, default=20, help="Results count")
-    _add_search_remote_option(code_search, remotes=remotes, remote_hint=remote_hint)
+    code_search.set_defaults(remote="all", remote_provider="", project=None, repos=None)
     _add_output_format(code_search)
     _set_handler(code_search, handle_code_search, "code.search", primary_path="code search")
-
-    code_grep = _add_parser(
-        code_sub,
-        "grep",
-        help_text="Targeted grep in a configured remote repository",
-    )
-    code_grep_remote = code_grep.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        help_text = f"Grep a repository via remote '{remote.name}'"
-        remote_parser = _add_parser(code_grep_remote, remote.name, help_text=help_text)
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project", help="Azure DevOps project name")
-            remote_parser.add_argument("repo", help="Repository name")
-        elif remote.provider == "github":
-            remote_parser.add_argument("repo", help="Repository name")
-            remote_parser.set_defaults(project=None)
-        else:
-            remote_parser.add_argument("repo", help="Repository path relative to the configured GitLab group")
-            remote_parser.set_defaults(project=None)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_grep_options(remote_parser)
-        _add_output_format(remote_parser)
-        _set_handler(remote_parser, handle_code_grep, "code.grep", primary_path="code grep")
 
 
 def _add_config_group(root_subparsers: Any) -> None:
     config = _add_parser(root_subparsers, "config", help_text="Manage remote configurations")
-    config_sub = config.add_subparsers(dest="action", required=True)
+    config_sub = config.add_subparsers(dest="config_action", required=True)
 
     config_list = _add_parser(config_sub, "list", help_text="List all configured remotes")
     _add_output_format(config_list)
@@ -376,7 +263,7 @@ def _add_config_group(root_subparsers: Any) -> None:
 
 def _add_cache_group(root_subparsers: Any, *, remotes: list[RemoteConfig]) -> None:
     cache = _add_parser(root_subparsers, "cache", help_text="Manage local grep caches")
-    cache_sub = cache.add_subparsers(dest="action", required=True)
+    cache_sub = cache.add_subparsers(dest="cache_action", required=True)
 
     cache_clean = _add_parser(cache_sub, "clean", help_text="Remove local grep caches")
     remote_choices = ["all", *[remote.name for remote in remotes]]
@@ -397,214 +284,240 @@ def _add_cache_group(root_subparsers: Any, *, remotes: list[RemoteConfig]) -> No
     )
 
 
-def _add_pr_group(
-    root_subparsers: Any,
-    *,
-    remotes: list[RemoteConfig],
-) -> None:
-    prs = _add_parser(root_subparsers, "prs", help_text="List, get, and read pull request comments")
-    pr_sub = prs.add_subparsers(dest="action", required=True)
+def _add_remote_repos_command(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
+    repos = _add_parser(remote_subparsers, "repos", help_text="List repositories")
+    if remote.provider == "azdo":
+        repos.add_argument("project", nargs="?", help="Azure DevOps project name")
+        repos.set_defaults(group=None)
+    elif remote.provider == "gitlab":
+        repos.add_argument("group", nargs="?", help="GitLab group path filter")
+        repos.set_defaults(project=None)
+    else:
+        repos.set_defaults(project=None, group=None)
+    _add_output_format(repos)
+    _set_handler(repos, handle_discover_repos, "repos", primary_path="repos")
+
+
+def _add_remote_orgs_command(remote_subparsers: Any) -> None:
+    orgs = _add_parser(
+        remote_subparsers,
+        "orgs",
+        help_text="List the accessible orgs, groups, or project scopes for this remote",
+    )
+    _add_output_format(orgs)
+    _set_handler(orgs, handle_discover_projects, "orgs", primary_path="orgs")
+
+
+def _add_remote_groups_group(remote_subparsers: Any) -> None:
+    groups = _add_parser(remote_subparsers, "groups", help_text="List GitLab groups")
+    groups_sub = groups.add_subparsers(dest="groups_action", required=True)
+
+    groups_list = _add_parser(groups_sub, "list", help_text="List accessible GitLab groups")
+    _add_output_format(groups_list)
+    _set_handler(groups_list, handle_list_groups, "groups.list", primary_path="groups list")
+
+
+def _add_remote_code_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
+    code = _add_parser(remote_subparsers, "code", help_text="Search and grep code")
+    code_sub = code.add_subparsers(dest="code_action", required=True)
+
+    code_search = _add_parser(code_sub, "search", help_text="Search code in this remote")
+    code_search.add_argument("query", nargs="?", help="Search query text")
+    if remote.provider == "azdo":
+        code_search.add_argument("--project", help="Azure DevOps project filter")
+    else:
+        code_search.set_defaults(project=None)
+    code_search.add_argument(
+        "--repo",
+        dest="repos",
+        action="append",
+        default=None,
+        metavar="REPO",
+        help=(
+            "Repository filter (repeatable)"
+            if remote.provider != "gitlab"
+            else "Full repository path filter (repeatable, e.g. group/project)"
+        ),
+    )
+    code_search.add_argument("--skip", type=int, default=0, help="Results offset")
+    code_search.add_argument("--take", type=int, default=20, help="Results count")
+    _add_output_format(code_search)
+    _set_handler(code_search, handle_code_search, "code.search", primary_path="code search")
+
+    code_grep = _add_parser(code_sub, "grep", help_text="Targeted grep in a repository")
+    if remote.provider == "azdo":
+        code_grep.add_argument("project", help="Azure DevOps project name")
+        code_grep.add_argument("repo", help="Repository name")
+    elif remote.provider == "github":
+        code_grep.add_argument("repo", help="Repository name")
+        code_grep.set_defaults(project=None)
+    else:
+        code_grep.add_argument("repo", help="Full repository path (e.g. group/project)")
+        code_grep.set_defaults(project=None)
+    _add_grep_options(code_grep)
+    _add_output_format(code_grep)
+    _set_handler(code_grep, handle_code_grep, "code.grep", primary_path="code grep")
+
+
+def _add_remote_prs_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
+    prs = _add_parser(remote_subparsers, "prs", help_text="List, get, and read pull request comments")
+    pr_sub = prs.add_subparsers(dest="prs_action", required=True)
 
     pr_list = _add_parser(pr_sub, "list", help_text="List pull requests")
-    pr_list_remote = pr_list.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        remote_parser = _add_parser(pr_list_remote, remote.name, help_text=f"List pull requests via remote '{remote.name}'")
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project", help="Azure DevOps project name")
-            remote_parser.add_argument("repo", help="Repository name")
-        elif remote.provider == "github":
-            remote_parser.add_argument("repo", help="Repository name")
-            remote_parser.set_defaults(project=None)
-        else:
-            remote_parser.add_argument("repo", help="Repository path relative to the configured GitLab group")
-            remote_parser.set_defaults(project=None)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_pr_list_filters(remote_parser)
-        _add_output_format(remote_parser)
-        _set_handler(remote_parser, handle_pr_list, "prs.list", primary_path="prs list")
+    if remote.provider == "azdo":
+        pr_list.add_argument("project", help="Azure DevOps project name")
+        pr_list.add_argument("repo", help="Repository name")
+    elif remote.provider == "github":
+        pr_list.add_argument("repo", help="Repository name")
+        pr_list.set_defaults(project=None)
+    else:
+        pr_list.add_argument("repo", help="Full repository path (e.g. group/project)")
+        pr_list.set_defaults(project=None)
+    _add_pr_list_filters(pr_list)
+    _add_output_format(pr_list)
+    _set_handler(pr_list, handle_pr_list, "prs.list", primary_path="prs list")
 
     pr_get = _add_parser(pr_sub, "get", help_text="Get pull request details")
-    pr_get_remote = pr_get.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        remote_parser = _add_parser(pr_get_remote, remote.name, help_text=f"Get pull request details via remote '{remote.name}'")
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project")
-            remote_parser.add_argument("repo")
-        else:
-            remote_parser.add_argument("repo")
-            remote_parser.set_defaults(project=None)
-        remote_parser.add_argument("id", type=int)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_output_format(remote_parser)
-        _set_handler(remote_parser, handle_pr_get, "prs.get", primary_path="prs get")
+    if remote.provider == "azdo":
+        pr_get.add_argument("project")
+        pr_get.add_argument("repo")
+    elif remote.provider == "github":
+        pr_get.add_argument("repo", help="Repository name")
+        pr_get.set_defaults(project=None)
+    else:
+        pr_get.add_argument("repo", help="Full repository path (e.g. group/project)")
+        pr_get.set_defaults(project=None)
+    pr_get.add_argument("id", type=int)
+    _add_output_format(pr_get)
+    _set_handler(pr_get, handle_pr_get, "prs.get", primary_path="prs get")
 
     pr_threads = _add_parser(pr_sub, "threads", help_text="Get pull request comment threads")
-    pr_threads_remote = pr_threads.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        remote_parser = _add_parser(pr_threads_remote, remote.name, help_text=f"Get pull request threads via remote '{remote.name}'")
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project")
-            remote_parser.add_argument("repo")
-        else:
-            remote_parser.add_argument("repo")
-            remote_parser.set_defaults(project=None)
-        remote_parser.add_argument("id", type=int)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_output_format(remote_parser)
-        _set_handler(remote_parser, handle_pr_threads, "prs.threads", primary_path="prs threads")
+    if remote.provider == "azdo":
+        pr_threads.add_argument("project")
+        pr_threads.add_argument("repo")
+    elif remote.provider == "github":
+        pr_threads.add_argument("repo", help="Repository name")
+        pr_threads.set_defaults(project=None)
+    else:
+        pr_threads.add_argument("repo", help="Full repository path (e.g. group/project)")
+        pr_threads.set_defaults(project=None)
+    pr_threads.add_argument("id", type=int)
+    _add_output_format(pr_threads)
+    _set_handler(pr_threads, handle_pr_threads, "prs.threads", primary_path="prs threads")
 
 
-def _add_ci_group(
-    root_subparsers: Any,
-    *,
-    remotes: list[RemoteConfig],
-) -> None:
-    pipelines = _add_parser(root_subparsers, "pipelines", help_text="Read and grep pipeline logs")
-    ci_sub = pipelines.add_subparsers(dest="action", required=True)
+def _add_remote_pipelines_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
+    pipelines = _add_parser(remote_subparsers, "pipelines", help_text="Read and grep pipeline logs")
+    pipelines_sub = pipelines.add_subparsers(dest="pipelines_action", required=True)
 
-    ci_logs = _add_parser(ci_sub, "logs", help_text="Inspect pipeline logs")
-    ci_logs_sub = ci_logs.add_subparsers(dest="log_action", required=True)
+    logs = _add_parser(pipelines_sub, "logs", help_text="Inspect pipeline logs")
+    logs_sub = logs.add_subparsers(dest="log_action", required=True)
 
-    ci_logs_list = _add_parser(ci_logs_sub, "list", help_text="List logs for a pipeline run")
-    ci_logs_list_remote = ci_logs_list.add_subparsers(dest="remote", required=True)
+    logs_list = _add_parser(logs_sub, "list", help_text="List logs for a pipeline run")
+    if remote.provider == "azdo":
+        logs_list.add_argument("project")
+        logs_list.add_argument("id", type=int, help="Build ID")
+        logs_list.set_defaults(repo=None)
+    elif remote.provider == "github":
+        logs_list.add_argument("repo", help="Repository name")
+        logs_list.add_argument("id", type=int, help="Run ID")
+        logs_list.set_defaults(project=None)
+    else:
+        logs_list.add_argument("repo", help="Full repository path (e.g. group/project)")
+        logs_list.add_argument("id", type=int, help="Pipeline ID")
+        logs_list.set_defaults(project=None)
+    _add_output_format(logs_list)
+    _set_handler(logs_list, handle_ci_logs, "pipelines.logs.list", primary_path="pipelines logs list")
 
-    for remote in remotes:
-        remote_parser = _add_parser(ci_logs_list_remote, remote.name, help_text=f"List pipeline logs via remote '{remote.name}'")
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project")
-            remote_parser.add_argument("id", type=int, help="Build ID")
-            remote_parser.set_defaults(repo=None)
-        elif remote.provider == "github":
-            remote_parser.add_argument("repo")
-            remote_parser.add_argument("id", type=int, help="Run ID")
-            remote_parser.set_defaults(project=None)
-        else:
-            remote_parser.add_argument("repo")
-            remote_parser.add_argument("id", type=int, help="Pipeline ID")
-            remote_parser.set_defaults(project=None)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_output_format(remote_parser)
-        _set_handler(
-            remote_parser,
-            handle_ci_logs,
-            "pipelines.logs.list",
-            primary_path="pipelines logs list",
-        )
-
-    ci_logs_grep = _add_parser(ci_logs_sub, "grep", help_text="Search or read pipeline logs")
-    ci_logs_grep_remote = ci_logs_grep.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        remote_parser = _add_parser(ci_logs_grep_remote, remote.name, help_text=f"Search pipeline logs via remote '{remote.name}'")
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project")
-            remote_parser.add_argument("id", type=int, help="Build ID")
-            remote_parser.set_defaults(repo=None)
-        elif remote.provider == "github":
-            remote_parser.add_argument("repo")
-            remote_parser.add_argument("id", type=int, help="Run ID")
-            remote_parser.set_defaults(project=None)
-        else:
-            remote_parser.add_argument("repo")
-            remote_parser.add_argument("id", type=int, help="Pipeline ID")
-            remote_parser.set_defaults(project=None)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_ci_grep_options(remote_parser)
-        _add_output_format(remote_parser)
-        _set_handler(
-            remote_parser,
-            handle_ci_grep,
-            "pipelines.logs.grep",
-            primary_path="pipelines logs grep",
-        )
+    logs_grep = _add_parser(logs_sub, "grep", help_text="Search or read pipeline logs")
+    if remote.provider == "azdo":
+        logs_grep.add_argument("project")
+        logs_grep.add_argument("id", type=int, help="Build ID")
+        logs_grep.set_defaults(repo=None)
+    elif remote.provider == "github":
+        logs_grep.add_argument("repo", help="Repository name")
+        logs_grep.add_argument("id", type=int, help="Run ID")
+        logs_grep.set_defaults(project=None)
+    else:
+        logs_grep.add_argument("repo", help="Full repository path (e.g. group/project)")
+        logs_grep.add_argument("id", type=int, help="Pipeline ID")
+        logs_grep.set_defaults(project=None)
+    _add_ci_grep_options(logs_grep)
+    _add_output_format(logs_grep)
+    _set_handler(logs_grep, handle_ci_grep, "pipelines.logs.grep", primary_path="pipelines logs grep")
 
 
-def _add_stories_group(
-    root_subparsers: Any,
-    *,
-    remotes: list[RemoteConfig],
-) -> None:
-    stories = _add_parser(
-        root_subparsers,
-        "stories",
-        help_text="Get, search, and get mine",
-    )
-    stories_sub = stories.add_subparsers(dest="action", required=True)
+def _add_remote_stories_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
+    stories = _add_parser(remote_subparsers, "stories", help_text="Get, search, and get mine")
+    stories_sub = stories.add_subparsers(dest="stories_action", required=True)
 
     stories_get = _add_parser(stories_sub, "get", help_text="Get work item or issue by ID")
-    stories_get_remote = stories_get.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        remote_parser = _add_parser(stories_get_remote, remote.name, help_text=f"Get a work item or issue via remote '{remote.name}'")
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project")
-            remote_parser.add_argument("id", type=int)
-            remote_parser.set_defaults(repo=None)
-        else:
-            remote_parser.add_argument("repo")
-            remote_parser.add_argument("id", type=int)
-            remote_parser.set_defaults(project=None)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_output_format(remote_parser)
-        _set_handler(
-            remote_parser,
-            handle_work_get,
-            "stories.get",
-            primary_path="stories get",
-        )
+    if remote.provider == "azdo":
+        stories_get.add_argument("project")
+        stories_get.add_argument("id", type=int)
+        stories_get.set_defaults(repo=None)
+    elif remote.provider == "github":
+        stories_get.add_argument("repo", help="Repository name")
+        stories_get.add_argument("id", type=int)
+        stories_get.set_defaults(project=None)
+    else:
+        stories_get.add_argument("repo", help="Full repository path (e.g. group/project)")
+        stories_get.add_argument("id", type=int)
+        stories_get.set_defaults(project=None)
+    _add_output_format(stories_get)
+    _set_handler(stories_get, handle_work_get, "stories.get", primary_path="stories get")
 
     stories_search = _add_parser(stories_sub, "search", help_text="Search work items and issues")
-    stories_search_remote = stories_search.add_subparsers(dest="remote", required=True)
-
-    for remote in remotes:
-        remote_parser = _add_parser(stories_search_remote, remote.name, help_text=f"Search work items or issues via remote '{remote.name}'")
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project")
-            remote_parser.add_argument("--query", required=True)
-            remote_parser.set_defaults(repo=None)
-        else:
-            remote_parser.add_argument("repo")
-            remote_parser.add_argument("--query", required=True)
-            remote_parser.set_defaults(project=None)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_work_search_filters(remote_parser)
-        _add_output_format(remote_parser)
-        _set_handler(
-            remote_parser,
-            handle_work_search,
-            "stories.search",
-            primary_path="stories search",
-        )
+    if remote.provider == "azdo":
+        stories_search.add_argument("project")
+        stories_search.add_argument("--query", required=True)
+        stories_search.set_defaults(repo=None)
+    elif remote.provider == "github":
+        stories_search.add_argument("repo", help="Repository name")
+        stories_search.add_argument("--query", required=True)
+        stories_search.set_defaults(project=None)
+    else:
+        stories_search.add_argument("repo", help="Full repository path (e.g. group/project)")
+        stories_search.add_argument("--query", required=True)
+        stories_search.set_defaults(project=None)
+    _add_work_search_filters(stories_search)
+    _add_output_format(stories_search)
+    _set_handler(stories_search, handle_work_search, "stories.search", primary_path="stories search")
 
     stories_mine = _add_parser(stories_sub, "mine", help_text="Get my assigned work items and issues")
-    stories_mine_remote = stories_mine.add_subparsers(dest="remote", required=True)
+    if remote.provider == "azdo":
+        stories_mine.add_argument("project")
+        stories_mine.set_defaults(repo=None)
+    elif remote.provider == "github":
+        stories_mine.add_argument("repo", help="Repository name")
+        stories_mine.set_defaults(project=None)
+    else:
+        stories_mine.add_argument("repo", help="Full repository path (e.g. group/project)")
+        stories_mine.set_defaults(project=None)
+    stories_mine.add_argument("--include-closed", action="store_true")
+    stories_mine.add_argument("--skip", type=int, default=0)
+    stories_mine.add_argument("--take", type=int, default=20)
+    _add_output_format(stories_mine)
+    _set_handler(stories_mine, handle_work_mine, "stories.mine", primary_path="stories mine")
 
-    for remote in remotes:
-        remote_parser = _add_parser(
-            stories_mine_remote,
-            remote.name,
-            help_text=f"Get assigned work items or issues via remote '{remote.name}'",
-        )
-        if remote.provider == "azdo":
-            remote_parser.add_argument("project")
-            remote_parser.set_defaults(repo=None)
-        else:
-            remote_parser.add_argument("repo")
-            remote_parser.set_defaults(project=None)
-        remote_parser.add_argument("--include-closed", action="store_true")
-        remote_parser.add_argument("--skip", type=int, default=0)
-        remote_parser.add_argument("--take", type=int, default=20)
-        _set_remote_defaults(remote_parser, remote=remote)
-        _add_output_format(remote_parser)
-        _set_handler(
-            remote_parser,
-            handle_work_mine,
-            "stories.mine",
-            primary_path="stories mine",
-        )
+
+def _add_remote_command_tree(root_subparsers: Any, *, remote: RemoteConfig) -> None:
+    remote_parser = _add_parser(
+        root_subparsers,
+        remote.name,
+        help_text=f"Commands for {remote.provider} remote '{remote.name}'",
+    )
+    _set_remote_defaults(remote_parser, remote=remote)
+    remote_subparsers = remote_parser.add_subparsers(dest="remote_command", required=True)
+
+    _add_remote_repos_command(remote_subparsers, remote=remote)
+    _add_remote_orgs_command(remote_subparsers)
+    if remote.provider == "gitlab":
+        _add_remote_groups_group(remote_subparsers)
+    _add_remote_code_group(remote_subparsers, remote=remote)
+    _add_remote_prs_group(remote_subparsers, remote=remote)
+    _add_remote_pipelines_group(remote_subparsers, remote=remote)
+    _add_remote_stories_group(remote_subparsers, remote=remote)
 
 
 def build_parser(*, smith_config: SmithConfig | None = None) -> argparse.ArgumentParser:
@@ -624,19 +537,12 @@ def build_parser(*, smith_config: SmithConfig | None = None) -> argparse.Argumen
         help="Enable verbose (DEBUG) logging to stderr.",
     )
 
-    root_subparsers = parser.add_subparsers(
-        dest="group",
-        required=True,
-        metavar="{repos,orgs,code,config,cache,prs,pipelines,stories}",
-    )
+    root_subparsers = parser.add_subparsers(dest="root_command", required=True)
 
-    _add_repos_group(root_subparsers, remotes=remotes)
-    _add_orgs_group(root_subparsers, remotes=remotes)
-    _add_code_group(root_subparsers, remotes=remotes, remote_hint=remote_hint)
+    _add_global_code_group(root_subparsers)
     _add_config_group(root_subparsers)
     _add_cache_group(root_subparsers, remotes=remotes)
-    _add_pr_group(root_subparsers, remotes=remotes)
-    _add_ci_group(root_subparsers, remotes=remotes)
-    _add_stories_group(root_subparsers, remotes=remotes)
+    for remote in remotes:
+        _add_remote_command_tree(root_subparsers, remote=remote)
 
     return parser

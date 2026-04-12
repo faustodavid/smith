@@ -5,27 +5,25 @@ Scope: read-only provider-specific pipeline-log investigation only.
 
 Preflight:
 ```bash
-: "${AZURE_DEVOPS_ORG:?Set AZURE_DEVOPS_ORG first (for azdo)}"
-: "${GITHUB_ORG:?Set GITHUB_ORG first (for github)}"
-: "${GITLAB_GROUP:?Set GITLAB_GROUP first (for gitlab)}"
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" config list
 az account show >/dev/null
 gh auth status >/dev/null
 glab auth status >/dev/null
 ```
 
 Required arguments:
-- List AZDO: `list azdo <project> <id>`
-- List GitHub: `list github <repo> <id>`
-- List GitLab: `list gitlab <repo> <id>`
-- Grep AZDO: `grep azdo <project> <id> <regex> [--log-id <n>]`
-- Grep GitHub: `grep github <repo> <id> <regex> [--log-id <n>]`
-- Grep GitLab: `grep gitlab <repo> <id> <regex> [--log-id <n>]`
+- List AZDO: `<azdo-remote-name> pipelines logs list <project> <id>`
+- List GitHub: `<github-remote-name> pipelines logs list <repo> <id>`
+- List GitLab: `<gitlab-remote-name> pipelines logs list <group/project> <id>`
+- Grep AZDO: `<azdo-remote-name> pipelines logs grep <project> <id> <regex> [--log-id <n>]`
+- Grep GitHub: `<github-remote-name> pipelines logs grep <repo> <id> <regex> [--log-id <n>]`
+- Grep GitLab: `<gitlab-remote-name> pipelines logs grep <group/project> <id> <regex> [--log-id <n>]`
 - GitHub commands take bare `<repo>`, not `org/repo`.
-- GitLab commands take `<repo>` relative to configured `GITLAB_GROUP`, not full `group/repo`.
+- GitLab commands take full `group/project` paths.
 
 First command to run:
 ```bash
-python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" pipelines logs $ARGUMENTS
+python3 "$HOME/.codex/skills/smith/scripts/smith_cli.py" $ARGUMENTS
 ```
 
 If no results:
@@ -33,7 +31,7 @@ If no results:
 2. Switch to `--output-mode logs_with_matches`.
 3. Page with `--from-line` and `--to-line` for large logs.
 4. If a GitHub command 404s after using `org/repo`, rerun it with bare `<repo>`.
-5. If a GitLab command 404s after using full `group/repo`, rerun it with `<repo>` relative to `GITLAB_GROUP`.
+5. If a GitLab command 404s after using a short repo name, rerun it with the full `group/project` path.
 
 Output contract:
 - Return concise findings and, when relevant, include repository source paths in `project/repository:path`, `org/repository:path`, or `group/repository:path`.

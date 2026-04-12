@@ -31,9 +31,9 @@ export GITLAB_TOKEN="<token>"
 az login
 
 smith config list
-smith repos github-public
-smith repos gitlab-platform
-smith code search "grafana" --remote all
+smith github-public repos
+smith gitlab-platform repos
+smith code search "grafana"
 ```
 
 ## Configuration
@@ -107,19 +107,19 @@ Usage examples:
 
 ```bash
 # Search across every enabled remote
-smith code search "grafana" --remote all
+smith code search "grafana"
 
 # Search only one configured remote
-smith code search "grafana" --remote github-public
+smith github-public code search "grafana"
 
 # List repositories for one configured GitLab remote
-smith repos gitlab-platform
+smith gitlab-platform repos
 
 # Grep a repository through one configured GitHub remote
-smith code grep github-public repo-a "TODO"
+smith github-public code grep repo-a "TODO"
 
 # Azure DevOps commands still take a project plus repo
-smith code grep azdo-main SRE repo-a "timeout"
+smith azdo-main code grep SRE repo-a "timeout"
 ```
 
 When multiple remotes are queried, Smith labels results with the remote name.

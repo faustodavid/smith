@@ -49,7 +49,7 @@ def test_main_emits_json_for_value_errors(monkeypatch: Any, capsys: Any) -> None
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)
     monkeypatch.setattr(cli_main, "validate_args_for_remote", lambda parsed: (_ for _ in ()).throw(ValueError("bad args")))
 
-    assert cli_main.main(["repos", "github"]) == cli_main.EXIT_INVALID_ARGS
+    assert cli_main.main(["github", "repos"]) == cli_main.EXIT_INVALID_ARGS
     captured = capsys.readouterr()
     assert '"code": "invalid_args"' in captured.out
     assert '"message": "bad args"' in captured.out
@@ -67,7 +67,7 @@ def test_main_uses_unexpected_error_fallback(monkeypatch: Any, capsys: Any) -> N
     monkeypatch.setattr(cli_main, "validate_args_for_remote", lambda parsed: None)
     monkeypatch.setattr(cli_main, "_client_from_args", lambda parsed: object())
 
-    assert cli_main.main(["repos", "github"]) == cli_main.EXIT_API_FAILURE
+    assert cli_main.main(["github", "repos"]) == cli_main.EXIT_API_FAILURE
     captured = capsys.readouterr()
     assert "Unexpected error: boom" in captured.err
 

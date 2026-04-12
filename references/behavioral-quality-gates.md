@@ -11,21 +11,21 @@ A `smith` investigation is acceptable only if all gates pass.
 ## Gate 2: Investigation
 
 - Unknown scope starts with `smith code search "<query>"`.
-- Unknown org or repo scope can use `smith orgs ...` and `smith repos ...`.
-- Unknown structure uses `smith code grep ... ".*" --output-mode files_with_matches`.
-- Final evidence comes from focused `smith code grep`.
+- Unknown org or repo scope can use `smith <remote> orgs ...` and `smith <remote> repos ...`.
+- Unknown structure uses `smith <remote> code grep ... ".*" --output-mode files_with_matches`.
+- Final evidence comes from focused `smith <remote> code grep`.
 - `prs`, `pipelines logs`, and `stories` are used only when primary or corroborating evidence is needed.
 - Remote syntax is explicit:
-  - `smith code grep <azdo-remote-name> <project> <repo> "<regex>"`
-  - `smith code grep <github-remote-name> <repo> "<regex>"`
-  - `smith code grep <gitlab-remote-name> <repo> "<regex>"`
-  - `smith pipelines logs list <github-remote-name> <repo> <id>`
+  - `smith <azdo-remote-name> code grep <project> <repo> "<regex>"`
+  - `smith <github-remote-name> code grep <repo> "<regex>"`
+  - `smith <gitlab-remote-name> code grep <group/project> "<regex>"`
+  - `smith <github-remote-name> pipelines logs list <repo> <id>`
 - GitHub repo arguments stay bare:
   - Search results may look like `org/repo:path`
   - Follow-up GitHub commands still take `<repo>`, not `org/repo`
-- GitLab repo arguments stay group-relative:
+- GitLab repo arguments stay fully qualified:
   - Search results may look like `group/repo:path`
-  - Follow-up GitLab commands take `<repo>` relative to the configured remote's group, not full `group/repo`
+  - Follow-up GitLab commands take full `group/project` paths, not a short repo name
 
 ## Gate 3: Answer Quality
 

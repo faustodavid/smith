@@ -61,11 +61,11 @@ def _make_smith_config(runtime: Any) -> SmithConfig:
             enabled=True,
             api_url=runtime.github_api_url,
         )
-    if runtime.gitlab_group:
+    if runtime.gitlab_api_url:
         remotes["gitlab"] = RemoteConfig(
             name="gitlab",
             provider="gitlab",
-            org=runtime.gitlab_group,
+            org="",
             host="gitlab.com",
             token_env="GITLAB_TOKEN",
             enabled=True,
@@ -126,7 +126,7 @@ def _install_client_fakes(monkeypatch: Any, runtime: Any) -> dict[str, Any]:
 
 
 def test_client_requires_at_least_one_configured_provider(monkeypatch: Any) -> None:
-    runtime = make_runtime_config(azdo_org="", github_org="", gitlab_group="")
+    runtime = make_runtime_config(azdo_org="", github_org="", gitlab_api_url="")
     monkeypatch.setattr(client_module, "parse_runtime_config", lambda **kwargs: runtime)
 
     with pytest.raises(ValueError, match="No remotes configured"):
@@ -147,7 +147,7 @@ def test_client_initializes_runtime_and_configures_session(monkeypatch: Any) -> 
 
 
 def test_client_lazily_creates_and_caches_remote_provider_instances(monkeypatch: Any) -> None:
-    runtime = make_runtime_config(github_org="", gitlab_group="")
+    runtime = make_runtime_config(github_org="", gitlab_api_url="")
     _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
     azdo_remote = client._config.remotes["azdo"]
@@ -514,7 +514,7 @@ def test_execute_code_search_runs_all_remote_operations(monkeypatch: Any) -> Non
 
 
 def test_execute_code_search_all_skips_unconfigured_remotes(monkeypatch: Any) -> None:
-    runtime = make_runtime_config(azdo_org="", github_org="", gitlab_group="platform")
+    runtime = make_runtime_config(azdo_org="", github_org="")
     calls = _install_client_fakes(monkeypatch, runtime)
     client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 

@@ -49,4 +49,5 @@ def test_behavior_fixture_covers_github_repo_shape_rule() -> None:
 
     assert any(case.get("required_phrase") == "bare `<repo>`" for case in cases)
     assert any(case.get("required_phrase") == "not `org/repo`" for case in cases)
-    assert any(case.get("required_phrase") == "relative to the configured remote's group" for case in cases)
+    assert any(case.get("required_phrase") == "full `group/project` paths" for case in cases)
+    assert any(case.get("required_phrase") == "not a short repo name" for case in cases)
