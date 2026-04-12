@@ -28,7 +28,6 @@ class RuntimeConfig:
     github_timeout_seconds: int
     github_max_concurrent_requests: int
     github_rate_limit_max_sleep_seconds: int
-    gitlab_group: str
     gitlab_api_url: str
     gitlab_timeout_seconds: int
     http_pool_maxsize: int
@@ -43,10 +42,6 @@ class RuntimeConfig:
     @property
     def github_configured(self) -> bool:
         return bool(self.github_org)
-
-    @property
-    def gitlab_configured(self) -> bool:
-        return bool(self.gitlab_group)
 
     @property
     def azdo_org_url(self) -> str:
@@ -249,6 +244,9 @@ def _compute_api_url_for_remote(provider: str, host: str) -> str:
     return ""
 
 
+_RESERVED_REMOTE_NAMES = {"all", "cache", "config", "help", "search"}
+
+
 def _normalize_config_api_url(raw_api_url: Any) -> str:
     return str(raw_api_url or "").strip().rstrip("/")
 
@@ -270,6 +268,10 @@ def _should_persist_api_url(remote: RemoteConfig) -> bool:
 
 
 def _validate_remote_dict(name: str, remote: dict[str, Any]) -> None:
+    if name.strip().lower() in _RESERVED_REMOTE_NAMES:
+        reserved = ", ".join(sorted(_RESERVED_REMOTE_NAMES))
+        raise ValueError(f"Remote '{name}': name is reserved. Choose a name outside: {reserved}")
+
     provider = remote.get("provider", "").strip().lower()
     if provider not in {"github", "gitlab", "azdo"}:
         raise ValueError(f"Remote '{name}': provider must be one of github, gitlab, azdo (got '{provider}')")
@@ -278,10 +280,6 @@ def _validate_remote_dict(name: str, remote: dict[str, Any]) -> None:
         org = remote.get("org", "").strip()
         if not org:
             raise ValueError(f"Remote '{name}': {provider} remotes require 'org' field")
-    elif provider == "gitlab":
-        group = remote.get("group", "").strip()
-        if not group:
-            raise ValueError(f"Remote '{name}': gitlab remotes require 'group' field")
 
 
 def load_config(*, config_path: Path | None = None) -> SmithConfig:
@@ -310,7 +308,7 @@ def load_config(*, config_path: Path | None = None) -> SmithConfig:
         _validate_remote_dict(name, remote)
 
         provider = remote["provider"].strip().lower()
-        org = remote.get("org", "").strip() or remote.get("group", "").strip()
+        org = remote.get("org", "").strip()
         host = remote.get("host", "").strip()
         if not host:
             if provider == "github":
@@ -353,8 +351,6 @@ def save_config(config: SmithConfig, *, config_path: Path | None = None) -> None
         }
         if remote.provider in {"github", "azdo"}:
             remote_dict["org"] = remote.org
-        else:
-            remote_dict["group"] = remote.org
 
         if remote.host:
             if remote.provider == "github" and remote.host != "github.com":
@@ -445,7 +441,6 @@ def parse_runtime_config(
             min_value=1,
             max_value=900,
         ),
-        gitlab_group="",
         gitlab_api_url=resolve_gitlab_api_url(
             default=gitlab_api_url_default,
             enable_auto_discovery=True,

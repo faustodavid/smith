@@ -52,7 +52,6 @@ def github_provider(github_smoke_env: dict[str, Any]) -> GitHubProvider:
 def gitlab_smoke_env() -> dict[str, Any]:
     values = _required_env(
         [
-            "GITLAB_GROUP",
             "GITLAB_TOKEN",
             "SMITH_TEST_GITLAB_REPO",
             "SMITH_TEST_GITLAB_MR_ID",
@@ -71,7 +70,7 @@ def gitlab_smoke_env() -> dict[str, Any]:
 @pytest.fixture
 def gitlab_provider(gitlab_smoke_env: dict[str, Any]) -> GitLabProvider:
     return GitLabProvider(
-        config=make_runtime_config(gitlab_group=gitlab_smoke_env["GITLAB_GROUP"]),
+        config=make_runtime_config(),
         session=requests.Session(),
     )
 

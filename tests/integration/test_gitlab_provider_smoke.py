@@ -10,14 +10,16 @@ def test_gitlab_provider_smoke_repository_and_search(
     gitlab_smoke_env: dict[str, Any],
 ) -> None:
     projects = gitlab_provider.list_projects()
-    assert any(entry.get("name") == gitlab_smoke_env["GITLAB_GROUP"] for entry in projects)
+    repo = gitlab_smoke_env["SMITH_TEST_GITLAB_REPO"]
+    group = repo.rsplit("/", 1)[0]
+    assert any(entry.get("name") == group for entry in projects)
 
-    repos = gitlab_provider.list_repositories()
-    assert any(entry.get("name") == gitlab_smoke_env["SMITH_TEST_GITLAB_REPO"] for entry in repos)
+    repos = gitlab_provider.list_repositories(group=group)
+    assert any(entry.get("name") == repo for entry in repos)
 
     search = gitlab_provider.search_code(
         query=gitlab_smoke_env["SMITH_TEST_GITLAB_SEARCH_QUERY"],
-        project=gitlab_smoke_env["SMITH_TEST_GITLAB_REPO"],
+        project=repo,
         repos=None,
         skip=0,
         take=5,

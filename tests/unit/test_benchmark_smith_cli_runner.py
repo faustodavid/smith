@@ -39,8 +39,8 @@ def test_in_process_runner_reuses_single_client(monkeypatch: Any) -> None:
     monkeypatch.setattr("smith.benchmark.smith_cli.SmithClient", _FakeClient)
 
     runner = InProcessSmithCliRunner()
-    first = runner.execute("orgs github")
-    second = runner.execute("orgs github")
+    first = runner.execute("github orgs")
+    second = runner.execute("github orgs")
 
     assert first == "openai"
     assert second == "openai"
@@ -53,7 +53,7 @@ def test_in_process_runner_caches_successful_normalized_commands(monkeypatch: An
 
     runner = InProcessSmithCliRunner()
     first = runner.execute('smith code search "webhook"')
-    second = runner.execute('code search "webhook" --remote github')
+    second = runner.execute('code search "webhook"')
 
     assert first.startswith("matches: 1")
     assert second == first

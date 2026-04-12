@@ -19,7 +19,7 @@ def _benchmark_env(*, base_url: str) -> dict[str, str]:
     }
 
 
-def test_benchmark_smith_cli_injects_benchmark_org_in_code_search() -> None:
+def test_benchmark_smith_cli_injects_benchmark_org_in_search() -> None:
     def search_handler(request: StubRequest) -> StubResponse:
         return StubResponse(
             status=200,

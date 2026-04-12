@@ -30,17 +30,16 @@ class GitLabProvider(
         *,
         config: RuntimeConfig,
         session: requests.Session,
-        gitlab_group: str | None = None,
         gitlab_api_url: str | None = None,
         token_env: str | None = None,
     ) -> None:
         super().__init__(config=config, session=session, token_env=token_env)
-        self.gitlab_group = gitlab_group or config.gitlab_group
         self.gitlab_api_url = gitlab_api_url or config.gitlab_api_url
         self.max_output_chars = config.max_output_chars
         self._gitlab_token: str | None = None
         self._default_branch_cache: dict[str, str] = {}
-        self._repository_list_cache: list[dict[str, Any]] | None = None
+        self._group_list_cache: list[dict[str, Any]] | None = None
+        self._repository_list_cache: dict[str, list[dict[str, Any]]] = {}
         self._project_id_to_path_cache: dict[str, str] = {}
         self._project_key_to_path_cache: dict[str, str] = {}
 
@@ -121,18 +120,26 @@ class GitLabProvider(
             return path
         return f"{self.gitlab_api_url}{path}"
 
-    def _require_gitlab_group(self) -> str:
-        group = (self.gitlab_group or "").strip().strip("/")
-        if not group:
-            raise ValueError("GitLab remote is missing a group in the Smith config.")
-        return group
-
     def _gitlab_web_url(self) -> str:
         if self.gitlab_api_url.endswith("/api/v4"):
             return self.gitlab_api_url[: -len("/api/v4")]
         if "/api/" in self.gitlab_api_url:
             return self.gitlab_api_url.split("/api/", 1)[0]
         return self.gitlab_api_url
+
+    @staticmethod
+    def _project_namespace(full_path: str) -> str:
+        normalized = full_path.strip().strip("/")
+        if "/" not in normalized:
+            return normalized
+        return normalized.rsplit("/", 1)[0]
+
+    @staticmethod
+    def _project_short_name(full_path: str) -> str:
+        normalized = full_path.strip().strip("/")
+        if "/" not in normalized:
+            return normalized
+        return normalized.rsplit("/", 1)[-1]
 
     def _cache_project(
         self,
@@ -159,14 +166,7 @@ class GitLabProvider(
                 self._default_branch_cache[relative.lower()] = default_branch
 
     def _relative_repo_path(self, full_path: str) -> str:
-        normalized_full_path = full_path.strip().strip("/")
-        group = self._require_gitlab_group()
-        prefix = f"{group}/"
-        if normalized_full_path.startswith(prefix):
-            relative = normalized_full_path[len(prefix) :]
-            if relative:
-                return relative
-        return normalized_full_path
+        return full_path.strip().strip("/")
 
     def _full_project_path(self, repo: str) -> str:
         normalized_repo = repo.strip().strip("/")
@@ -176,11 +176,7 @@ class GitLabProvider(
         cached = self._project_key_to_path_cache.get(normalized_repo.lower())
         if cached:
             return cached
-
-        group = self._require_gitlab_group()
-        if normalized_repo.startswith(f"{group}/"):
-            return normalized_repo
-        return f"{group}/{normalized_repo}"
+        return normalized_repo
 
     def _project_id(self, repo: str) -> str:
         return quote(self._full_project_path(repo), safe="")

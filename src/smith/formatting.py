@@ -327,6 +327,7 @@ def _render_board_table(data: Any) -> str:
 
 _RENDER_DISPATCH: dict[str, Any] = {
     "orgs": _render_name_list,
+    "groups.list": _render_name_list,
     "repos": _render_discover_repos,
     "code.search": _render_code_search,
     "code.grep": _render_grep,

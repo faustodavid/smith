@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
 
 if TYPE_CHECKING:
     pass
@@ -27,13 +26,13 @@ class GitLabIssueMixin:
             "title": issue.get("title"),
             "state": state,
             "type": "Issue",
-            "project": self._require_gitlab_group(),
+            "project": self._project_namespace(repo),
             "assigned_to": assigned_to,
             "tags": tag_names,
             "created_date": issue.get("created_at"),
             "changed_date": issue.get("updated_at"),
             "url": issue.get("web_url"),
-            "repository": repo,
+            "repository": self._project_short_name(repo),
             "highlights": [],
         }
 
@@ -109,7 +108,7 @@ class GitLabIssueMixin:
         if repo_name:
             path = f"/projects/{self._project_id(repo_name)}/issues"
         else:
-            path = f"/groups/{quote(self._require_gitlab_group(), safe='')}/issues"
+            path = "/issues"
 
         issues_data = self._get_paginated_list(
             path,

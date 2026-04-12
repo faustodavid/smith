@@ -57,7 +57,7 @@ def test_render_tool_trace_markdown_includes_auditable_arguments():
             "server": "smith-benchmark",
             "tool": "smith_cli",
             "status": "failed",
-            "arguments": {"command": "smith repos github"},
+            "arguments": {"command": "smith github repos"},
             "result_preview": "github auth failed",
         }
     ]
@@ -65,7 +65,7 @@ def test_render_tool_trace_markdown_includes_auditable_arguments():
     markdown = render_tool_trace_markdown(tool_trace)
 
     assert "`smith-benchmark:smith_cli` `failed`" in markdown
-    assert '"command": "smith repos github"' in markdown
+    assert '"command": "smith github repos"' in markdown
     assert "github auth failed" in markdown
 
 
@@ -102,7 +102,7 @@ async def test_execute_eval_run_writes_tool_trace_artifacts(tmp_path, monkeypatc
                     "server": "smith-benchmark",
                     "tool": "smith_cli",
                     "status": "completed",
-                    "arguments": {"command": "smith repos github"},
+                    "arguments": {"command": "smith github repos"},
                 }
             ],
         )
@@ -138,6 +138,6 @@ async def test_execute_eval_run_writes_tool_trace_artifacts(tmp_path, monkeypatc
     tool_trace_md = (outputs_dir / "tool_trace.md").read_text()
     metrics = json.loads((outputs_dir / "metrics.json").read_text())
 
-    assert tool_trace_json[0]["arguments"] == {"command": "smith repos github"}
+    assert tool_trace_json[0]["arguments"] == {"command": "smith github repos"}
     assert "`smith-benchmark:smith_cli` `completed`" in tool_trace_md
     assert metrics["tool_trace_entries"] == 1

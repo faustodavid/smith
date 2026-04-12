@@ -35,29 +35,58 @@ _CACHE_LOCKS_GUARD = threading.Lock()
 
 
 class GitLabCodeMixin:
-    _repository_list_cache: list[dict[str, Any]] | None
+    _group_list_cache: list[dict[str, Any]] | None
+    _repository_list_cache: dict[str, list[dict[str, Any]]]
 
     def list_projects(self: Any) -> list[dict[str, Any]]:
-        group = self._require_gitlab_group()
-        return [
-            {
-                "id": group,
-                "name": group,
-                "state": "active",
-                "url": f"{self._gitlab_web_url()}/{group}",
-            }
-        ]
+        return self.list_groups()
 
-    def list_repositories(self: Any) -> list[dict[str, Any]]:
-        cache = getattr(self, "_repository_list_cache", None)
+    def list_groups(self: Any) -> list[dict[str, Any]]:
+        cache = getattr(self, "_group_list_cache", None)
         if cache is not None:
             return [dict(entry) for entry in cache]
 
-        group = self._require_gitlab_group()
-        repos = self._get_paginated_list(
-            f"/groups/{quote(group, safe='')}/projects",
-            params={"include_subgroups": "true", "simple": "true", "order_by": "path"},
+        groups = self._get_paginated_list(
+            "/groups",
+            params={"all_available": "false", "order_by": "path"},
         )
+        mapped: list[dict[str, Any]] = []
+        for item in groups:
+            if not isinstance(item, dict):
+                continue
+            full_path = str(item.get("full_path") or item.get("path") or "").strip().strip("/")
+            if not full_path:
+                continue
+            mapped.append(
+                {
+                    "id": item.get("id"),
+                    "name": full_path,
+                    "state": "active",
+                    "url": item.get("web_url") or f"{self._gitlab_web_url()}/{full_path}",
+                }
+            )
+
+        self._group_list_cache = mapped
+        return [dict(entry) for entry in mapped]
+
+    def list_repositories(self: Any, *, group: str | None = None) -> list[dict[str, Any]]:
+        normalized_group = str(group or "").strip().strip("/")
+        cache_key = normalized_group.lower()
+        cache = getattr(self, "_repository_list_cache", {})
+        cached_entries = cache.get(cache_key)
+        if cached_entries is not None:
+            return [dict(entry) for entry in cached_entries]
+
+        if normalized_group:
+            repos = self._get_paginated_list(
+                f"/groups/{quote(normalized_group, safe='')}/projects",
+                params={"include_subgroups": "true", "simple": "true", "order_by": "path"},
+            )
+        else:
+            repos = self._get_paginated_list(
+                "/projects",
+                params={"membership": "true", "simple": "true", "order_by": "path"},
+            )
         mapped: list[dict[str, Any]] = []
         for item in repos:
             if not isinstance(item, dict):
@@ -65,23 +94,22 @@ class GitLabCodeMixin:
             full_path = str(item.get("path_with_namespace") or "").strip().strip("/")
             if not full_path:
                 continue
-            relative = self._relative_repo_path(full_path)
             self._cache_project(
                 project_id=str(item.get("id") or "") or None,
                 full_path=full_path,
-                relative_path=relative,
                 default_branch=str(item.get("default_branch") or "") or None,
             )
             mapped.append(
                 {
                     "id": item.get("id"),
-                    "name": relative,
+                    "name": full_path,
                     "defaultBranch": item.get("default_branch"),
                     "webUrl": item.get("web_url"),
                 }
             )
 
-        self._repository_list_cache = mapped
+        cache[cache_key] = mapped
+        self._repository_list_cache = cache
         return [dict(entry) for entry in mapped]
 
     def _search_result_project_path(self: Any, item: dict[str, Any], *, repo: str | None) -> str:
@@ -107,7 +135,7 @@ class GitLabCodeMixin:
         if fallback:
             return self._full_project_path(fallback)
 
-        return self._full_project_path(repo) if repo else self._require_gitlab_group()
+        return self._full_project_path(repo) if repo else ""
 
     @staticmethod
     def _pagination_header_int(
@@ -143,11 +171,10 @@ class GitLabCodeMixin:
         page: int,
         per_page: int,
     ) -> tuple[list[dict[str, Any]], int | None, int | None]:
-        group = self._require_gitlab_group()
         if repo:
             path = f"/projects/{self._project_id(repo)}/search"
         else:
-            path = f"/groups/{quote(group, safe='')}/search"
+            path = "/search"
 
         response = self._request_response(
             "GET",
@@ -196,9 +223,8 @@ class GitLabCodeMixin:
         per_page = 100
         total_matches = 0
         page_items_for_output: list[dict[str, Any]] = []
-
-        if not effective_repos:
-            self.list_repositories()
+        warnings: list[str] = []
+        partial = False
 
         for target_repo in search_targets:
             current_page = 1
@@ -235,12 +261,28 @@ class GitLabCodeMixin:
 
             target_seen = 0
             current_items = list(first_page_items)
+            broad_search_without_total = target_repo is None
+            checked_extra_page_after_window = False
             while True:
                 for item in current_items:
                     global_index = total_matches + target_seen
                     if start <= global_index < stop:
                         page_items_for_output.append(item)
                     target_seen += 1
+
+                maybe_more = next_page is not None or len(current_items) >= per_page
+                if broad_search_without_total and target_seen >= stop:
+                    if checked_extra_page_after_window or not maybe_more:
+                        if checked_extra_page_after_window and maybe_more:
+                            partial = True
+                            warning = (
+                                "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "
+                                "Narrow with `--repo group/project` for exact counts."
+                            )
+                            if warning not in warnings:
+                                warnings.append(warning)
+                        break
+                    checked_extra_page_after_window = True
 
                 next_page_num = next_page if next_page is not None else current_page + 1
                 next_items, _ignored_total, next_page = self._search_code_page(
@@ -258,19 +300,22 @@ class GitLabCodeMixin:
 
         results: list[str] = []
         for item in page_items_for_output:
-            project_path = self._relative_repo_path(
-                self._search_result_project_path(
-                    item,
-                    repo=str(item.get("_repo_hint") or "") or None,
-                )
+            project_path = self._search_result_project_path(
+                item,
+                repo=str(item.get("_repo_hint") or "") or None,
             )
             path = normalize_path(str(item.get("path") or item.get("filename") or ""))
             results.append(f"{project_path}:{path}" if project_path else path)
 
-        return {
+        result = {
             "matchesCount": total_matches,
             "results": results,
         }
+        if warnings:
+            result["warnings"] = warnings
+        if partial:
+            result["partial"] = True
+        return result
 
     def _get_file_metadata(
         self: Any,

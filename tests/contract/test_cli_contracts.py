@@ -22,8 +22,8 @@ def _make_args(**overrides: Any) -> Namespace:
         "query": "grafana",
         "github_org": None,
         "azdo_org": None,
-        "gitlab_group": None,
         "project": "proj-a",
+        "group": None,
         "repo": "repo-a",
         "repos": ["repo-a"],
         "status": ["active"],
@@ -109,10 +109,18 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
     [
         (_make_args(command_id="repos", remote="all", remote_provider=""), "does not support remote 'all'"),
         (_make_args(command_id="code.search", query="   "), "code search requires a query"),
+        (_make_args(command_id="code.search", remote="all", remote_provider="", project="proj-a", repos=None),
+         "does not support `--project`"),
+        (_make_args(command_id="code.search", remote="all", remote_provider="", project=None, repos=["repo-a"]),
+         "does not support `--repo`"),
         (_make_args(command_id="code.search", remote="github", remote_provider="github", project="proj-a"),
          "GitHub code search does not support `--project`"),
         (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project="proj-a"),
          "GitLab code search does not support `--project`"),
+        (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project=None, repos=["repo-a"]),
+         "GitLab repositories must use full `group/project` paths"),
+        (_make_args(command_id="code.grep", remote="gitlab", remote_provider="gitlab", project=None, repo="repo-a"),
+         "GitLab repositories must use full `group/project` paths"),
     ],
 )
 def test_validate_args_for_remote_rejects_invalid_inputs(
@@ -124,7 +132,20 @@ def test_validate_args_for_remote_rejects_invalid_inputs(
 
 
 def test_validate_args_for_remote_allows_code_search_all() -> None:
-    args = _make_args(command_id="code.search", remote="all", remote_provider="")
+    args = _make_args(command_id="code.search", remote="all", remote_provider="", project=None, repos=None)
+
+    handlers.validate_args_for_remote(args)
+
+
+def test_validate_args_for_remote_allows_full_gitlab_repo_paths() -> None:
+    args = _make_args(
+        command_id="code.search",
+        remote="gitlab",
+        remote_provider="gitlab",
+        project=None,
+        repos=["engineering-tools/coderabbit"],
+        repo="engineering-tools/coderabbit",
+    )
 
     handlers.validate_args_for_remote(args)
 
@@ -248,17 +269,17 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
             "handle_discover_repos",
             _make_args(command_id="repos"),
             "execute_discover_repos",
-            {"remote_or_provider": "azdo", "project": "proj-a"},
+            {"remote_or_provider": "azdo", "project": "proj-a", "group": None},
         ),
         (
             "handle_code_search",
-            _make_args(command_id="code.search", remote="all", remote_provider=""),
+            _make_args(command_id="code.search", remote="all", remote_provider="", project=None, repos=None),
             "execute_code_search",
             {
                 "remote_or_provider": "all",
                 "query": "grafana",
-                "project": "proj-a",
-                "repos": ["repo-a"],
+                "project": None,
+                "repos": None,
                 "skip": 3,
                 "take": 7,
             },
@@ -374,6 +395,19 @@ def test_handlers_forward_expected_arguments(
     assert exit_code == handlers.EXIT_OK
     assert output.out.strip() == f"{args.command_id}:{handler_name}"
     assert client.calls == [(expected_method, expected_kwargs)]
+
+
+def test_handle_list_groups_forwards_selected_remote(monkeypatch: Any, capsys: Any) -> None:
+    client = _RecordingClient(payload={"marker": "groups"})
+    args = _make_args(command_id="groups.list", remote="gitlab-infra", remote_provider="gitlab")
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
+
+    exit_code = handlers.handle_list_groups(client, args)
+    output = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert output.out.strip() == "groups.list:groups"
+    assert client.calls == [("execute_list_groups", {"remote_or_provider": "gitlab-infra"})]
 
 
 def test_handle_cache_clean_cleans_requested_remote_cache(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:

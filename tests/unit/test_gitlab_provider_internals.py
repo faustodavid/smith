@@ -14,6 +14,8 @@ from tests.support import make_runtime_config
 from smith.errors import SmithApiError, SmithAuthError
 from smith.providers.gitlab import GitLabProvider
 
+_FULL_REPO = "gitlab-org/repo-a"
+
 
 def _provider(config: Any | None = None) -> GitLabProvider:
     return GitLabProvider(config=config or make_runtime_config(), session=requests.Session())
@@ -60,7 +62,7 @@ def test_gitlab_token_falls_back_to_glab_config_and_reports_auth_failures(monkey
         failing_provider._get_token()
 
 
-def test_gitlab_token_rejects_empty_cli_token_and_requires_group(monkeypatch: Any) -> None:
+def test_gitlab_token_rejects_empty_cli_token(monkeypatch: Any) -> None:
     monkeypatch.delenv("GITLAB_TOKEN", raising=False)
     provider = _provider()
     monkeypatch.setattr(
@@ -76,9 +78,6 @@ def test_gitlab_token_rejects_empty_cli_token_and_requires_group(monkeypatch: An
         "Set GITLAB_TOKEN or run `glab auth login` and retry."
     )
     assert provider._build_url("https://example.test/projects") == "https://example.test/projects"
-
-    with pytest.raises(ValueError, match="GitLab remote is missing a group in the Smith config"):
-        _provider(make_runtime_config(gitlab_group=""))._require_gitlab_group()
 
 
 def test_gitlab_token_uses_host_specific_glab_config_lookup(monkeypatch: Any) -> None:
@@ -99,7 +98,7 @@ def test_gitlab_token_uses_host_specific_glab_config_lookup(monkeypatch: Any) ->
 
 def test_gitlab_project_path_helpers_and_repository_file_resolution(monkeypatch: Any) -> None:
     provider = _provider()
-    repo_id = provider._project_id("repo-a")
+    repo_id = provider._project_id(_FULL_REPO)
 
     def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
         if path == f"/projects/{repo_id}/repository/tree" and params == {
@@ -135,24 +134,24 @@ def test_gitlab_project_path_helpers_and_repository_file_resolution(monkeypatch:
     monkeypatch.setattr(provider, "_request", _fake_request)
     monkeypatch.setattr(provider, "_request_json", _fake_request_json)
 
-    assert provider._full_project_path("repo-a") == "gitlab-org/repo-a"
-    assert provider._full_project_path("sub/repo-a") == "gitlab-org/sub/repo-a"
-    assert provider._relative_repo_path("gitlab-org/sub/repo-a") == "sub/repo-a"
+    assert provider._full_project_path(_FULL_REPO) == _FULL_REPO
+    assert provider._full_project_path("gitlab-org/sub/repo-a") == "gitlab-org/sub/repo-a"
+    assert provider._relative_repo_path("gitlab-org/sub/repo-a") == "gitlab-org/sub/repo-a"
 
-    assert provider._get_repository_files(repo="repo-a", path=None, branch="main") == [
+    assert provider._get_repository_files(repo=_FULL_REPO, path=None, branch="main") == [
         {"path": "/README.md", "is_binary": False, "sha": "sha-readme"}
     ]
-    assert provider._get_repository_files(repo="repo-a", path="/src", branch="main") == [
+    assert provider._get_repository_files(repo=_FULL_REPO, path="/src", branch="main") == [
         {"path": "/src/app.py", "is_binary": False, "sha": "sha-app"}
     ]
-    assert provider._get_repository_files(repo="repo-a", path="/README.md", branch="main") == [
+    assert provider._get_repository_files(repo=_FULL_REPO, path="/README.md", branch="main") == [
         {"path": "/README.md", "is_binary": False, "sha": "sha-readme"}
     ]
 
 
 def test_gitlab_file_text_prefers_blob_api_and_falls_back_to_raw_file(monkeypatch: Any) -> None:
     provider = _provider()
-    repo_id = provider._project_id("repo-a")
+    repo_id = provider._project_id(_FULL_REPO)
     calls: list[str] = []
 
     def _blob_success(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
@@ -162,7 +161,7 @@ def test_gitlab_file_text_prefers_blob_api_and_falls_back_to_raw_file(monkeypatc
         raise AssertionError(f"unexpected request_text: {path} {params}")
 
     monkeypatch.setattr(provider, "_request_text", _blob_success)
-    assert provider._get_file_text(repo="repo-a", file_path="/src/app.py", branch="main", blob_sha="sha-1") == "hello from blob"
+    assert provider._get_file_text(repo=_FULL_REPO, file_path="/src/app.py", branch="main", blob_sha="sha-1") == "hello from blob"
 
     calls.clear()
 
@@ -178,7 +177,7 @@ def test_gitlab_file_text_prefers_blob_api_and_falls_back_to_raw_file(monkeypatc
     monkeypatch.setattr(provider, "_request_text", _blob_fallback)
     assert (
         provider._get_file_text(
-            repo="repo-a",
+            repo=_FULL_REPO,
             file_path="/src/app.py",
             branch="refs/heads/main",
             blob_sha="sha-2",
@@ -214,10 +213,10 @@ def test_gitlab_local_checkout_clone_uses_token_auth_when_available(monkeypatch:
 
     monkeypatch.setattr("smith.providers.gitlab_code.subprocess.run", _fake_run)
 
-    checkout_dir = provider._ensure_local_checkout(repo="repo-a", branch="main")
+    checkout_dir = provider._ensure_local_checkout(repo=_FULL_REPO, branch="main")
     expected_basic = base64.b64encode(b"oauth2:env-token").decode("ascii")
 
-    assert checkout_dir == provider._local_checkout_path(repo="repo-a", branch="main")
+    assert checkout_dir == provider._local_checkout_path(repo=_FULL_REPO, branch="main")
     assert git_calls == [
         {
             "args": [
@@ -235,7 +234,7 @@ def test_gitlab_local_checkout_clone_uses_token_auth_when_available(monkeypatch:
                 "main",
                 "--single-branch",
                 "https://gitlab.com/gitlab-org/repo-a.git",
-                provider._local_checkout_path(repo="repo-a", branch="main"),
+                provider._local_checkout_path(repo=_FULL_REPO, branch="main"),
             ],
             "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         }
@@ -245,7 +244,7 @@ def test_gitlab_local_checkout_clone_uses_token_auth_when_available(monkeypatch:
 def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     monkeypatch.setattr(provider, "_gitlab_grep_cache_root", lambda: str(tmp_path))
-    checkout_dir = provider._local_checkout_path(repo="repo-a", branch="main")
+    checkout_dir = provider._local_checkout_path(repo=_FULL_REPO, branch="main")
     Path(checkout_dir, ".git").mkdir(parents=True)
     git_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(provider, "_get_token", lambda force_refresh=False: "env-token")
@@ -261,7 +260,7 @@ def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch:
 
     monkeypatch.setattr("smith.providers.gitlab_code.subprocess.run", _fake_run)
 
-    result = provider._ensure_local_checkout(repo="repo-a", branch="main")
+    result = provider._ensure_local_checkout(repo=_FULL_REPO, branch="main")
     expected_basic = base64.b64encode(b"oauth2:env-token").decode("ascii")
 
     assert result == checkout_dir
@@ -323,9 +322,9 @@ def test_gitlab_grep_uses_git_grep_fast_path_before_listing(monkeypatch: Any, tm
         lambda **kwargs: [{"path": "/src/app.py", "is_binary": False, "sha": None, "local_path": str(local_file)}],
     )
 
-    result = provider.grep(repo="repo-a", pattern="needle", output_mode="files_with_matches")
+    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="files_with_matches")
 
-    assert checkout_calls == [("repo-a", "main")]
+    assert checkout_calls == [(_FULL_REPO, "main")]
     assert result["text"] == "/src/app.py"
 
 
@@ -345,7 +344,7 @@ def test_gitlab_grep_no_clone_skips_local_checkout(monkeypatch: Any) -> None:
     )
     monkeypatch.setattr(provider, "_get_file_text", lambda **kwargs: "needle\n")
 
-    result = provider.grep(repo="repo-a", pattern="needle", output_mode="count", no_clone=True)
+    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="count", no_clone=True)
 
     assert result == {
         "text": "/src/app.py:1",
@@ -451,7 +450,7 @@ def test_gitlab_grep_fast_path_returns_content_without_rereading_files(monkeypat
 
     monkeypatch.setattr(provider, "_git_subprocess_result", _fake_git_result)
 
-    result = provider.grep(repo="repo-a", pattern="needle", output_mode="content", context_lines=1)
+    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="content", context_lines=1)
 
     assert result == {
         "text": "/src/app.py\n1-before\n2:needle\n3-after",
@@ -498,7 +497,7 @@ def test_gitlab_grep_fast_path_returns_count_without_rereading_files(monkeypatch
 
     monkeypatch.setattr(provider, "_git_subprocess_result", _fake_git_result)
 
-    result = provider.grep(repo="repo-a", pattern="needle", output_mode="count", context_lines=0)
+    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="count", context_lines=0)
 
     assert result == {
         "text": "/src/app.py:2",
@@ -524,7 +523,7 @@ def test_gitlab_grep_does_not_retry_local_checkout_after_api_listing(monkeypatch
     )
     monkeypatch.setattr(provider, "_get_file_text", lambda **kwargs: "needle\n")
 
-    result = provider.grep(repo="repo-a", pattern="needle", output_mode="count")
+    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="count")
 
     assert result == {
         "text": "/src/app.py:1",
@@ -532,7 +531,7 @@ def test_gitlab_grep_does_not_retry_local_checkout_after_api_listing(monkeypatch
         "warnings": [],
         "partial": False,
     }
-    assert checkout_calls == [{"repo": "repo-a", "branch": "main"}]
+    assert checkout_calls == [{"repo": _FULL_REPO, "branch": "main"}]
 
 
 def test_gitlab_grep_parallel_api_fallback_uses_worker_sessions(monkeypatch: Any) -> None:
@@ -567,7 +566,7 @@ def test_gitlab_grep_parallel_api_fallback_uses_worker_sessions(monkeypatch: Any
     monkeypatch.setattr(provider, "_get_http_session", _fake_get_http_session)
     monkeypatch.setattr(provider, "_get_file_text", _fake_get_file_text)
 
-    result = provider.grep(repo="repo-a", pattern="needle", output_mode="count")
+    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="count")
 
     assert result == {
         "text": "/src/app.py:1\n/src/util.py:1",
@@ -596,7 +595,7 @@ def test_gitlab_grep_content_uses_search_api_prefilter_when_local_checkout_unava
     )
     monkeypatch.setattr(provider, "_get_file_text", lambda **kwargs: "needle\n")
 
-    result = provider.grep(repo="repo-a", pattern="needle", output_mode="content", context_lines=0)
+    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="content", context_lines=0)
 
     assert result == {
         "text": "/src/app.py\n1:needle",

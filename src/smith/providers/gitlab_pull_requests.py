@@ -129,8 +129,8 @@ class GitLabPullRequestMixin:
                                 "created_by": creator,
                                 "status": status,
                                 "creation_date": item.get("created_at"),
-                                "project_name": self._require_gitlab_group(),
-                                "repository_name": repo_name,
+                                "project_name": self._project_namespace(repo_name),
+                                "repository_name": self._project_short_name(repo_name),
                                 "repository_id": item.get("project_id"),
                                 "closed_date": (
                                     resolved_closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
@@ -275,8 +275,8 @@ class GitLabPullRequestMixin:
 
         return {
             "pull_request_id": pull_request_id,
-            "project_name": self._require_gitlab_group(),
-            "repository_name": repo,
+            "project_name": self._project_namespace(repo),
+            "repository_name": self._project_short_name(repo),
             "returned_count": len(threads),
             "total_comments": total_comments,
             "threads": threads,

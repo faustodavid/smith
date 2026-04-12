@@ -31,16 +31,11 @@ _DEFAULT_RUNNER: InProcessSmithCliRunner | None = None
 
 
 def _strip_benchmark_global_flags(tokens: list[str]) -> list[str]:
-    root_commands = {"code", "repos", "orgs"}
     ignored_flags = {"--format"}
     ignored_switches = {"--verbose", "-v"}
-    output: list[str] = []
     index = 0
     while index < len(tokens):
         token = tokens[index]
-        if token in root_commands:
-            output.extend(tokens[index:])
-            break
         if token in ignored_switches:
             index += 1
             continue
@@ -50,9 +45,8 @@ def _strip_benchmark_global_flags(tokens: list[str]) -> list[str]:
         if token.startswith("--format="):
             index += 1
             continue
-        output.extend(tokens[index:])
         break
-    return output
+    return tokens[index:]
 
 
 def _benchmark_github_remote_name(*, env: dict[str, str] | None = None) -> str:
@@ -71,6 +65,10 @@ def _benchmark_github_remote_name(*, env: dict[str, str] | None = None) -> str:
     raise ValueError("smith_cli requires an enabled GitHub remote in SMITH_CONFIG.")
 
 
+def _has_cli_flag(tokens: list[str], flag: str) -> bool:
+    return any(token == flag or token.startswith(f"{flag}=") for token in tokens)
+
+
 def validate_smith_cli_command(command: str, *, env: dict[str, str] | None = None) -> list[str]:
     tokens = shlex.split(command)
     if not tokens:
@@ -83,31 +81,35 @@ def validate_smith_cli_command(command: str, *, env: dict[str, str] | None = Non
 
     github_remote = _benchmark_github_remote_name(env=env)
 
-    if tokens[:2] == ["code", "search"]:
-        if "--project" in tokens:
-            raise ValueError("smith_cli only supports GitHub code search for this benchmark.")
-        if "--provider" in tokens:
-            raise ValueError(f"smith_cli no longer accepts --provider for code search; use --remote {github_remote}.")
-        if "--remote" in tokens:
-            remote_index = tokens.index("--remote") + 1
-            if remote_index >= len(tokens) or tokens[remote_index] != github_remote:
-                raise ValueError(f"smith_cli only allows --remote {github_remote} for code search.")
-        else:
-            tokens.extend(["--remote", github_remote])
+    if len(tokens) >= 2 and tokens[:2] == ["code", "search"]:
+        if _has_cli_flag(tokens, "--remote"):
+            raise ValueError("smith_cli does not allow `--remote` with `code search`. Use `<remote> code search`.")
+        if _has_cli_flag(tokens, "--project"):
+            raise ValueError("smith_cli does not allow `--project` with `code search`. Use `<remote> code search`.")
+        if _has_cli_flag(tokens, "--repo"):
+            raise ValueError("smith_cli does not allow `--repo` with `code search`. Use `<remote> code search`.")
         return tokens
 
-    if len(tokens) >= 3 and tokens[:3] == ["code", "grep", github_remote]:
+    if len(tokens) >= 3 and tokens[:3] == [github_remote, "code", "search"]:
         return tokens
 
-    if tokens[:2] == ["repos", github_remote]:
+    if len(tokens) >= 3 and tokens[:3] == [github_remote, "code", "grep"]:
         return tokens
 
-    if tokens[:2] == ["orgs", github_remote]:
+    if tokens[:2] == [github_remote, "repos"]:
         return tokens
 
-    raise ValueError(
-        f"smith_cli only allows: `code search`, `code grep {github_remote}`, `repos {github_remote}`, and `orgs {github_remote}`."
-    )
+    if tokens[:2] == [github_remote, "orgs"]:
+        return tokens
+
+    allowed = ", ".join([
+        "`code search`",
+        f"`{github_remote} code search`",
+        f"`{github_remote} code grep`",
+        f"`{github_remote} repos`",
+        f"`{github_remote} orgs`",
+    ])
+    raise ValueError(f"smith_cli only allows: {allowed}.")
 
 
 @contextmanager
@@ -162,7 +164,7 @@ class InProcessSmithCliRunner:
         self._client: SmithClient | None = None
         self._client_key: tuple[str, ...] | None = None
         self._lock = threading.RLock()
-        self._success_cache: dict[tuple[tuple[str, ...], tuple[tuple[str, str], ...]], str] = {}
+        self._success_cache: dict[tuple[tuple[str, ...], tuple[tuple[str, str], ...], str], str] = {}
 
     def _build_run_env(self, *, env: dict[str, str] | None = None) -> dict[str, str]:
         run_env = os.environ.copy()
