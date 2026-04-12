@@ -223,6 +223,13 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
         ("execute_discover_projects", {"remote_or_provider": "azdo"}, "azdo", "list_projects", {}),
         ("execute_discover_projects", {"remote_or_provider": "gitlab"}, "gitlab", "list_projects", {}),
         (
+            "execute_list_groups",
+            {"remote_or_provider": "gitlab", "grep": "^platform", "skip": 5, "take": 17},
+            "gitlab",
+            "discover_groups",
+            {"query": client_module.DiscoveryQuery.create(grep="^platform", skip=5, take=17)},
+        ),
+        (
             "execute_code_grep",
             {
                 "remote_or_provider": "github",
@@ -474,6 +481,32 @@ def test_execute_discover_repos_for_azdo_project_calls_list_repositories(monkeyp
             "projectName": "proj-a",
         }
     ]
+
+
+def test_execute_discover_repos_for_gitlab_builds_discovery_query(monkeypatch: Any) -> None:
+    runtime = make_runtime_config()
+    _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
+
+    result = client.execute_discover_repos(
+        remote_or_provider="gitlab",
+        project=None,
+        group="engineering-tools",
+        grep="^engineering-tools/(api|web)$",
+        skip=10,
+        take=25,
+    )
+
+    remote_entry = result["remotes"]["gitlab"]["data"]
+    assert remote_entry["method"] == "discover_repositories"
+    assert remote_entry["kwargs"] == {
+        "group": "engineering-tools",
+        "query": client_module.DiscoveryQuery.create(
+            grep="^engineering-tools/(api|web)$",
+            skip=10,
+            take=25,
+        ),
+    }
 
 
 def test_execute_discover_repos_for_azdo_without_project_fans_out_projects(monkeypatch: Any) -> None:

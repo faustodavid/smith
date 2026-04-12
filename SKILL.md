@@ -41,13 +41,11 @@ Use the current CLI tree only:
 - Discovery:
   - `smith <azdo-remote-name> orgs`
   - `smith <github-remote-name> orgs`
-  - `smith <gitlab-remote-name> orgs`
-  - `smith <gitlab-remote-name> groups list`
   - `smith <azdo-remote-name> repos`
   - `smith <azdo-remote-name> repos <project>`
   - `smith <github-remote-name> repos`
-  - `smith <gitlab-remote-name> repos`
-  - `smith <gitlab-remote-name> repos <group>`
+  - `smith <gitlab-remote-name> repos [<group>] [--grep <regex>] [--skip <n>] [--take <n>]`
+  - `smith <gitlab-remote-name> groups [--grep <regex>] [--skip <n>] [--take <n>]`
 - Code:
   - `smith <azdo-remote-name> code search "<query>" [--project <project>] [--repo <repo>]`
   - `smith <github-remote-name> code search "<query>" [--repo <repo>]`
@@ -71,6 +69,7 @@ Use the current CLI tree only:
 Representative command examples:
 
 - `smith code search "grafana loki retention"`
+- `smith gitlab-infra groups --grep "^platform" --take 25`
 - `smith github-readonly code search "OPENAI_WEBHOOK_SECRET" --repo openai-python`
 - `smith github-readonly prs list <repo>`
 - `smith gitlab-infra prs list <group/project>`
@@ -140,7 +139,8 @@ Important pipeline ID rule:
    - Start with `smith code search "<stable noun>"` to locate the relevant area.
    - If the remote is already known, use `smith <remote> code search "<stable noun>"`.
    - Only add `--project` or `--repo` on remote-scoped `smith <remote> code search`, using the provider-appropriate repo shape.
-   - If org, project, or repo scope is unclear, use `smith <remote> orgs`, `smith <remote> repos`, or `smith <gitlab-remote> groups list`.
+   - If org, project, or repo scope is unclear, use `smith <remote> orgs`, `smith <remote> repos`, or `smith <gitlab-remote> groups`.
+   - GitLab discovery defaults to `--take 50`, supports `--grep` and `--skip`, and caps `--take` at `500`.
 3. Map only the relevant subtree.
    - After search reveals a likely area, map only that subtree:
      - Azure DevOps: `smith <azdo-remote-name> code grep <project> <repo> ".*" --path <dir> --output-mode files_with_matches`

@@ -62,12 +62,12 @@ smith <gitlab-remote-name> code grep <group/project> "<regex>" --path <path> --g
 ```bash
 smith <azdo-remote-name> orgs
 smith <github-remote-name> orgs
-smith <gitlab-remote-name> orgs
 smith <azdo-remote-name> repos
 smith <azdo-remote-name> repos <project>
 smith <github-remote-name> repos
-smith <gitlab-remote-name> repos
-smith <gitlab-remote-name> groups list
+smith <gitlab-remote-name> repos --grep "^platform/" --take 25
+smith <gitlab-remote-name> repos <group> --skip 25 --take 25
+smith <gitlab-remote-name> groups --grep "^platform" --take 25
 ```
 
 ## Pull Requests

@@ -134,7 +134,10 @@ def _fmt_table_line(columns: list[str]) -> str:
 
 
 def _render_name_list(data: Any) -> str:
-    rows = data if isinstance(data, list) else []
+    if isinstance(data, dict) and isinstance(data.get("results"), list):
+        rows = data.get("results", [])
+    else:
+        rows = data if isinstance(data, list) else []
     return "\n".join(
         str(row.get("name", ""))
         for row in rows
@@ -143,7 +146,10 @@ def _render_name_list(data: Any) -> str:
 
 
 def _render_discover_repos(data: Any) -> str:
-    rows = data if isinstance(data, list) else []
+    if isinstance(data, dict) and isinstance(data.get("results"), list):
+        rows = data.get("results", [])
+    else:
+        rows = data if isinstance(data, list) else []
     project_names = {
         str(row.get("projectName", "")).strip()
         for row in rows
@@ -327,6 +333,7 @@ def _render_board_table(data: Any) -> str:
 
 _RENDER_DISPATCH: dict[str, Any] = {
     "orgs": _render_name_list,
+    "groups": _render_name_list,
     "groups.list": _render_name_list,
     "repos": _render_discover_repos,
     "code.search": _render_code_search,

@@ -8,6 +8,7 @@ import pytest
 import requests
 from tests.support import make_runtime_config
 
+from smith.discovery import DiscoveryQuery
 from smith.errors import SmithApiError
 from smith.providers.gitlab import GitLabProvider
 
@@ -130,6 +131,111 @@ def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) ->
             "method": "GET",
             "path": "/projects/gitlab-org%2Frepo-a/search",
             "params": {"scope": "blobs", "search": "grafana", "per_page": 100, "page": 1},
+        }
+    ]
+
+
+def test_gitlab_discover_groups_applies_grep_skip_take_and_truncation(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params, "kwargs": kwargs})
+        return [
+            {"id": "1", "full_path": "infra", "web_url": "https://gitlab.com/infra"},
+            {"id": "2", "full_path": "platform/api", "web_url": "https://gitlab.com/platform/api"},
+            {"id": "3", "full_path": "platform/web", "web_url": "https://gitlab.com/platform/web"},
+            {"id": "4", "full_path": "platform/cli", "web_url": "https://gitlab.com/platform/cli"},
+        ]
+
+    monkeypatch.setattr(provider, "_request", _fake_request)
+
+    result = provider.discover_groups(query=DiscoveryQuery.create(grep="^platform", skip=1, take=1))
+
+    assert result == {
+        "results": [
+            {
+                "id": "3",
+                "name": "platform/web",
+                "state": "active",
+                "url": "https://gitlab.com/platform/web",
+            }
+        ],
+        "returned_count": 1,
+        "has_more": True,
+        "warnings": ["showing 1 matching groups; use --skip/--take to see more."],
+        "partial": True,
+    }
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/groups",
+            "params": {"all_available": "false", "order_by": "path", "per_page": 100, "page": 1},
+            "kwargs": {"expect_json": True},
+        }
+    ]
+
+
+def test_gitlab_discover_repositories_scopes_group_and_truncates(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params, "kwargs": kwargs})
+        return [
+            {
+                "id": 1,
+                "path_with_namespace": "engineering-tools/platform/api",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/api",
+            },
+            {
+                "id": 2,
+                "path_with_namespace": "engineering-tools/platform/web",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/web",
+            },
+            {
+                "id": 3,
+                "path_with_namespace": "engineering-tools/platform/cli",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/cli",
+            },
+        ]
+
+    monkeypatch.setattr(provider, "_request", _fake_request)
+
+    result = provider.discover_repositories(
+        group="engineering-tools/platform",
+        query=DiscoveryQuery.create(skip=1, take=1),
+    )
+
+    assert result == {
+        "results": [
+            {
+                "id": 2,
+                "name": "engineering-tools/platform/web",
+                "defaultBranch": "main",
+                "webUrl": "https://gitlab.com/engineering-tools/platform/web",
+            }
+        ],
+        "returned_count": 1,
+        "has_more": True,
+        "warnings": ["showing 1 matching repositories; use --skip/--take to see more."],
+        "partial": True,
+    }
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/groups/engineering-tools%2Fplatform/projects",
+            "params": {
+                "include_subgroups": "true",
+                "simple": "true",
+                "order_by": "path",
+                "per_page": 100,
+                "page": 1,
+            },
+            "kwargs": {"expect_json": True},
         }
     ]
 

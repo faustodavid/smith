@@ -241,5 +241,39 @@ def test_render_text_repos_uses_project_column_for_cross_project_results() -> No
     assert rendered == "project | repo\nproj-a | repo-a\nproj-b | repo-b"
 
 
+def test_render_text_discovery_payload_uses_results_window() -> None:
+    rendered = render_text(
+        "groups",
+        {
+            "results": [{"name": "platform/api"}, {"name": "platform/web"}],
+            "returned_count": 2,
+            "has_more": True,
+        },
+    )
+
+    assert rendered == "platform/api\nplatform/web"
+
+
+def test_render_text_grouped_discovery_output_surfaces_warning_and_partial() -> None:
+    payload = {
+        "remotes": {
+            "gitlab-infra": {
+                "ok": True,
+                "data": {"results": [{"name": "platform/api"}]},
+                "warnings": ["showing 1 matching groups; use --skip/--take to see more."],
+                "partial": True,
+                "error": None,
+            }
+        },
+        "summary": {"queried": ["gitlab-infra"]},
+    }
+
+    assert render_text("groups", payload) == (
+        "platform/api\n"
+        "warning: showing 1 matching groups; use --skip/--take to see more.\n"
+        "partial: true"
+    )
+
+
 def test_render_text_falls_back_to_json_for_unknown_commands() -> None:
     assert render_text("custom.command", {"alpha": 1, "beta": 2}) == '{\n  "alpha": 1,\n  "beta": 2\n}'

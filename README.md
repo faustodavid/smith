@@ -33,6 +33,7 @@ az login
 smith config list
 smith github-public repos
 smith gitlab-platform repos
+smith gitlab-platform groups
 smith code search "grafana"
 ```
 
@@ -115,12 +116,25 @@ smith github-public code search "grafana"
 # List repositories for one configured GitLab remote
 smith gitlab-platform repos
 
+# Filter GitLab repositories with paging
+smith gitlab-platform repos --grep "^platform/" --take 25
+
+# Discover GitLab groups with paging
+smith gitlab-platform groups --skip 25 --take 25
+
 # Grep a repository through one configured GitHub remote
 smith github-public code grep repo-a "TODO"
 
 # Azure DevOps commands still take a project plus repo
 smith azdo-main code grep SRE repo-a "timeout"
 ```
+
+GitLab discovery commands support `--grep`, `--skip`, and `--take`.
+
+- `smith <gitlab-remote> repos [<group>] [--grep <regex>] [--skip <n>] [--take <n>]`
+- `smith <gitlab-remote> groups [--grep <regex>] [--skip <n>] [--take <n>]`
+
+GitLab discovery defaults to `--take 50` and caps `--take` at `500`. When more matches exist than are shown, Smith prints a small warning so you can page with `--skip` / `--take`.
 
 When multiple remotes are queried, Smith labels results with the remote name.
 

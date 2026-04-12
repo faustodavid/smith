@@ -28,9 +28,12 @@ from smith.cli.handlers import (
     handle_work_search,
 )
 from smith.config import RemoteConfig, SmithConfig, load_config
+from smith.discovery import DEFAULT_DISCOVERY_TAKE
 
 _NO_REMOTES_CONFIGURED_HINT = "No remotes configured. Run `smith config init` and add entries under `remotes:`."
 _CURRENT_REMOTE_HINT: str | None = None
+_RESULTS_OFFSET_HELP = "Results offset"
+_RESULTS_COUNT_HELP = "Results count"
 
 
 class SmithArgumentParser(argparse.ArgumentParser):
@@ -176,6 +179,12 @@ def _add_work_search_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--take", type=int, default=20)
 
 
+def _add_gitlab_discovery_list_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--grep", help="Regex filter for full GitLab group or repository paths")
+    parser.add_argument("--skip", type=int, default=0, help=_RESULTS_OFFSET_HELP)
+    parser.add_argument("--take", type=int, default=DEFAULT_DISCOVERY_TAKE, help=_RESULTS_COUNT_HELP)
+
+
 def _add_global_code_group(root_subparsers: Any) -> None:
     code = _add_parser(root_subparsers, "code", help_text="Search code across all configured remotes")
     code_sub = code.add_subparsers(dest="global_code_action", required=True)
@@ -186,8 +195,8 @@ def _add_global_code_group(root_subparsers: Any) -> None:
         help_text="Search code across all configured remotes",
     )
     code_search.add_argument("query", nargs="?", help="Search query text")
-    code_search.add_argument("--skip", type=int, default=0, help="Results offset")
-    code_search.add_argument("--take", type=int, default=20, help="Results count")
+    code_search.add_argument("--skip", type=int, default=0, help=_RESULTS_OFFSET_HELP)
+    code_search.add_argument("--take", type=int, default=20, help=_RESULTS_COUNT_HELP)
     code_search.set_defaults(remote="all", remote_provider="", project=None, repos=None)
     _add_output_format(code_search)
     _set_handler(code_search, handle_code_search, "code.search", primary_path="code search")
@@ -292,6 +301,7 @@ def _add_remote_repos_command(remote_subparsers: Any, *, remote: RemoteConfig) -
     elif remote.provider == "gitlab":
         repos.add_argument("group", nargs="?", help="GitLab group path filter")
         repos.set_defaults(project=None)
+        _add_gitlab_discovery_list_options(repos)
     else:
         repos.set_defaults(project=None, group=None)
     _add_output_format(repos)
@@ -308,13 +318,11 @@ def _add_remote_orgs_command(remote_subparsers: Any) -> None:
     _set_handler(orgs, handle_discover_projects, "orgs", primary_path="orgs")
 
 
-def _add_remote_groups_group(remote_subparsers: Any) -> None:
-    groups = _add_parser(remote_subparsers, "groups", help_text="List GitLab groups")
-    groups_sub = groups.add_subparsers(dest="groups_action", required=True)
-
-    groups_list = _add_parser(groups_sub, "list", help_text="List accessible GitLab groups")
-    _add_output_format(groups_list)
-    _set_handler(groups_list, handle_list_groups, "groups.list", primary_path="groups list")
+def _add_remote_groups_command(remote_subparsers: Any) -> None:
+    groups = _add_parser(remote_subparsers, "groups", help_text="List accessible GitLab groups")
+    _add_gitlab_discovery_list_options(groups)
+    _add_output_format(groups)
+    _set_handler(groups, handle_list_groups, "groups", primary_path="groups")
 
 
 def _add_remote_code_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
@@ -339,8 +347,8 @@ def _add_remote_code_group(remote_subparsers: Any, *, remote: RemoteConfig) -> N
             else "Full repository path filter (repeatable, e.g. group/project)"
         ),
     )
-    code_search.add_argument("--skip", type=int, default=0, help="Results offset")
-    code_search.add_argument("--take", type=int, default=20, help="Results count")
+    code_search.add_argument("--skip", type=int, default=0, help=_RESULTS_OFFSET_HELP)
+    code_search.add_argument("--take", type=int, default=20, help=_RESULTS_COUNT_HELP)
     _add_output_format(code_search)
     _set_handler(code_search, handle_code_search, "code.search", primary_path="code search")
 
@@ -511,9 +519,10 @@ def _add_remote_command_tree(root_subparsers: Any, *, remote: RemoteConfig) -> N
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command", required=True)
 
     _add_remote_repos_command(remote_subparsers, remote=remote)
-    _add_remote_orgs_command(remote_subparsers)
+    if remote.provider != "gitlab":
+        _add_remote_orgs_command(remote_subparsers)
     if remote.provider == "gitlab":
-        _add_remote_groups_group(remote_subparsers)
+        _add_remote_groups_command(remote_subparsers)
     _add_remote_code_group(remote_subparsers, remote=remote)
     _add_remote_prs_group(remote_subparsers, remote=remote)
     _add_remote_pipelines_group(remote_subparsers, remote=remote)

@@ -359,6 +359,9 @@ def handle_discover_repos(client: SmithClient, args: argparse.Namespace) -> int:
         remote_or_provider=_selected_target(args),
         project=getattr(args, "project", None),
         group=getattr(args, "group", None),
+        grep=getattr(args, "grep", None),
+        skip=getattr(args, "skip", 0),
+        take=getattr(args, "take", None),
     )
     return _emit_success(
         args=args,
@@ -369,7 +372,12 @@ def handle_discover_repos(client: SmithClient, args: argparse.Namespace) -> int:
 
 
 def handle_list_groups(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_list_groups(remote_or_provider=_selected_target(args))
+    data = client.execute_list_groups(
+        remote_or_provider=_selected_target(args),
+        grep=getattr(args, "grep", None),
+        skip=getattr(args, "skip", 0),
+        take=getattr(args, "take", None),
+    )
     return _emit_success(
         args=args,
         command=args.command_id,

@@ -11,10 +11,11 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 from urllib.parse import quote
 
 from smith.config import parse_bool_env, parse_int_env
+from smith.discovery import DiscoveryQuery, build_discovery_payload
 from smith.errors import SmithApiError
 from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers.helpers import (
@@ -24,9 +25,6 @@ from smith.providers.helpers import (
     grep_too_many_files_result,
 )
 from smith.utils import compile_search_pattern, match_all_pattern, normalize_path, slice_lines
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +39,110 @@ class GitLabCodeMixin:
     def list_projects(self: Any) -> list[dict[str, Any]]:
         return self.list_groups()
 
+    @staticmethod
+    def _matches_discovery_name(row: dict[str, Any], pattern: re.Pattern[str] | None) -> bool:
+        if pattern is None:
+            return True
+        name = str(row.get("name", "") or "").strip()
+        return bool(name) and pattern.search(name) is not None
+
+    def _map_group_entry(self: Any, item: dict[str, Any]) -> dict[str, Any] | None:
+        full_path = str(item.get("full_path") or item.get("path") or "").strip().strip("/")
+        if not full_path:
+            return None
+        return {
+            "id": item.get("id"),
+            "name": full_path,
+            "state": "active",
+            "url": item.get("web_url") or f"{self._gitlab_web_url()}/{full_path}",
+        }
+
+    def _map_repository_entry(self: Any, item: dict[str, Any]) -> dict[str, Any] | None:
+        full_path = str(item.get("path_with_namespace") or "").strip().strip("/")
+        if not full_path:
+            return None
+        self._cache_project(
+            project_id=str(item.get("id") or "") or None,
+            full_path=full_path,
+            default_branch=str(item.get("default_branch") or "") or None,
+        )
+        return {
+            "id": item.get("id"),
+            "name": full_path,
+            "defaultBranch": item.get("default_branch"),
+            "webUrl": item.get("web_url"),
+        }
+
+    def _slice_discovery_rows(
+        self: Any,
+        *,
+        rows: list[dict[str, Any]],
+        query: DiscoveryQuery,
+        subject: str,
+    ) -> dict[str, Any]:
+        pattern = query.compile_grep()
+        matched = [dict(row) for row in rows if isinstance(row, dict) and self._matches_discovery_name(row, pattern)]
+        window_end = query.skip + query.take
+        return build_discovery_payload(
+            rows=matched[query.skip:window_end],
+            query=query,
+            has_more=len(matched) > window_end,
+            subject=subject,
+        )
+
+    def discover_groups(self: Any, *, query: DiscoveryQuery) -> dict[str, Any]:
+        cache = getattr(self, "_group_list_cache", None)
+        if cache is not None:
+            return self._slice_discovery_rows(rows=cache, query=query, subject="groups")
+
+        pattern = query.compile_grep()
+        page = 1
+        per_page = 100
+        matched: list[dict[str, Any]] = []
+        all_rows: list[dict[str, Any]] = []
+
+        while True:
+            data = self._request(
+                "GET",
+                "/groups",
+                params={
+                    "all_available": "false",
+                    "order_by": "path",
+                    "per_page": per_page,
+                    "page": page,
+                },
+                expect_json=True,
+            )
+            if not isinstance(data, list):
+                break
+
+            page_items = [item for item in data if isinstance(item, dict)]
+            if not page_items:
+                break
+
+            for item in page_items:
+                row = self._map_group_entry(item)
+                if row is None:
+                    continue
+                all_rows.append(row)
+                if self._matches_discovery_name(row, pattern):
+                    matched.append(row)
+                    if len(matched) >= query.required_matches:
+                        window_end = query.skip + query.take
+                        return build_discovery_payload(
+                            rows=matched[query.skip:window_end],
+                            query=query,
+                            has_more=True,
+                            subject="groups",
+                        )
+
+            if len(page_items) < per_page:
+                break
+            page += 1
+
+        self._group_list_cache = all_rows
+        return self._slice_discovery_rows(rows=all_rows, query=query, subject="groups")
+
     def list_groups(self: Any) -> list[dict[str, Any]]:
         cache = getattr(self, "_group_list_cache", None)
         if cache is not None:
@@ -54,20 +156,71 @@ class GitLabCodeMixin:
         for item in groups:
             if not isinstance(item, dict):
                 continue
-            full_path = str(item.get("full_path") or item.get("path") or "").strip().strip("/")
-            if not full_path:
+            row = self._map_group_entry(item)
+            if row is None:
                 continue
-            mapped.append(
-                {
-                    "id": item.get("id"),
-                    "name": full_path,
-                    "state": "active",
-                    "url": item.get("web_url") or f"{self._gitlab_web_url()}/{full_path}",
-                }
-            )
+            mapped.append(row)
 
         self._group_list_cache = mapped
         return [dict(entry) for entry in mapped]
+
+    def discover_repositories(self: Any, *, group: str | None = None, query: DiscoveryQuery) -> dict[str, Any]:
+        normalized_group = str(group or "").strip().strip("/")
+        cache_key = normalized_group.lower()
+        cache = getattr(self, "_repository_list_cache", {})
+        cached_entries = cache.get(cache_key)
+        if cached_entries is not None:
+            return self._slice_discovery_rows(rows=cached_entries, query=query, subject="repositories")
+
+        pattern = query.compile_grep()
+        page = 1
+        per_page = 100
+        matched: list[dict[str, Any]] = []
+        all_rows: list[dict[str, Any]] = []
+        if normalized_group:
+            path = f"/groups/{quote(normalized_group, safe='')}/projects"
+            params = {"include_subgroups": "true", "simple": "true", "order_by": "path"}
+        else:
+            path = "/projects"
+            params = {"membership": "true", "simple": "true", "order_by": "path"}
+
+        while True:
+            data = self._request(
+                "GET",
+                path,
+                params={**params, "per_page": per_page, "page": page},
+                expect_json=True,
+            )
+            if not isinstance(data, list):
+                break
+
+            page_items = [item for item in data if isinstance(item, dict)]
+            if not page_items:
+                break
+
+            for item in page_items:
+                row = self._map_repository_entry(item)
+                if row is None:
+                    continue
+                all_rows.append(row)
+                if self._matches_discovery_name(row, pattern):
+                    matched.append(row)
+                    if len(matched) >= query.required_matches:
+                        window_end = query.skip + query.take
+                        return build_discovery_payload(
+                            rows=matched[query.skip:window_end],
+                            query=query,
+                            has_more=True,
+                            subject="repositories",
+                        )
+
+            if len(page_items) < per_page:
+                break
+            page += 1
+
+        cache[cache_key] = all_rows
+        self._repository_list_cache = cache
+        return self._slice_discovery_rows(rows=all_rows, query=query, subject="repositories")
 
     def list_repositories(self: Any, *, group: str | None = None) -> list[dict[str, Any]]:
         normalized_group = str(group or "").strip().strip("/")
@@ -91,22 +244,10 @@ class GitLabCodeMixin:
         for item in repos:
             if not isinstance(item, dict):
                 continue
-            full_path = str(item.get("path_with_namespace") or "").strip().strip("/")
-            if not full_path:
+            row = self._map_repository_entry(item)
+            if row is None:
                 continue
-            self._cache_project(
-                project_id=str(item.get("id") or "") or None,
-                full_path=full_path,
-                default_branch=str(item.get("default_branch") or "") or None,
-            )
-            mapped.append(
-                {
-                    "id": item.get("id"),
-                    "name": full_path,
-                    "defaultBranch": item.get("default_branch"),
-                    "webUrl": item.get("web_url"),
-                }
-            )
+            mapped.append(row)
 
         cache[cache_key] = mapped
         self._repository_list_cache = cache

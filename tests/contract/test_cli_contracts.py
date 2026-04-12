@@ -25,6 +25,7 @@ def _make_args(**overrides: Any) -> Namespace:
         "azdo_org": None,
         "project": "proj-a",
         "group": None,
+        "grep": None,
         "repo": "repo-a",
         "repos": ["repo-a"],
         "status": ["active"],
@@ -553,9 +554,16 @@ def test_handle_config_toggle_persists_updated_remote_state(
         ),
         (
             "handle_discover_repos",
-            _make_args(command_id="repos"),
+            _make_args(command_id="repos", grep="^proj", skip=11, take=13),
             "execute_discover_repos",
-            {"remote_or_provider": "azdo", "project": "proj-a", "group": None},
+            {
+                "remote_or_provider": "azdo",
+                "project": "proj-a",
+                "group": None,
+                "grep": "^proj",
+                "skip": 11,
+                "take": 13,
+            },
         ),
         (
             "handle_code_search",
@@ -685,15 +693,18 @@ def test_handlers_forward_expected_arguments(
 
 def test_handle_list_groups_forwards_selected_remote(monkeypatch: Any, capsys: Any) -> None:
     client = _RecordingClient(payload={"marker": "groups"})
-    args = _make_args(command_id="groups.list", remote="gitlab-infra", remote_provider="gitlab")
+    args = _make_args(command_id="groups", remote="gitlab-infra", remote_provider="gitlab", grep="^platform", skip=5, take=17)
     monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
 
     exit_code = handlers.handle_list_groups(client, args)
     output = capsys.readouterr()
 
     assert exit_code == handlers.EXIT_OK
-    assert output.out.strip() == "groups.list:groups"
-    assert client.calls == [("execute_list_groups", {"remote_or_provider": "gitlab-infra"})]
+    assert output.out.strip() == "groups:groups"
+    assert client.calls == [(
+        "execute_list_groups",
+        {"remote_or_provider": "gitlab-infra", "grep": "^platform", "skip": 5, "take": 17},
+    )]
 
 
 def test_handle_cache_clean_cleans_requested_remote_cache(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
