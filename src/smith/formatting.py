@@ -388,8 +388,6 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
         if command not in {"code.grep", "pipelines.logs.grep"}:
             for warning in warnings if isinstance(warnings, list) else []:
                 lines.append(f"warning: {warning}")
-        if bool(entry.get("partial", False)):
-            lines.append("partial: true")
         return "\n".join(lines).rstrip()
 
     output_lines: list[str] = []
@@ -432,8 +430,6 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
         if command not in {"code.grep", "pipelines.logs.grep"}:
             for warning in warnings if isinstance(warnings, list) else []:
                 output_lines.append(f"warning: {warning}")
-        if bool(entry.get("partial", False)):
-            output_lines.append("partial: true")
         output_lines.append("")
 
     return "\n".join(output_lines).rstrip()

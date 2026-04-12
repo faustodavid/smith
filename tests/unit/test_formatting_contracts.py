@@ -209,7 +209,7 @@ def test_render_text_flattens_single_remote_and_omits_duplicate_grep_warnings() 
         "summary": {"queried": ["github"]},
     }
 
-    assert render_text("pipelines.logs.grep", payload) == "line one\nwarning: inner warning\npartial: true"
+    assert render_text("pipelines.logs.grep", payload) == "line one\nwarning: inner warning"
 
 
 def test_render_text_returns_remote_error_for_single_remote_failures() -> None:
@@ -270,8 +270,7 @@ def test_render_text_grouped_discovery_output_surfaces_warning_and_partial() -> 
 
     assert render_text("groups", payload) == (
         "platform/api\n"
-        "warning: showing 1 matching groups; use --skip/--take to see more.\n"
-        "partial: true"
+        "warning: showing 1 matching groups; use --skip/--take to see more."
     )
 
 
