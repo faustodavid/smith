@@ -133,20 +133,19 @@ Important pipeline ID rule:
 
 ## Investigation Algorithm
 
-1. Confirm the request is read-only and GitHub, GitLab, or Azure DevOps backed.
-2. Discover candidate scope cautiously.
+1. Discover candidate scope cautiously.
    - Do not start with a broad regex over the whole repo unless you already know the subsystem path.
    - Start with `smith code search "<stable noun>"` to locate the relevant area.
-   - If the remote is already known, use `smith <remote> code search "<stable noun>"`.
+   - Important: If the remote is already known, use `smith <remote> code search "<stable noun>"`.
    - Only add `--project` or `--repo` on remote-scoped `smith <remote> code search`, using the provider-appropriate repo shape.
    - If org, project, or repo scope is unclear, use `smith <remote> orgs`, `smith <remote> repos`, or `smith <gitlab-remote> groups`.
    - GitLab discovery defaults to `--take 50`, supports `--grep` and `--skip`, and caps `--take` at `500`.
-3. Map only the relevant subtree.
+2. Map only the relevant subtree.
    - After search reveals a likely area, map only that subtree:
      - Azure DevOps: `smith <azdo-remote-name> code grep <project> <repo> ".*" --path <dir> --output-mode files_with_matches`
      - GitHub: `smith <github-remote-name> code grep <repo> ".*" --path <dir> --output-mode files_with_matches`
      - GitLab: `smith <gitlab-remote-name> code grep <group/project> ".*" --path <dir> --output-mode files_with_matches`
-4. Extract proof with focused grep.
+3. Extract proof with focused grep.
    - Narrow in this order: repo -> subsystem path -> glob -> regex -> line window.
    - Use both `--path <dir>` and, when possible, `--glob "*.ext"`:
      - Azure DevOps: `smith <azdo-remote-name> code grep <project> <repo> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
@@ -154,11 +153,11 @@ Important pipeline ID rule:
      - GitLab: `smith <gitlab-remote-name> code grep <group/project> "<regex>" --output-mode content [--path <path>] [--glob <glob>]`
    - Use `--no-clone` for one-off targeted grep or when scanning many repos once.
    - Keep the default clone-backed path when you expect multiple grep calls in the same repo so the local checkout can be reused.
-5. Corroborate only when needed.
+4. Corroborate only when needed.
    - Use `prs` for review context or changed-file confirmation.
    - Use `pipelines logs` for build failures or runtime evidence. List the pipeline once, pick the relevant job by stage or job name, then grep only that `--log-id`.
    - Use `stories` for work-item or issue context.
-6. Report only what the retrieved evidence supports.
+5. Report only what the retrieved evidence supports.
 
 ## Query Discipline
 
