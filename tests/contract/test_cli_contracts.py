@@ -199,11 +199,11 @@ def test_validate_args_for_remote_resolves_remote_type_from_config(monkeypatch: 
                 "gitlab-infra": RemoteConfig(
                     name="gitlab-infra",
                     provider="gitlab",
-                    org="adyen",
-                    host="gitlab-infra.is.adyen.com",
+                    org="example-org",
+                    host="gitlab.example.com",
                     token_env="GITLAB_INFRA_READ_ONLY_TOKEN",
                     enabled=True,
-                    api_url="https://gitlab-infra.is.adyen.com/api/v4",
+                    api_url="https://gitlab.example.com/api/v4",
                 )
             },
             defaults={},
