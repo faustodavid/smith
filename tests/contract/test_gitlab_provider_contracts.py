@@ -2,20 +2,27 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 import pytest
 import requests
 from tests.support import make_runtime_config
 
+from smith.discovery import DiscoveryQuery
 from smith.errors import SmithApiError
 from smith.providers.gitlab import GitLabProvider
 
 _FULL_REPO = "gitlab-org/repo-a"
+_FULL_GROUP = "gitlab-org"
 
 
-def _provider(config: Any | None = None) -> GitLabProvider:
-    return GitLabProvider(config=config or make_runtime_config(), session=requests.Session())
+def _provider(config: Any | None = None, *, gitlab_org: str | None = _FULL_GROUP) -> GitLabProvider:
+    return GitLabProvider(
+        config=config or make_runtime_config(),
+        session=requests.Session(),
+        gitlab_org=gitlab_org,
+    )
 
 
 def _cache_git_output(
@@ -134,6 +141,507 @@ def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) ->
     ]
 
 
+def test_gitlab_discover_groups_applies_grep_skip_take_and_truncation(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        calls.append({"path": path, "params": params, "page": page, "per_page": per_page})
+        return [
+            {"id": "1", "full_path": "infra", "web_url": "https://gitlab.com/infra"},
+            {"id": "2", "full_path": "platform/api", "web_url": "https://gitlab.com/platform/api"},
+            {"id": "3", "full_path": "platform/web", "web_url": "https://gitlab.com/platform/web"},
+            {"id": "4", "full_path": "platform/cli", "web_url": "https://gitlab.com/platform/cli"},
+        ], 1
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_groups(query=DiscoveryQuery.create(grep="^platform", skip=1, take=1))
+
+    assert result == {
+        "results": [
+            {
+                "id": "3",
+                "name": "platform/web",
+                "state": "active",
+                "url": "https://gitlab.com/platform/web",
+            }
+        ],
+        "returned_count": 1,
+        "has_more": True,
+        "warnings": ["showing 1 matching groups; use --skip/--take to see more."],
+        "partial": True,
+    }
+    assert calls == [
+        {
+            "path": "/groups",
+            "params": {"all_available": "false", "order_by": "path"},
+            "page": 1,
+            "per_page": 100,
+        }
+    ]
+
+
+def test_gitlab_discover_repositories_scopes_group_and_truncates(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        calls.append({"path": path, "params": params, "page": page, "per_page": per_page})
+        return [
+            {
+                "id": 1,
+                "path_with_namespace": "engineering-tools/platform/api",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/api",
+            },
+            {
+                "id": 2,
+                "path_with_namespace": "engineering-tools/platform/web",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/web",
+            },
+            {
+                "id": 3,
+                "path_with_namespace": "engineering-tools/platform/cli",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/cli",
+            },
+        ], 1
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_repositories(
+        group="engineering-tools/platform",
+        query=DiscoveryQuery.create(skip=1, take=1),
+    )
+
+    assert result == {
+        "results": [
+            {
+                "id": 2,
+                "name": "engineering-tools/platform/web",
+                "defaultBranch": "main",
+                "webUrl": "https://gitlab.com/engineering-tools/platform/web",
+            }
+        ],
+        "returned_count": 1,
+        "has_more": True,
+        "warnings": ["showing 1 matching repositories; use --skip/--take to see more."],
+        "partial": True,
+    }
+    assert calls == [
+        {
+            "path": "/groups/engineering-tools%2Fplatform/projects",
+            "params": {
+                "include_subgroups": "true",
+                "simple": "true",
+                "order_by": "path",
+            },
+            "page": 1,
+            "per_page": 100,
+        }
+    ]
+
+
+def test_gitlab_discover_groups_does_not_poison_cache_when_filtered(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        calls.append({"kind": "page", "path": path, "params": params, "page": page, "per_page": per_page})
+        return [
+            {"id": "1", "full_path": "infra", "web_url": "https://gitlab.com/infra"},
+            {"id": "2", "full_path": "platform/api", "web_url": "https://gitlab.com/platform/api"},
+        ], 1
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_groups(query=DiscoveryQuery.create(grep="platform"))
+    listed = provider.list_groups()
+
+    assert result["results"] == [
+        {
+            "id": "2",
+            "name": "platform/api",
+            "state": "active",
+            "url": "https://gitlab.com/platform/api",
+        }
+    ]
+    assert listed == [
+        {
+            "id": "1",
+            "name": "infra",
+            "state": "active",
+            "url": "https://gitlab.com/infra",
+        },
+        {
+            "id": "2",
+            "name": "platform/api",
+            "state": "active",
+            "url": "https://gitlab.com/platform/api",
+        },
+    ]
+    assert calls == [
+        {
+            "kind": "page",
+            "path": "/groups",
+            "params": {"all_available": "false", "order_by": "path"},
+            "page": 1,
+            "per_page": 100,
+        },
+    ]
+
+
+def test_gitlab_discover_groups_skips_server_search_for_nested_paths(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        calls.append({"path": path, "params": params, "page": page, "per_page": per_page})
+        return [
+            {"id": "2", "full_path": "platform/api", "web_url": "https://gitlab.com/platform/api"},
+        ], 1
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_groups(query=DiscoveryQuery.create(grep="platform/api"))
+
+    assert result["results"] == [
+        {
+            "id": "2",
+            "name": "platform/api",
+            "state": "active",
+            "url": "https://gitlab.com/platform/api",
+        }
+    ]
+    assert calls == [
+        {
+            "path": "/groups",
+            "params": {"all_available": "false", "order_by": "path"},
+            "page": 1,
+            "per_page": 100,
+        }
+    ]
+
+
+def test_gitlab_discover_repositories_uses_server_search_for_simple_substrings(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        calls.append({"path": path, "params": params, "page": page, "per_page": per_page})
+        return [
+            {
+                "id": 1,
+                "path_with_namespace": "engineering-tools/platform/api",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/api",
+            }
+        ], 1
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_repositories(query=DiscoveryQuery.create(grep="api"))
+
+    assert result["results"] == [
+        {
+            "id": 1,
+            "name": "engineering-tools/platform/api",
+            "defaultBranch": "main",
+            "webUrl": "https://gitlab.com/engineering-tools/platform/api",
+        }
+    ]
+    assert calls == [
+        {
+            "path": "/projects",
+            "params": {
+                "membership": "true",
+                "simple": "true",
+                "order_by": "path",
+                "search": "api",
+                "search_namespaces": "true",
+            },
+            "page": 1,
+            "per_page": 100,
+        }
+    ]
+
+
+def test_gitlab_discover_repositories_skips_server_search_for_namespace_queries(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        calls.append({"path": path, "params": params, "page": page, "per_page": per_page})
+        return [
+            {
+                "id": 1,
+                "path_with_namespace": "engineering-tools/platform/api",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/api",
+            }
+        ], 1
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_repositories(
+        group="engineering-tools",
+        query=DiscoveryQuery.create(grep="platform"),
+    )
+
+    assert result["results"] == [
+        {
+            "id": 1,
+            "name": "engineering-tools/platform/api",
+            "defaultBranch": "main",
+            "webUrl": "https://gitlab.com/engineering-tools/platform/api",
+        }
+    ]
+    assert calls == [
+        {
+            "path": "/groups/engineering-tools/projects",
+            "params": {
+                "include_subgroups": "true",
+                "simple": "true",
+                "order_by": "path",
+            },
+            "page": 1,
+            "per_page": 100,
+        }
+    ]
+
+
+def test_gitlab_discover_repositories_enables_namespace_search_for_unscoped_search(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        calls.append({"path": path, "params": params, "page": page, "per_page": per_page})
+        return [
+            {
+                "id": 1,
+                "path_with_namespace": "engineering-tools/platform/api",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/api",
+            }
+        ], 1
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_repositories(query=DiscoveryQuery.create(grep="platform"))
+
+    assert result["results"] == [
+        {
+            "id": 1,
+            "name": "engineering-tools/platform/api",
+            "defaultBranch": "main",
+            "webUrl": "https://gitlab.com/engineering-tools/platform/api",
+        }
+    ]
+    assert calls == [
+        {
+            "path": "/projects",
+            "params": {
+                "membership": "true",
+                "simple": "true",
+                "order_by": "path",
+                "search": "platform",
+                "search_namespaces": "true",
+            },
+            "page": 1,
+            "per_page": 100,
+        }
+    ]
+
+
+def test_gitlab_discover_repositories_falls_back_when_server_search_errors(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        calls.append({"path": path, "params": params, "page": page, "per_page": per_page})
+        if params and params.get("search"):
+            raise SmithApiError("server search unavailable")
+        return [
+            {
+                "id": 1,
+                "path_with_namespace": "engineering-tools/platform/api",
+                "default_branch": "main",
+                "web_url": "https://gitlab.com/engineering-tools/platform/api",
+            }
+        ], 1
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_repositories(query=DiscoveryQuery.create(grep="platform"))
+
+    assert result["results"] == [
+        {
+            "id": 1,
+            "name": "engineering-tools/platform/api",
+            "defaultBranch": "main",
+            "webUrl": "https://gitlab.com/engineering-tools/platform/api",
+        }
+    ]
+    assert calls == [
+        {
+            "path": "/projects",
+            "params": {
+                "membership": "true",
+                "simple": "true",
+                "order_by": "path",
+                "search": "platform",
+                "search_namespaces": "true",
+            },
+            "page": 1,
+            "per_page": 100,
+        },
+        {
+            "path": "/projects",
+            "params": {
+                "membership": "true",
+                "simple": "true",
+                "order_by": "path",
+            },
+            "page": 1,
+            "per_page": 100,
+        },
+    ]
+
+
+def test_gitlab_discover_groups_stops_after_required_window(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[int] = []
+    first_page = [
+        {
+            "id": str(index),
+            "full_path": f"platform/group-{index:03d}",
+            "web_url": f"https://gitlab.com/platform/group-{index:03d}",
+        }
+        for index in range(100)
+    ]
+
+    def _fake_paginated_page(
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        assert path == "/groups"
+        assert params == {"all_available": "false", "order_by": "path"}
+        assert per_page == 100
+        calls.append(page)
+        if page != 1:
+            raise AssertionError("did not expect discovery to fetch additional pages")
+        return first_page, 3
+
+    monkeypatch.setattr(provider, "_get_paginated_page", _fake_paginated_page)
+
+    result = provider.discover_groups(query=DiscoveryQuery.create())
+
+    assert result["returned_count"] == 50
+    assert result["has_more"] is True
+    assert calls == [1]
+
+
+def test_gitlab_paginated_list_preserves_page_order_when_fetching_in_parallel(monkeypatch: Any) -> None:
+    provider = _provider()
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        del method, path, kwargs
+        page = int((params or {}).get("page", 1))
+        if page == 2:
+            time.sleep(0.05)
+        elif page == 3:
+            time.sleep(0.01)
+        return _FakeJsonResponse(
+            [{"page": page}],
+            headers={"X-Total-Pages": "3"} if page == 1 else {},
+        )
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+
+    result = provider._get_paginated_list("/groups", params={"all_available": "false", "order_by": "path"})
+
+    assert result == [{"page": 1}, {"page": 2}, {"page": 3}]
+
+
+def test_gitlab_paginated_list_uses_stable_page_size_when_limit_is_applied(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        del method, path, kwargs
+        calls.append(dict(params or {}))
+        page = int((params or {}).get("page", 1))
+        per_page = int((params or {}).get("per_page", 100))
+        start = (page - 1) * per_page
+        payload = [{"index": start + offset} for offset in range(per_page)]
+        return _FakeJsonResponse(payload)
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+
+    result = provider._get_paginated_list("/groups", params={"order_by": "path"}, limit=150)
+
+    assert len(result) == 150
+    assert result[0] == {"index": 0}
+    assert result[-1] == {"index": 149}
+    assert calls == [
+        {"order_by": "path", "per_page": 100, "page": 1},
+        {"order_by": "path", "per_page": 100, "page": 2},
+    ]
+
+
 def test_gitlab_search_code_uses_pagination_headers_for_exact_total(monkeypatch: Any) -> None:
     provider = _provider()
     calls: list[dict[str, Any]] = []
@@ -209,8 +717,37 @@ def test_gitlab_search_code_falls_back_to_complete_pagination_for_exact_total(mo
     ]
 
 
-def test_gitlab_search_code_limits_broad_search_when_total_is_unknown(monkeypatch: Any) -> None:
+def test_gitlab_search_code_uses_group_scoped_search_for_broad_queries(monkeypatch: Any) -> None:
     provider = _provider()
+    calls: list[dict[str, Any]] = []
+    page_one = [{"path": f"src/file-{index:03d}.py", "path_with_namespace": _FULL_REPO} for index in range(100)]
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        page = int((params or {}).get("page", 1))
+        if page == 1:
+            return _FakeJsonResponse(page_one, headers={"X-Total": "200", "X-Next-Page": "2"})
+        raise AssertionError(f"did not expect additional pages when the first page already covers the requested window: {page}")
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+
+    result = provider.search_code(query="grafana", project=None, repos=None, skip=0, take=20)
+
+    assert result == {
+        "matchesCount": 200,
+        "results": [f"{_FULL_REPO}:/src/file-{index:03d}.py" for index in range(20)],
+    }
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/groups/gitlab-org/search",
+            "params": {"scope": "blobs", "search": "grafana", "per_page": 100, "page": 1},
+        },
+    ]
+
+
+def test_gitlab_search_code_global_fallback_keeps_lower_bound_warning_without_group(monkeypatch: Any) -> None:
+    provider = _provider(gitlab_org=None)
     calls: list[dict[str, Any]] = []
     page_one = [{"path": f"src/file-{index:03d}.py", "path_with_namespace": _FULL_REPO} for index in range(100)]
     page_two = [{"path": f"src/file-{100 + index:03d}.py", "path_with_namespace": _FULL_REPO} for index in range(100)]
@@ -230,6 +767,7 @@ def test_gitlab_search_code_limits_broad_search_when_total_is_unknown(monkeypatc
 
     assert result == {
         "matchesCount": 200,
+        "matchesCountLowerBound": True,
         "results": [f"{_FULL_REPO}:/src/file-{index:03d}.py" for index in range(20)],
         "warnings": [
             "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "

@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
-import sys
 from pathlib import Path
 from typing import Any
-
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SKILL_MD = SKILL_DIR / "SKILL.md"
@@ -23,9 +22,7 @@ def _candidate_roots() -> list[Path]:
 
     env_root = None
     for key in ("SMITH_REPO_ROOT", "PROJECT_ROOT", "REPO_ROOT"):
-        value = (Path.cwd() / "").__class__  # satisfy pyright about Path import use
-        del value
-        raw = __import__("os").getenv(key)
+        raw = os.getenv(key)
         if raw:
             env_root = Path(raw).expanduser().resolve()
             candidates.append(env_root)
@@ -194,8 +191,7 @@ def run_trigger_checks() -> list[str]:
         "smith <gitlab-remote-name> code search",
         "smith <azdo-remote-name> orgs",
         "smith <github-remote-name> orgs",
-        "smith <gitlab-remote-name> orgs",
-        "smith <gitlab-remote-name> groups list",
+        "smith <gitlab-remote-name> groups",
         "smith <azdo-remote-name> repos <project>",
         "smith <github-remote-name> repos",
         "smith <gitlab-remote-name> repos",
@@ -270,7 +266,7 @@ def run_behavior_checks() -> list[str]:
     command_markers = [
         "smith <azdo-remote-name> orgs",
         "smith <github-remote-name> orgs",
-        "smith <gitlab-remote-name> orgs",
+        "smith <gitlab-remote-name> groups",
         "smith <azdo-remote-name> repos <project>",
         "smith <github-remote-name> repos",
         "smith <gitlab-remote-name> repos",

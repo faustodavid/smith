@@ -10,6 +10,7 @@ from typing import Any, Callable, Literal, cast
 import requests
 
 from smith.config import RemoteConfig, SmithConfig, load_config, parse_runtime_config
+from smith.discovery import DiscoveryQuery
 from smith.errors import SmithApiError, SmithAuthError, SmithError
 from smith.fanout import run_fanout
 from smith.http import configure_http_session
@@ -90,6 +91,7 @@ class SmithClient:
             provider = GitLabProvider(
                 config=self._runtime,
                 session=self._main_session,
+                gitlab_org=remote.org,
                 gitlab_api_url=remote.api_url,
                 token_env=remote.token_env,
             )
@@ -288,6 +290,9 @@ class SmithClient:
         remote_or_provider: str,
         project: str | None,
         group: str | None = None,
+        grep: str | None = None,
+        skip: int = 0,
+        take: int | None = None,
     ) -> dict[str, Any]:
         target = self._require_single_target(remote_or_provider, command="repos")
         return self._fanout(
@@ -295,16 +300,28 @@ class SmithClient:
             operations={
                 "azdo": lambda r: self._list_azdo_repositories(azdo=self._azdo_provider(r), project=project),
                 "github": lambda r: self._github_provider(r).list_repositories(),
-                "gitlab": lambda r: self._gitlab_provider(r).list_repositories(group=group),
+                "gitlab": lambda r: self._gitlab_provider(r).discover_repositories(
+                    group=group,
+                    query=DiscoveryQuery.create(grep=grep, skip=skip, take=take),
+                ),
             },
         )
 
-    def execute_list_groups(self, *, remote_or_provider: str) -> dict[str, Any]:
-        target = self._require_single_target(remote_or_provider, command="groups.list")
+    def execute_list_groups(
+        self,
+        *,
+        remote_or_provider: str,
+        grep: str | None = None,
+        skip: int = 0,
+        take: int | None = None,
+    ) -> dict[str, Any]:
+        target = self._require_single_target(remote_or_provider, command="groups")
         return self._fanout(
             remote_or_provider=target,
             operations={
-                "gitlab": lambda r: self._gitlab_provider(r).list_groups(),
+                "gitlab": lambda r: self._gitlab_provider(r).discover_groups(
+                    query=DiscoveryQuery.create(grep=grep, skip=skip, take=take),
+                ),
             },
         )
 

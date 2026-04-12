@@ -4,6 +4,7 @@ import pytest
 
 from smith.cli.parser import build_parser
 from smith.config import RemoteConfig, SmithConfig
+from smith.discovery import DEFAULT_DISCOVERY_TAKE
 
 
 def _build_test_parser() -> object:
@@ -92,7 +93,7 @@ def test_stories_group_parses_to_stories_command() -> None:
     assert args.id == 123
 
 
-@pytest.mark.parametrize("provider", ["azdo", "github", "gitlab"])
+@pytest.mark.parametrize("provider", ["azdo", "github"])
 def test_orgs_parser_uses_canonical_command_id(provider: str) -> None:
     parser = _build_test_parser()
     args = parser.parse_args([provider, "orgs"])
@@ -100,6 +101,13 @@ def test_orgs_parser_uses_canonical_command_id(provider: str) -> None:
     assert args.command_id == "orgs"
     assert args.remote == provider
     assert args.remote_provider == provider
+
+
+def test_gitlab_orgs_path_fails_to_parse() -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["gitlab", "orgs"])
 
 
 def test_repos_parser_uses_canonical_command_id() -> None:
@@ -121,6 +129,9 @@ def test_repos_gitlab_parser_uses_canonical_command_id() -> None:
     assert args.remote_provider == "gitlab"
     assert args.project is None
     assert args.group is None
+    assert args.grep is None
+    assert args.skip == 0
+    assert args.take == DEFAULT_DISCOVERY_TAKE
 
 
 def test_repos_parser_accepts_named_remote() -> None:
@@ -133,22 +144,70 @@ def test_repos_parser_accepts_named_remote() -> None:
     assert args.project is None
 
 
-def test_gitlab_repos_parser_accepts_group_filter() -> None:
+def test_gitlab_repos_parser_accepts_group_filter_and_discovery_flags() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(["gitlab-infra", "repos", "engineering-tools"])
+    args = parser.parse_args(
+        [
+            "gitlab-infra",
+            "repos",
+            "engineering-tools",
+            "--grep",
+            "^engineering-tools/(api|web)$",
+            "--skip",
+            "10",
+            "--take",
+            "25",
+        ]
+    )
 
     assert args.command_id == "repos"
     assert args.remote == "gitlab-infra"
     assert args.group == "engineering-tools"
+    assert args.grep == "^engineering-tools/(api|web)$"
+    assert args.skip == 10
+    assert args.take == 25
 
 
-def test_gitlab_groups_list_parser_uses_canonical_command_id() -> None:
+def test_gitlab_groups_parser_uses_canonical_command_id() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(["gitlab-infra", "groups", "list"])
+    args = parser.parse_args(["gitlab-infra", "groups"])
 
-    assert args.command_id == "groups.list"
+    assert args.command_id == "groups"
     assert args.remote == "gitlab-infra"
     assert args.remote_provider == "gitlab"
+    assert args.grep is None
+    assert args.skip == 0
+    assert args.take == DEFAULT_DISCOVERY_TAKE
+
+
+def test_gitlab_groups_parser_accepts_discovery_flags() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(
+        ["gitlab-infra", "groups", "--grep", "^platform", "--skip", "5", "--take", "15"]
+    )
+
+    assert args.command_id == "groups"
+    assert args.remote == "gitlab-infra"
+    assert args.grep == "^platform"
+    assert args.skip == 5
+    assert args.take == 15
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["github", "repos", "--grep", "^platform"],
+        ["github", "repos", "--take", "10"],
+        ["azdo", "repos", "SRE", "--skip", "5"],
+        ["github", "groups"],
+        ["azdo", "groups"],
+    ],
+)
+def test_non_gitlab_discovery_flags_and_groups_fail_to_parse(argv: list[str]) -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(argv)
 
 
 def test_prs_list_parser_uses_canonical_command_id() -> None:
@@ -341,6 +400,8 @@ def test_grep_commands_fail_when_pattern_contract_is_not_met(argv: list[str]) ->
         ["repos", "github"],
         ["orgs", "azdo"],
         ["search", "grafana"],
+        ["gitlab", "orgs"],
+        ["gitlab", "groups", "list"],
         ["cache", "clean", "--provider", "github"],
         ["work", "get", "azdo", "SRE", "123"],
         ["pr", "list", "github", "repo-a"],
@@ -349,8 +410,6 @@ def test_grep_commands_fail_when_pattern_contract_is_not_met(argv: list[str]) ->
         ["ci", "grep", "azdo", "SRE", "42"],
         ["ci", "logs", "list", "azdo", "SRE", "42"],
         ["ci", "logs", "azdo", "SRE", "42"],
-        ["ci", "logs", "grep", "github", "repo-a", "42"],
-        ["stories", "ticket", "azdo", "SRE", "123"],
     ],
 )
 def test_legacy_paths_fail_to_parse(argv: list[str]) -> None:
@@ -388,12 +447,12 @@ def test_remote_help_lists_provider_commands(capsys: pytest.CaptureFixture[str])
 
     output = capsys.readouterr().out
     assert "repos" in output
-    assert "orgs" in output
     assert "groups" in output
     assert "code" in output
     assert "prs" in output
     assert "pipelines" in output
     assert "stories" in output
+    assert "orgs" not in output
 
 
 def test_pipelines_help_lists_only_logs(capsys: pytest.CaptureFixture[str]) -> None:

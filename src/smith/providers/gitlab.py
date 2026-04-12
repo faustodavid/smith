@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote, urlparse
 
 import requests
 
 from smith.config import RuntimeConfig
-from smith.errors import SmithAuthError
+from smith.errors import SmithApiError, SmithAuthError
 from smith.providers.base import BaseProvider
 from smith.providers.gitlab_builds import GitLabBuildMixin
 from smith.providers.gitlab_code import GitLabCodeMixin
@@ -30,10 +31,12 @@ class GitLabProvider(
         *,
         config: RuntimeConfig,
         session: requests.Session,
+        gitlab_org: str | None = None,
         gitlab_api_url: str | None = None,
         token_env: str | None = None,
     ) -> None:
         super().__init__(config=config, session=session, token_env=token_env)
+        self.gitlab_org = (gitlab_org or "").strip().strip("/")
         self.gitlab_api_url = gitlab_api_url or config.gitlab_api_url
         self.max_output_chars = config.max_output_chars
         self._gitlab_token: str | None = None
@@ -120,6 +123,9 @@ class GitLabProvider(
             return path
         return f"{self.gitlab_api_url}{path}"
 
+    def _configured_gitlab_group(self) -> str | None:
+        return self.gitlab_org or None
+
     def _gitlab_web_url(self) -> str:
         if self.gitlab_api_url.endswith("/api/v4"):
             return self.gitlab_api_url[: -len("/api/v4")]
@@ -202,6 +208,62 @@ class GitLabProvider(
         )
         return full_path
 
+    @staticmethod
+    def _pagination_header_int(
+        headers: Any,
+        name: str,
+        *,
+        allow_zero: bool = False,
+    ) -> int | None:
+        getter = getattr(headers, "get", None)
+        if not callable(getter):
+            return None
+
+        raw_value = str(getter(name, "") or "").strip()
+        if not raw_value:
+            return None
+
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            return None
+        if value > 0 or (allow_zero and value == 0):
+            return value
+        return None
+
+    def _get_paginated_page(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        query = dict(params or {})
+        query["per_page"] = per_page
+        query["page"] = page
+        response = self._request_response("GET", path, params=query)
+        total_pages = self._pagination_header_int(response.headers, "X-Total-Pages")
+
+        if response.status_code == 204:
+            return [], total_pages
+
+        body = response.text or ""
+        if not body.strip():
+            return [], total_pages
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise SmithApiError(
+                f"Expected JSON response from {self._build_url(path)} but received invalid JSON"
+            ) from exc
+
+        if not isinstance(data, list):
+            return [], total_pages
+
+        return [item for item in data if isinstance(item, dict)], total_pages
+
     def _get_paginated_list(
         self,
         path: str,
@@ -209,24 +271,81 @@ class GitLabProvider(
         params: dict[str, Any] | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        page = 1
         per_page = 100
         output: list[dict[str, Any]] = []
-        while True:
-            query = dict(params or {})
-            query["per_page"] = min(per_page, max(1, limit - len(output))) if limit is not None else per_page
-            query["page"] = page
-            data = self._request("GET", path, params=query, expect_json=True)
-            if not isinstance(data, list):
+        if limit is not None:
+            page_size = min(per_page, max(1, limit))
+            page = 1
+            while True:
+                page_items, _ignored_total_pages = self._get_paginated_page(
+                    path,
+                    params=params,
+                    page=page,
+                    per_page=page_size,
+                )
+                if not page_items:
+                    break
+                output.extend(page_items)
+                if len(output) >= limit:
+                    return output[:limit]
+                if len(page_items) < page_size:
+                    break
+                page += 1
+            return output
+
+        first_page_items, total_pages = self._get_paginated_page(
+            path,
+            params=params,
+            page=1,
+            per_page=per_page,
+        )
+        if not first_page_items:
+            return []
+
+        output.extend(first_page_items)
+
+        if total_pages is not None and total_pages > 1:
+            remaining_pages = list(range(2, total_pages + 1))
+            max_workers = min(8, len(remaining_pages))
+            if max_workers <= 1:
+                for page in remaining_pages:
+                    page_items, _ignored_total_pages = self._get_paginated_page(
+                        path,
+                        params=params,
+                        page=page,
+                        per_page=per_page,
+                    )
+                    output.extend(page_items)
+                return output
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    page: executor.submit(
+                        self._get_paginated_page,
+                        path,
+                        params=params,
+                        page=page,
+                        per_page=per_page,
+                    )
+                    for page in remaining_pages
+                }
+                for page in remaining_pages:
+                    page_items, _ignored_total_pages = futures[page].result()
+                    output.extend(page_items)
+            return output
+
+        page = 2
+        current_page_items = first_page_items
+        while len(current_page_items) >= per_page:
+            current_page_items, _ignored_total_pages = self._get_paginated_page(
+                path,
+                params=params,
+                page=page,
+                per_page=per_page,
+            )
+            if not current_page_items:
                 break
-            page_items = [item for item in data if isinstance(item, dict)]
-            if not page_items:
-                break
-            output.extend(page_items)
-            if limit is not None and len(output) >= limit:
-                return output[:limit]
-            if len(page_items) < query["per_page"]:
-                break
+            output.extend(current_page_items)
             page += 1
         return output
 

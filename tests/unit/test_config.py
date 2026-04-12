@@ -606,3 +606,51 @@ def test_save_config_omits_derived_github_api_url_override(tmp_path: Path) -> No
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     assert "api_url" not in saved["remotes"]["github-enterprise"]
+
+
+def test_load_config_accepts_legacy_gitlab_group_field(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  gitlab-infra:
+    provider: gitlab
+    enabled: true
+    host: gitlab.example.test
+    group: platform/subgroup
+    token_env: GITLAB_TOKEN
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["gitlab-infra"].org == "platform/subgroup"
+
+
+def test_save_config_persists_gitlab_group_when_present(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "gitlab-infra": RemoteConfig(
+                    name="gitlab-infra",
+                    provider="gitlab",
+                    org="platform/subgroup",
+                    host="gitlab.example.test",
+                    token_env="GITLAB_TOKEN",
+                    enabled=True,
+                    api_url="https://gitlab.example.test/api/v4",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["gitlab-infra"]["group"] == "platform/subgroup"
+    assert "org" not in saved["remotes"]["gitlab-infra"]
+    assert reloaded.remotes["gitlab-infra"].org == "platform/subgroup"

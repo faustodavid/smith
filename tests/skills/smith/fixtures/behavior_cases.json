@@ -13,7 +13,7 @@
     "name": "discovery_helpers",
     "expected_sequence": [
       "smith <github-remote-name> orgs",
-      "smith <gitlab-remote-name> orgs",
+      "smith <gitlab-remote-name> groups",
       "smith <github-remote-name> repos",
       "smith <gitlab-remote-name> repos",
       "smith <azdo-remote-name> repos <project>"

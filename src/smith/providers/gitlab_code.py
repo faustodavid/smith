@@ -11,10 +11,11 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Callable, Literal, Protocol
 from urllib.parse import quote
 
 from smith.config import parse_bool_env, parse_int_env
+from smith.discovery import DiscoveryQuery, build_discovery_payload
 from smith.errors import SmithApiError
 from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers.helpers import (
@@ -25,13 +26,68 @@ from smith.providers.helpers import (
 )
 from smith.utils import compile_search_pattern, match_all_pattern, normalize_path, slice_lines
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 _CACHE_LOCKS: dict[str, threading.Lock] = {}
 _CACHE_LOCKS_GUARD = threading.Lock()
+
+
+class _GitLabDiscoveryProvider(Protocol):
+    _group_list_cache: list[dict[str, Any]] | None
+    _repository_list_cache: dict[str, list[dict[str, Any]]]
+
+    def _gitlab_web_url(self) -> str: ...
+    def _cache_project(
+        self,
+        *,
+        project_id: str | None,
+        full_path: str,
+        relative_path: str | None = None,
+        default_branch: str | None = None,
+    ) -> None: ...
+    def _get_paginated_list(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]: ...
+    def _get_paginated_page(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        page: int,
+        per_page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]: ...
+    def _map_group_entry(self, item: dict[str, Any]) -> dict[str, Any] | None: ...
+    def _map_repository_entry(self, item: dict[str, Any]) -> dict[str, Any] | None: ...
+    def _slice_discovery_rows(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        query: DiscoveryQuery,
+        subject: str,
+    ) -> dict[str, Any]: ...
+    def _discover_paginated_rows(
+        self,
+        *,
+        cached_rows: list[dict[str, Any]] | None,
+        query: DiscoveryQuery,
+        subject: str,
+        path: str,
+        params: dict[str, Any],
+        search_term: str | None,
+        mapper: Callable[[dict[str, Any]], dict[str, Any] | None],
+        store_rows: Callable[[list[dict[str, Any]]], None],
+    ) -> dict[str, Any]: ...
+    def _load_group_rows(self, *, search: str | None = None) -> list[dict[str, Any]]: ...
+    def _load_repository_rows(
+        self,
+        *,
+        group: str | None = None,
+        search: str | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 class GitLabCodeMixin:
@@ -41,76 +97,230 @@ class GitLabCodeMixin:
     def list_projects(self: Any) -> list[dict[str, Any]]:
         return self.list_groups()
 
-    def list_groups(self: Any) -> list[dict[str, Any]]:
-        cache = getattr(self, "_group_list_cache", None)
-        if cache is not None:
-            return [dict(entry) for entry in cache]
+    @staticmethod
+    def _matches_discovery_name(row: dict[str, Any], pattern: re.Pattern[str] | None) -> bool:
+        if pattern is None:
+            return True
+        name = str(row.get("name", "") or "").strip()
+        return bool(name) and pattern.search(name) is not None
 
-        groups = self._get_paginated_list(
-            "/groups",
-            params={"all_available": "false", "order_by": "path"},
+    def _map_group_entry(self: _GitLabDiscoveryProvider, item: dict[str, Any]) -> dict[str, Any] | None:
+        full_path = str(item.get("full_path") or item.get("path") or "").strip().strip("/")
+        if not full_path:
+            return None
+        return {
+            "id": item.get("id"),
+            "name": full_path,
+            "state": "active",
+            "url": item.get("web_url") or f"{self._gitlab_web_url()}/{full_path}",
+        }
+
+    def _map_repository_entry(self: _GitLabDiscoveryProvider, item: dict[str, Any]) -> dict[str, Any] | None:
+        full_path = str(item.get("path_with_namespace") or "").strip().strip("/")
+        if not full_path:
+            return None
+        self._cache_project(
+            project_id=str(item.get("id") or "") or None,
+            full_path=full_path,
+            default_branch=str(item.get("default_branch") or "") or None,
         )
-        mapped: list[dict[str, Any]] = []
-        for item in groups:
-            if not isinstance(item, dict):
+        return {
+            "id": item.get("id"),
+            "name": full_path,
+            "defaultBranch": item.get("default_branch"),
+            "webUrl": item.get("web_url"),
+        }
+
+    def _slice_discovery_rows(
+        self: _GitLabDiscoveryProvider,
+        *,
+        rows: list[dict[str, Any]],
+        query: DiscoveryQuery,
+        subject: str,
+    ) -> dict[str, Any]:
+        pattern = query.compile_grep()
+        matched = [row for row in rows if GitLabCodeMixin._matches_discovery_name(row, pattern)]
+        window_end = query.skip + query.take
+        return build_discovery_payload(
+            rows=matched[query.skip:window_end],
+            query=query,
+            has_more=len(matched) > window_end,
+            subject=subject,
+        )
+
+    def _discover_paginated_rows(
+        self: _GitLabDiscoveryProvider,
+        *,
+        cached_rows: list[dict[str, Any]] | None,
+        query: DiscoveryQuery,
+        subject: str,
+        path: str,
+        params: dict[str, Any],
+        search_term: str | None,
+        mapper: Callable[[dict[str, Any]], dict[str, Any] | None],
+        store_rows: Callable[[list[dict[str, Any]]], None],
+    ) -> dict[str, Any]:
+        if cached_rows is not None:
+            return self._slice_discovery_rows(rows=cached_rows, query=query, subject=subject)
+
+        pattern = query.compile_grep()
+        current_search_term = search_term
+
+        while True:
+            request_params = dict(params)
+            if current_search_term:
+                request_params["search"] = current_search_term
+            else:
+                request_params.pop("search_namespaces", None)
+
+            matched_rows: list[dict[str, Any]] = []
+            all_rows: list[dict[str, Any]] | None = [] if current_search_term is None else None
+            page = 1
+            per_page = 100
+
+            try:
+                while True:
+                    page_items, total_pages = self._get_paginated_page(
+                        path,
+                        params=request_params,
+                        page=page,
+                        per_page=per_page,
+                    )
+                    if not page_items:
+                        break
+
+                    for item in page_items:
+                        row = mapper(item)
+                        if row is None:
+                            continue
+                        if all_rows is not None:
+                            all_rows.append(row)
+                        if GitLabCodeMixin._matches_discovery_name(row, pattern):
+                            matched_rows.append(row)
+                            if len(matched_rows) >= query.required_matches:
+                                window_end = query.skip + query.take
+                                return build_discovery_payload(
+                                    rows=matched_rows[query.skip:window_end],
+                                    query=query,
+                                    has_more=True,
+                                    subject=subject,
+                                )
+
+                    if total_pages is not None:
+                        if page >= total_pages:
+                            break
+                    elif len(page_items) < per_page:
+                        break
+                    page += 1
+            except SmithApiError:
+                if current_search_term is None:
+                    raise
+                current_search_term = None
                 continue
-            full_path = str(item.get("full_path") or item.get("path") or "").strip().strip("/")
-            if not full_path:
-                continue
-            mapped.append(
-                {
-                    "id": item.get("id"),
-                    "name": full_path,
-                    "state": "active",
-                    "url": item.get("web_url") or f"{self._gitlab_web_url()}/{full_path}",
-                }
+
+            if all_rows is not None:
+                store_rows(all_rows)
+                return self._slice_discovery_rows(rows=all_rows, query=query, subject=subject)
+
+            window_end = query.skip + query.take
+            return build_discovery_payload(
+                rows=matched_rows[query.skip:window_end],
+                query=query,
+                has_more=False,
+                subject=subject,
             )
 
-        self._group_list_cache = mapped
-        return [dict(entry) for entry in mapped]
+    def _load_group_rows(
+        self: _GitLabDiscoveryProvider,
+        *,
+        search: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if search is None and self._group_list_cache is not None:
+            return self._group_list_cache
 
-    def list_repositories(self: Any, *, group: str | None = None) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"all_available": "false", "order_by": "path"}
+        if search:
+            params["search"] = search
+
+        groups = self._get_paginated_list("/groups", params=params)
+        mapped = [row for item in groups if (row := self._map_group_entry(item)) is not None]
+
+        if search is None:
+            self._group_list_cache = mapped
+        return mapped
+
+    def discover_groups(self: _GitLabDiscoveryProvider, *, query: DiscoveryQuery) -> dict[str, Any]:
+        return self._discover_paginated_rows(
+            cached_rows=self._group_list_cache,
+            query=query,
+            subject="groups",
+            path="/groups",
+            params={"all_available": "false", "order_by": "path"},
+            search_term=None,
+            mapper=self._map_group_entry,
+            store_rows=lambda rows: setattr(self, "_group_list_cache", rows),
+        )
+
+    def list_groups(self: _GitLabDiscoveryProvider) -> list[dict[str, Any]]:
+        return [dict(entry) for entry in self._load_group_rows()]
+
+    def _load_repository_rows(
+        self: _GitLabDiscoveryProvider,
+        *,
+        group: str | None = None,
+        search: str | None = None,
+    ) -> list[dict[str, Any]]:
         normalized_group = str(group or "").strip().strip("/")
         cache_key = normalized_group.lower()
-        cache = getattr(self, "_repository_list_cache", {})
-        cached_entries = cache.get(cache_key)
-        if cached_entries is not None:
-            return [dict(entry) for entry in cached_entries]
+        if search is None:
+            cached_entries = self._repository_list_cache.get(cache_key)
+            if cached_entries is not None:
+                return cached_entries
 
         if normalized_group:
-            repos = self._get_paginated_list(
-                f"/groups/{quote(normalized_group, safe='')}/projects",
-                params={"include_subgroups": "true", "simple": "true", "order_by": "path"},
-            )
+            path = f"/groups/{quote(normalized_group, safe='')}/projects"
+            params = {"include_subgroups": "true", "simple": "true", "order_by": "path"}
         else:
-            repos = self._get_paginated_list(
-                "/projects",
-                params={"membership": "true", "simple": "true", "order_by": "path"},
-            )
-        mapped: list[dict[str, Any]] = []
-        for item in repos:
-            if not isinstance(item, dict):
-                continue
-            full_path = str(item.get("path_with_namespace") or "").strip().strip("/")
-            if not full_path:
-                continue
-            self._cache_project(
-                project_id=str(item.get("id") or "") or None,
-                full_path=full_path,
-                default_branch=str(item.get("default_branch") or "") or None,
-            )
-            mapped.append(
-                {
-                    "id": item.get("id"),
-                    "name": full_path,
-                    "defaultBranch": item.get("default_branch"),
-                    "webUrl": item.get("web_url"),
-                }
-            )
+            path = "/projects"
+            params = {"membership": "true", "simple": "true", "order_by": "path"}
 
-        cache[cache_key] = mapped
-        self._repository_list_cache = cache
-        return [dict(entry) for entry in mapped]
+        if search:
+            params["search"] = search
+
+        repos = self._get_paginated_list(path, params=params)
+        mapped = [row for item in repos if (row := self._map_repository_entry(item)) is not None]
+
+        if search is None:
+            self._repository_list_cache[cache_key] = mapped
+        return mapped
+
+    def discover_repositories(self: _GitLabDiscoveryProvider, *, group: str | None = None, query: DiscoveryQuery) -> dict[str, Any]:
+        normalized_group = str(group or "").strip().strip("/")
+        cached_rows = self._repository_list_cache.get(normalized_group.lower())
+        search_term = query.server_search_term() if not normalized_group else None
+        if search_term and "/" in search_term:
+            search_term = None
+        if normalized_group:
+            path = f"/groups/{quote(normalized_group, safe='')}/projects"
+            params: dict[str, Any] = {"include_subgroups": "true", "simple": "true", "order_by": "path"}
+        else:
+            path = "/projects"
+            params = {"membership": "true", "simple": "true", "order_by": "path"}
+            if search_term:
+                params["search_namespaces"] = "true"
+        return self._discover_paginated_rows(
+            cached_rows=cached_rows,
+            query=query,
+            subject="repositories",
+            path=path,
+            params=params,
+            search_term=search_term,
+            mapper=self._map_repository_entry,
+            store_rows=lambda rows: self._repository_list_cache.__setitem__(normalized_group.lower(), rows),
+        )
+
+    def list_repositories(self: _GitLabDiscoveryProvider, *, group: str | None = None) -> list[dict[str, Any]]:
+        return [dict(entry) for entry in self._load_repository_rows(group=group)]
 
     def _search_result_project_path(self: Any, item: dict[str, Any], *, repo: str | None) -> str:
         if repo:
@@ -174,7 +384,9 @@ class GitLabCodeMixin:
         if repo:
             path = f"/projects/{self._project_id(repo)}/search"
         else:
-            path = "/search"
+            group_getter = getattr(self, "_configured_gitlab_group", None)
+            group = group_getter() if callable(group_getter) else None
+            path = f"/groups/{quote(group, safe='')}/search" if group else "/search"
 
         response = self._request_response(
             "GET",
@@ -225,6 +437,7 @@ class GitLabCodeMixin:
         page_items_for_output: list[dict[str, Any]] = []
         warnings: list[str] = []
         partial = False
+        matches_count_lower_bound = False
 
         for target_repo in search_targets:
             current_page = 1
@@ -275,6 +488,7 @@ class GitLabCodeMixin:
                     if checked_extra_page_after_window or not maybe_more:
                         if checked_extra_page_after_window and maybe_more:
                             partial = True
+                            matches_count_lower_bound = True
                             warning = (
                                 "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "
                                 "Narrow with `--repo group/project` for exact counts."
@@ -315,6 +529,8 @@ class GitLabCodeMixin:
             result["warnings"] = warnings
         if partial:
             result["partial"] = True
+        if matches_count_lower_bound:
+            result["matchesCountLowerBound"] = True
         return result
 
     def _get_file_metadata(

@@ -11,7 +11,7 @@ A `smith` investigation is acceptable only if all gates pass.
 ## Gate 2: Investigation
 
 - Unknown scope starts with `smith code search "<query>"`.
-- Unknown org or repo scope can use `smith <remote> orgs ...` and `smith <remote> repos ...`.
+- Unknown org or repo scope can use `smith <remote> orgs ...`, `smith <remote> repos ...`, and for GitLab `smith <gitlab-remote-name> groups ...`.
 - Unknown structure uses `smith <remote> code grep ... ".*" --output-mode files_with_matches`.
 - Final evidence comes from focused `smith <remote> code grep`.
 - `prs`, `pipelines logs`, and `stories` are used only when primary or corroborating evidence is needed.
