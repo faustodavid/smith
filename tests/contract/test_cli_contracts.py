@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from types import SimpleNamespace
 from typing import Any
@@ -72,6 +73,43 @@ class _RecordingClient:
             return self.payload
 
         return _inner
+
+
+def _make_remote_config(
+    name: str,
+    provider: str,
+    *,
+    enabled: bool = True,
+    org: str | None = None,
+    host: str | None = None,
+    token_env: str | None = None,
+    api_url: str | None = None,
+) -> RemoteConfig:
+    default_org = {"github": "octo-org", "gitlab": "", "azdo": "acme"}[provider] if org is None else org
+    default_host = {
+        "github": "github.com",
+        "gitlab": "gitlab.com",
+        "azdo": "dev.azure.com",
+    }[provider] if host is None else host
+    default_token_env = {
+        "github": "GITHUB_TOKEN",
+        "gitlab": "GITLAB_TOKEN",
+        "azdo": "AZURE_DEVOPS_PAT",
+    }[provider] if token_env is None else token_env
+    default_api_url = {
+        "github": "https://api.github.com",
+        "gitlab": "https://gitlab.com/api/v4",
+        "azdo": "https://dev.azure.com",
+    }[provider] if api_url is None else api_url
+    return RemoteConfig(
+        name=name,
+        provider=provider,
+        org=default_org,
+        host=default_host,
+        token_env=default_token_env,
+        enabled=enabled,
+        api_url=default_api_url,
+    )
 
 
 def test_csv_list_and_remote_helpers() -> None:
@@ -175,6 +213,21 @@ def test_validate_args_for_remote_resolves_remote_type_from_config(monkeypatch: 
         handlers.validate_args_for_remote(args)
 
 
+def test_selected_remote_provider_returns_empty_when_config_lookup_cannot_resolve(monkeypatch: Any) -> None:
+    assert handlers._selected_remote_provider(_make_args(remote="all", remote_provider="")) == ""
+
+    args = _make_args(remote="gitlab-infra", remote_provider="")
+
+    def _raise_runtime_error() -> SmithConfig:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(handlers, "load_config", _raise_runtime_error)
+    assert handlers._selected_remote_provider(args) == ""
+
+    monkeypatch.setattr(handlers, "load_config", lambda: SmithConfig(remotes={}, defaults={}))
+    assert handlers._selected_remote_provider(args) == ""
+
+
 def test_handle_code_grep_uses_named_remote(monkeypatch: Any, capsys: Any) -> None:
     client = _RecordingClient(payload={"marker": "code-grep"})
     args = _make_args(command_id="code.grep", remote="gitlab-infra", remote_provider="gitlab", project=None)
@@ -254,6 +307,239 @@ def test_emit_error_supports_text_and_json(capsys: Any) -> None:
     assert exit_json == handlers.EXIT_INVALID_ARGS
     assert '"ok": false' in json_output.out
     assert '"code": "invalid_args"' in json_output.out
+
+
+def test_handle_config_list_returns_all_remotes_as_json(monkeypatch: Any, capsys: Any) -> None:
+    github = _make_remote_config("github", "github")
+    gitlab = _make_remote_config(
+        "gitlab-infra",
+        "gitlab",
+        enabled=False,
+        host="gitlab-infra.example.com",
+        token_env="GITLAB_INFRA_TOKEN",
+        api_url="https://gitlab-infra.example.com/api/v4",
+    )
+    monkeypatch.setattr(
+        handlers,
+        "load_config",
+        lambda: SmithConfig(remotes={"github": github, "gitlab-infra": gitlab}, defaults={}),
+    )
+    args = _make_args(command_id="config.list", output_format="json")
+
+    exit_code = handlers.handle_config_list(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["command"] == "config.list"
+    assert payload["data"] == {
+        "remotes": [
+            {
+                "name": "github",
+                "provider": "github",
+                "org": "octo-org",
+                "host": "github.com",
+                "enabled": True,
+            },
+            {
+                "name": "gitlab-infra",
+                "provider": "gitlab",
+                "org": "",
+                "host": "gitlab-infra.example.com",
+                "enabled": False,
+            },
+        ]
+    }
+
+
+def test_handle_config_show_returns_remote_details_as_json(monkeypatch: Any, capsys: Any) -> None:
+    remote = _make_remote_config(
+        "gitlab-infra",
+        "gitlab",
+        host="gitlab-infra.example.com",
+        token_env="GITLAB_INFRA_TOKEN",
+        api_url="https://gitlab-infra.example.com/api/v4",
+    )
+    monkeypatch.setattr(
+        handlers,
+        "load_config",
+        lambda: SmithConfig(remotes={"gitlab-infra": remote}, defaults={}),
+    )
+    args = _make_args(command_id="config.show", output_format="json", remote_name="gitlab-infra")
+
+    exit_code = handlers.handle_config_show(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["data"] == {
+        "name": "gitlab-infra",
+        "provider": "gitlab",
+        "org": "",
+        "host": "gitlab-infra.example.com",
+        "token_env": "GITLAB_INFRA_TOKEN",
+        "enabled": True,
+        "api_url": "https://gitlab-infra.example.com/api/v4",
+    }
+
+
+def test_handle_config_show_returns_not_found_error(monkeypatch: Any, capsys: Any) -> None:
+    monkeypatch.setattr(handlers, "load_config", lambda: SmithConfig(remotes={}, defaults={}))
+    args = _make_args(command_id="config.show", output_format="json", remote_name="missing")
+
+    exit_code = handlers.handle_config_show(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_INVALID_ARGS
+    assert payload["error"] == {"code": "not_found", "message": "Remote 'missing' not found"}
+
+
+def test_handle_config_init_creates_empty_config_file(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
+    path = tmp_path / "smith-config.yaml"
+    monkeypatch.setattr(handlers, "_default_config_path", lambda: path)
+    args = _make_args(command_id="config.init", output_format="json")
+
+    exit_code = handlers.handle_config_init(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["data"] == {"path": str(path), "remotes_count": 0}
+    assert handlers.load_config(config_path=path) == SmithConfig(remotes={}, defaults={})
+
+
+def test_handle_config_init_rejects_existing_config_file(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
+    path = tmp_path / "smith-config.yaml"
+    path.write_text("remotes: {}\ndefaults: {}\n", encoding="utf-8")
+    monkeypatch.setattr(handlers, "_default_config_path", lambda: path)
+    args = _make_args(command_id="config.init", output_format="json")
+
+    exit_code = handlers.handle_config_init(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_INVALID_ARGS
+    assert payload["error"] == {
+        "code": "already_exists",
+        "message": f"Config file already exists at {path}",
+    }
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_handle_config_path_reports_default_path_and_existence(
+    monkeypatch: Any,
+    tmp_path: Any,
+    capsys: Any,
+    exists: bool,
+) -> None:
+    path = tmp_path / "smith-config.yaml"
+    if exists:
+        path.write_text("remotes: {}\ndefaults: {}\n", encoding="utf-8")
+    monkeypatch.setattr(handlers, "_default_config_path", lambda: path)
+    args = _make_args(command_id="config.path", output_format="json")
+
+    exit_code = handlers.handle_config_path(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["data"] == {"path": str(path), "exists": exists}
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "command_id"),
+    [
+        ("handle_config_enable", "config.enable"),
+        ("handle_config_disable", "config.disable"),
+    ],
+)
+def test_handle_config_toggle_returns_not_found_for_missing_remote(
+    monkeypatch: Any,
+    capsys: Any,
+    handler_name: str,
+    command_id: str,
+) -> None:
+    monkeypatch.setattr(handlers, "load_config", lambda: SmithConfig(remotes={}, defaults={}))
+    args = _make_args(command_id=command_id, output_format="json", remote_name="missing")
+
+    exit_code = getattr(handlers, handler_name)(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_INVALID_ARGS
+    assert payload["error"] == {"code": "not_found", "message": "Remote 'missing' not found"}
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "command_id", "enabled", "expected_message"),
+    [
+        ("handle_config_enable", "config.enable", True, "Remote 'github' is already enabled"),
+        ("handle_config_disable", "config.disable", False, "Remote 'github' is already disabled"),
+    ],
+)
+def test_handle_config_toggle_is_idempotent_when_state_already_matches(
+    monkeypatch: Any,
+    capsys: Any,
+    handler_name: str,
+    command_id: str,
+    enabled: bool,
+    expected_message: str,
+) -> None:
+    remote = _make_remote_config("github", "github", enabled=enabled)
+
+    def _raise_save_config_assertion(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("save_config should not be called")
+
+    monkeypatch.setattr(
+        handlers,
+        "load_config",
+        lambda: SmithConfig(remotes={"github": remote}, defaults={"default_remote": "github"}),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "save_config",
+        _raise_save_config_assertion,
+    )
+    args = _make_args(command_id=command_id, output_format="json", remote_name="github")
+
+    exit_code = getattr(handlers, handler_name)(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["data"] == {"message": expected_message}
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "command_id", "initial_enabled", "expected_enabled", "expected_message"),
+    [
+        ("handle_config_enable", "config.enable", False, True, "Remote 'github' enabled"),
+        ("handle_config_disable", "config.disable", True, False, "Remote 'github' disabled"),
+    ],
+)
+def test_handle_config_toggle_persists_updated_remote_state(
+    monkeypatch: Any,
+    capsys: Any,
+    handler_name: str,
+    command_id: str,
+    initial_enabled: bool,
+    expected_enabled: bool,
+    expected_message: str,
+) -> None:
+    remote = _make_remote_config("github", "github", enabled=initial_enabled)
+    saved: dict[str, SmithConfig] = {}
+    monkeypatch.setattr(
+        handlers,
+        "load_config",
+        lambda: SmithConfig(remotes={"github": remote}, defaults={"default_remote": "github"}),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "save_config",
+        lambda config, **_kwargs: saved.setdefault("config", config),
+    )
+    args = _make_args(command_id=command_id, output_format="json", remote_name="github")
+
+    exit_code = getattr(handlers, handler_name)(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["data"] == {"message": expected_message}
+    assert saved["config"].defaults == {"default_remote": "github"}
+    assert saved["config"].remotes["github"].enabled is expected_enabled
 
 
 @pytest.mark.parametrize(
@@ -481,11 +767,14 @@ def test_client_from_args_loads_config_and_passes_smith_config(monkeypatch: Any)
         def __init__(self, **kwargs: Any) -> None:
             captured.update(kwargs)
 
+    def _raise_load_config_assertion() -> SmithConfig:
+        raise AssertionError("load_config should not be called")
+
     monkeypatch.setattr(handlers, "SmithClient", _FakeClient)
     monkeypatch.setattr(
         handlers,
         "load_config",
-        lambda: (_ for _ in ()).throw(AssertionError("load_config should not be called")),
+        _raise_load_config_assertion,
     )
 
     handlers._client_from_args(SimpleNamespace())
