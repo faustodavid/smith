@@ -524,11 +524,17 @@ def handle_ci_grep(client: SmithClient, args: argparse.Namespace) -> int:
 
 
 def handle_work_get(client: SmithClient, args: argparse.Namespace) -> int:
+    request_kwargs: dict[str, Any] = {
+        "remote_or_provider": _selected_target(args),
+        "project": getattr(args, "project", None),
+        "repo": getattr(args, "repo", None),
+        "work_item_id": args.id,
+    }
+    if hasattr(args, "no_images"):
+        request_kwargs["no_images"] = bool(args.no_images)
+
     data = client.execute_work_get(
-        remote_or_provider=_selected_target(args),
-        project=getattr(args, "project", None),
-        repo=getattr(args, "repo", None),
-        work_item_id=args.id,
+        **request_kwargs,
     )
     return _emit_success(
         args=args,

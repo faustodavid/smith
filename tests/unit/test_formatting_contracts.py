@@ -165,6 +165,88 @@ def test_render_text_code_search_shows_total_and_displayed_counts() -> None:
     )
 
 
+def test_render_text_renders_youtrack_story_views() -> None:
+    work_get = render_text(
+        "stories.get",
+        {
+            "provider": "youtrack",
+            "id": "RAD-1055",
+            "title": "Investigate patching flow",
+            "url": "https://youtrack.example.test/issue/RAD-1055",
+            "metadata": {
+                "Project": "Release and Deployments (RAD)",
+                "Type": "Task",
+                "State": "In Progress",
+                "Priority": "Normal",
+                "Reporter": "Fausto Suarez Rosario (fausto)",
+                "Created": "2026-04-12T10:00:00Z",
+                "Impact": "4",
+            },
+            "description": "Line one\n![](image1.png)",
+            "attachments": [
+                {
+                    "name": "image1.png",
+                    "mimeType": "image/png",
+                    "size": 123,
+                    "url": "https://youtrack.example.test/api/files/1",
+                }
+            ],
+            "links": [
+                {
+                    "type": "Relates",
+                    "issues": [{"id": "RAD-1004", "summary": "Implement endpoint"}],
+                }
+            ],
+            "comments": [
+                {
+                    "author_display": "Fausto Suarez Rosario (fausto)",
+                    "created": "2026-04-12T11:00:00Z",
+                    "text": "Looks good",
+                    "reactions": [{"reaction": "thumbs-up", "author_display": "alice"}],
+                    "attachments": [],
+                }
+            ],
+            "timeline": [
+                {
+                    "timestamp": "2026-04-12T10:00:00Z",
+                    "author_display": "Fausto Suarez Rosario (fausto)",
+                    "action": "created issue",
+                }
+            ],
+        },
+    )
+    work_search = render_text(
+        "stories.search",
+        {
+            "provider": "youtrack",
+            "results": [
+                {
+                    "id": "RAD-1055",
+                    "project": "RAD",
+                    "type": "Task",
+                    "state": "In Progress",
+                    "title": "Investigate patching flow",
+                }
+            ],
+            "returned_count": 1,
+            "has_more": False,
+        },
+    )
+
+    assert "--- description ---" in work_get
+    assert "--- attachments ---" in work_get
+    assert "--- related items ---" in work_get
+    assert "--- comments (1) ---" in work_get
+    assert "--- timeline (1) ---" in work_get
+    assert "Impact: 4" in work_get
+    assert work_search == (
+        "id | project | type | state | title\n"
+        "RAD-1055 | RAD | Task | In Progress | Investigate patching flow\n"
+        "returned_count: 1\n"
+        "has_more: False"
+    )
+
+
 def test_render_text_code_search_shows_plus_for_lower_bound_totals() -> None:
     rendered = render_text(
         "code.search",

@@ -86,21 +86,24 @@ def _make_remote_config(
     token_env: str | None = None,
     api_url: str | None = None,
 ) -> RemoteConfig:
-    default_org = {"github": "octo-org", "gitlab": "", "azdo": "acme"}[provider] if org is None else org
+    default_org = {"github": "octo-org", "gitlab": "", "azdo": "acme", "youtrack": ""}[provider] if org is None else org
     default_host = {
         "github": "github.com",
         "gitlab": "gitlab.com",
         "azdo": "dev.azure.com",
+        "youtrack": "youtrack.example.test",
     }[provider] if host is None else host
     default_token_env = {
         "github": "GITHUB_TOKEN",
         "gitlab": "GITLAB_TOKEN",
         "azdo": "AZURE_DEVOPS_PAT",
+        "youtrack": "YOUTRACK_TOKEN",
     }[provider] if token_env is None else token_env
     default_api_url = {
         "github": "https://api.github.com",
         "gitlab": "https://gitlab.com/api/v4",
         "azdo": "https://dev.azure.com",
+        "youtrack": "https://youtrack.example.test/api",
     }[provider] if api_url is None else api_url
     return RemoteConfig(
         name=name,
@@ -705,6 +708,38 @@ def test_handle_list_groups_forwards_selected_remote(monkeypatch: Any, capsys: A
         "execute_list_groups",
         {"remote_or_provider": "gitlab-infra", "grep": "^platform", "skip": 5, "take": 17},
     )]
+
+
+def test_handle_youtrack_work_get_forwards_no_images(monkeypatch: Any, capsys: Any) -> None:
+    client = _RecordingClient(payload={"marker": "youtrack-get"})
+    args = _make_args(
+        command_id="stories.get",
+        remote="youtrack",
+        remote_provider="youtrack",
+        project=None,
+        repo=None,
+        id="RAD-1055",
+        no_images=True,
+    )
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
+
+    exit_code = handlers.handle_work_get(client, args)
+    output = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert output.out.strip() == "stories.get:youtrack-get"
+    assert client.calls == [
+        (
+            "execute_work_get",
+            {
+                "remote_or_provider": "youtrack",
+                "project": None,
+                "repo": None,
+                "work_item_id": "RAD-1055",
+                "no_images": True,
+            },
+        )
+    ]
 
 
 def test_handle_cache_clean_cleans_requested_remote_cache(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:

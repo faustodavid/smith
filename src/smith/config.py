@@ -241,6 +241,15 @@ def _compute_api_url_for_remote(provider: str, host: str) -> str:
         return f"{scheme}://{netloc}/api/v4"
     if provider == "azdo":
         return "https://dev.azure.com"
+    if provider == "youtrack":
+        parsed = urlparse(host if "://" in host else f"https://{host}")
+        scheme = parsed.scheme or "https"
+        netloc = (parsed.netloc or parsed.path or "").strip().strip("/")
+        path = parsed.path.strip().rstrip("/") if parsed.netloc else ""
+        base_url = f"{scheme}://{netloc}{path}" if netloc else ""
+        if base_url.endswith("/api"):
+            return base_url
+        return f"{base_url}/api" if base_url else ""
     return ""
 
 
@@ -253,7 +262,7 @@ def _normalize_config_api_url(raw_api_url: Any) -> str:
 
 def _load_remote_api_url(*, provider: str, remote: dict[str, Any], host: str) -> str:
     explicit_api_url = _normalize_config_api_url(remote.get("api_url", ""))
-    if provider == "github" and explicit_api_url:
+    if provider in {"github", "youtrack"} and explicit_api_url:
         return explicit_api_url
     return _compute_api_url_for_remote(provider, host)
 
@@ -273,13 +282,19 @@ def _validate_remote_dict(name: str, remote: dict[str, Any]) -> None:
         raise ValueError(f"Remote '{name}': name is reserved. Choose a name outside: {reserved}")
 
     provider = remote.get("provider", "").strip().lower()
-    if provider not in {"github", "gitlab", "azdo"}:
-        raise ValueError(f"Remote '{name}': provider must be one of github, gitlab, azdo (got '{provider}')")
+    if provider not in {"github", "gitlab", "azdo", "youtrack"}:
+        raise ValueError(
+            f"Remote '{name}': provider must be one of github, gitlab, azdo, youtrack (got '{provider}')"
+        )
 
     if provider in {"github", "azdo"}:
         org = remote.get("org", "").strip()
         if not org:
             raise ValueError(f"Remote '{name}': {provider} remotes require 'org' field")
+    if provider == "youtrack":
+        host = str(remote.get("host", "") or "").strip()
+        if not host:
+            raise ValueError(f"Remote '{name}': youtrack remotes require 'host' field")
 
 
 def load_config(*, config_path: Path | None = None) -> SmithConfig:
@@ -362,6 +377,8 @@ def save_config(config: SmithConfig, *, config_path: Path | None = None) -> None
             elif remote.provider == "gitlab" and remote.host != "gitlab.com":
                 remote_dict["host"] = remote.host
             elif remote.provider == "azdo" and remote.host != "dev.azure.com":
+                remote_dict["host"] = remote.host
+            elif remote.provider == "youtrack":
                 remote_dict["host"] = remote.host
 
         if remote.token_env:

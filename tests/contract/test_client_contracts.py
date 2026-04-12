@@ -49,6 +49,11 @@ class _FakeGitLabProvider(_FakeProvider):
     provider_name = "gitlab"
 
 
+class _FakeYouTrackProvider(_FakeProvider):
+    instances: list["_FakeYouTrackProvider"] = []
+    provider_name = "youtrack"
+
+
 def _make_smith_config(runtime: Any) -> SmithConfig:
     remotes: dict[str, RemoteConfig] = {}
     if runtime.github_org:
@@ -84,10 +89,28 @@ def _make_smith_config(runtime: Any) -> SmithConfig:
     return SmithConfig(remotes=remotes, defaults={})
 
 
+def _make_youtrack_config() -> SmithConfig:
+    return SmithConfig(
+        remotes={
+            "youtrack": RemoteConfig(
+                name="youtrack",
+                provider="youtrack",
+                org="",
+                host="youtrack.example.test",
+                token_env="YOUTRACK_TOKEN",
+                enabled=True,
+                api_url="https://youtrack.example.test/api",
+            )
+        },
+        defaults={},
+    )
+
+
 def _install_client_fakes(monkeypatch: Any, runtime: Any) -> dict[str, Any]:
     _FakeAzdoProvider.instances.clear()
     _FakeGitHubProvider.instances.clear()
     _FakeGitLabProvider.instances.clear()
+    _FakeYouTrackProvider.instances.clear()
     calls: dict[str, Any] = {}
 
     def _fake_run_fanout(
@@ -121,6 +144,7 @@ def _install_client_fakes(monkeypatch: Any, runtime: Any) -> dict[str, Any]:
     monkeypatch.setattr(client_module, "AzdoProvider", _FakeAzdoProvider)
     monkeypatch.setattr(client_module, "GitHubProvider", _FakeGitHubProvider)
     monkeypatch.setattr(client_module, "GitLabProvider", _FakeGitLabProvider)
+    monkeypatch.setattr(client_module, "YouTrackProvider", _FakeYouTrackProvider)
     monkeypatch.setattr(client_module, "run_fanout", _fake_run_fanout)
     return calls
 
@@ -159,6 +183,20 @@ def test_client_lazily_creates_and_caches_remote_provider_instances(monkeypatch:
     assert len(_FakeAzdoProvider.instances) == 1
     assert "github" not in client._config.remotes
     assert "gitlab" not in client._config.remotes
+
+
+def test_client_creates_and_caches_youtrack_provider_instances(monkeypatch: Any) -> None:
+    runtime = make_runtime_config(azdo_org="", github_org="", gitlab_api_url="")
+    _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object(), smith_config=_make_youtrack_config())
+    youtrack_remote = client._config.remotes["youtrack"]
+
+    first = client._get_provider_for_remote(youtrack_remote)
+    second = client._get_provider_for_remote(youtrack_remote)
+
+    assert first is second
+    assert len(_FakeYouTrackProvider.instances) == 1
+    assert _FakeYouTrackProvider.instances[0].kwargs["youtrack_api_url"] == "https://youtrack.example.test/api"
 
 
 def test_remote_entry_helpers_extract_warning_and_partial_state() -> None:
@@ -590,6 +628,67 @@ def test_execute_pr_list_uses_projects_as_repo_fallback(monkeypatch: Any, provid
     )
 
     assert result["remotes"][provider]["data"]["kwargs"]["repos"] == ["repo-from-project"]
+
+
+def test_execute_youtrack_work_methods_dispatch(monkeypatch: Any) -> None:
+    runtime = make_runtime_config(azdo_org="", github_org="", gitlab_api_url="")
+    _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object(), smith_config=_make_youtrack_config())
+
+    work_get = client.execute_work_get(
+        remote_or_provider="youtrack",
+        project=None,
+        repo=None,
+        work_item_id="RAD-1055",
+        no_images=True,
+    )
+    work_search = client.execute_work_search(
+        remote_or_provider="youtrack",
+        query="patch flow",
+        project=None,
+        repo=None,
+        area=None,
+        work_item_type="Task",
+        state="In Progress",
+        assigned_to="fausto",
+        skip=2,
+        take=5,
+    )
+    work_mine = client.execute_work_mine(
+        remote_or_provider="youtrack",
+        project=None,
+        repo=None,
+        include_closed=False,
+        skip=1,
+        take=4,
+    )
+
+    assert work_get["remotes"]["youtrack"]["data"]["method"] == "get_ticket_by_id"
+    assert work_get["remotes"]["youtrack"]["data"]["kwargs"] == {
+        "work_item_id": "RAD-1055",
+        "no_images": True,
+    }
+    assert work_search["remotes"]["youtrack"]["data"]["method"] == "search_work_items"
+    assert work_search["remotes"]["youtrack"]["data"]["kwargs"] == {
+        "query": "patch flow",
+        "project": None,
+        "repo": None,
+        "state": "In Progress",
+        "assigned_to": "fausto",
+        "work_item_type": "Task",
+        "skip": 2,
+        "take": 5,
+        "include_closed": True,
+    }
+    assert work_mine["remotes"]["youtrack"]["data"]["method"] == "get_my_work_items"
+    assert work_mine["remotes"]["youtrack"]["data"]["kwargs"] == {
+        "project": None,
+        "repo": None,
+        "include_closed": False,
+        "skip": 1,
+        "take": 4,
+    }
+
 
 def test_canonical_methods_cover_removed_wrapper_behavior(monkeypatch: Any) -> None:
     runtime = make_runtime_config()

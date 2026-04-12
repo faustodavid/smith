@@ -654,3 +654,90 @@ def test_save_config_persists_gitlab_group_when_present(tmp_path: Path) -> None:
     assert saved["remotes"]["gitlab-infra"]["group"] == "platform/subgroup"
     assert "org" not in saved["remotes"]["gitlab-infra"]
     assert reloaded.remotes["gitlab-infra"].org == "platform/subgroup"
+
+
+def test_load_config_derives_youtrack_api_url_from_host(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  youtrack:
+    provider: youtrack
+    host: youtrack.example.test
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["youtrack"].host == "youtrack.example.test"
+    assert config.remotes["youtrack"].api_url == "https://youtrack.example.test/api"
+
+
+def test_load_config_derives_youtrack_api_url_from_service_url(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  youtrack:
+    provider: youtrack
+    host: https://tracker.example.test/youtrack
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["youtrack"].api_url == "https://tracker.example.test/youtrack/api"
+
+
+def test_load_config_requires_youtrack_host(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  youtrack:
+    provider: youtrack
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="youtrack remotes require 'host' field"):
+        load_config(config_path=config_path)
+
+
+def test_save_config_persists_youtrack_host(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "youtrack": RemoteConfig(
+                    name="youtrack",
+                    provider="youtrack",
+                    org="",
+                    host="https://tracker.example.test/youtrack",
+                    token_env="YOUTRACK_TOKEN",
+                    enabled=True,
+                    api_url="https://tracker.example.test/youtrack/api",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["youtrack"]["host"] == "https://tracker.example.test/youtrack"
+    assert "org" not in saved["remotes"]["youtrack"]
+    assert reloaded.remotes["youtrack"].api_url == "https://tracker.example.test/youtrack/api"

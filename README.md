@@ -1,6 +1,6 @@
 # smith
 
-`smith` is a read-only investigation CLI for Azure DevOps, GitHub, and GitLab.
+`smith` is a read-only investigation CLI for Azure DevOps, GitHub, GitLab, and YouTrack.
 
 ## Goals
 
@@ -28,11 +28,13 @@ $EDITOR ~/.config/smith/config.yaml
 
 export GITHUB_TOKEN="<token>"
 export GITLAB_TOKEN="<token>"
+export YOUTRACK_TOKEN="<token>"
 az login
 
 smith config list
 smith github-public repos
 smith gitlab-platform repos
+smith youtrack-main stories search --query "patch rollout"
 smith gitlab-platform groups
 smith code search "grafana"
 ```
@@ -73,9 +75,15 @@ remotes:
     provider: azdo
     org: acme
     enabled: true
+
+  youtrack-main:
+    provider: youtrack
+    host: https://youtrack.acme.com
+    token_env: YOUTRACK_TOKEN
+    enabled: true
 ```
 
-For self-hosted GitHub Enterprise or GitLab, set `host`:
+For self-hosted GitHub Enterprise, GitLab, or YouTrack, set `host`:
 
 ```yaml
 remotes:
@@ -92,7 +100,15 @@ remotes:
     host: gitlab.acme.internal
     token_env: GITLAB_SELF_HOSTED_TOKEN
     enabled: true
+
+  youtrack-self-hosted:
+    provider: youtrack
+    host: https://youtrack.acme.internal
+    token_env: YOUTRACK_TOKEN
+    enabled: true
 ```
+
+For YouTrack, set `host` to the service root URL. Smith derives the REST API URL automatically by appending `/api`. If your instance is mounted under a path, set `host` to that full base URL.
 
 Useful config commands:
 
@@ -127,6 +143,15 @@ smith github-public code grep repo-a "TODO"
 
 # Azure DevOps commands still take a project plus repo
 smith azdo-main code grep SRE repo-a "timeout"
+
+# Search YouTrack issues on one configured remote
+smith youtrack-main stories search --query "patch rollout" --state "In Progress"
+
+# Read one YouTrack issue and hide inline images
+smith youtrack-main stories get RAD-1055 --no-images
+
+# List my assigned YouTrack issues
+smith youtrack-main stories mine
 ```
 
 GitLab discovery commands support `--grep`, `--skip`, and `--take`.
@@ -135,6 +160,8 @@ GitLab discovery commands support `--grep`, `--skip`, and `--take`.
 - `smith <gitlab-remote> groups [--grep <regex>] [--skip <n>] [--take <n>]`
 
 GitLab discovery defaults to `--take 50` and caps `--take` at `500`. When more matches exist than are shown, Smith prints a small warning so you can page with `--skip` / `--take`.
+
+YouTrack remotes expose only `stories` commands, use string issue IDs such as `RAD-1055`, and do not take project or repo arguments.
 
 When multiple remotes are queried, Smith labels results with the remote name.
 
