@@ -741,3 +741,80 @@ def test_save_config_persists_youtrack_host(tmp_path: Path) -> None:
     assert saved["remotes"]["youtrack"]["host"] == "https://tracker.example.test/youtrack"
     assert "org" not in saved["remotes"]["youtrack"]
     assert reloaded.remotes["youtrack"].api_url == "https://tracker.example.test/youtrack/api"
+
+
+def test_load_config_preserves_explicit_youtrack_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  youtrack-stub:
+    provider: youtrack
+    host: 127.0.0.1:4010
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+    api_url: http://127.0.0.1:4010/api/youtrack
+defaults: {}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["youtrack-stub"].host == "127.0.0.1:4010"
+    assert config.remotes["youtrack-stub"].api_url == "http://127.0.0.1:4010/api/youtrack"
+
+
+def test_save_config_persists_non_derivable_youtrack_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "youtrack-stub": RemoteConfig(
+                    name="youtrack-stub",
+                    provider="youtrack",
+                    org="",
+                    host="127.0.0.1:4010",
+                    token_env="YOUTRACK_TOKEN",
+                    enabled=True,
+                    api_url="http://127.0.0.1:4010/api/youtrack",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["youtrack-stub"]["api_url"] == "http://127.0.0.1:4010/api/youtrack"
+    assert reloaded.remotes["youtrack-stub"].api_url == "http://127.0.0.1:4010/api/youtrack"
+
+
+def test_save_config_omits_derived_youtrack_api_url(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "youtrack": RemoteConfig(
+                    name="youtrack",
+                    provider="youtrack",
+                    org="",
+                    host="https://tracker.example.test/youtrack",
+                    token_env="YOUTRACK_TOKEN",
+                    enabled=True,
+                    api_url="https://tracker.example.test/youtrack/api",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert "api_url" not in saved["remotes"]["youtrack"]
+    assert reloaded.remotes["youtrack"].api_url == "https://tracker.example.test/youtrack/api"

@@ -123,12 +123,20 @@ def test_youtrack_stories_search_and_mine_omit_repo_and_project() -> None:
     assert search_args.command_id == "stories.search"
     assert search_args.project is None
     assert search_args.repo is None
+    assert search_args.area is None
     assert search_args.query == "patching flow"
 
     assert mine_args.command_id == "stories.mine"
     assert mine_args.project is None
     assert mine_args.repo is None
     assert mine_args.include_closed is True
+
+
+def test_youtrack_stories_search_rejects_hidden_area_flag() -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["youtrack", "stories", "search", "--query", "patching flow", "--area", "Ops"])
 
 
 @pytest.mark.parametrize("provider", ["azdo", "github"])

@@ -170,8 +170,11 @@ def _add_ci_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--case-sensitive", action="store_true")
 
 
-def _add_work_search_filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--area")
+def _add_work_search_filters(parser: argparse.ArgumentParser, *, include_area: bool = True) -> None:
+    if include_area:
+        parser.add_argument("--area")
+    else:
+        parser.set_defaults(area=None)
     parser.add_argument("--type")
     parser.add_argument("--state")
     parser.add_argument("--assigned-to")
@@ -495,7 +498,7 @@ def _add_remote_stories_group(remote_subparsers: Any, *, remote: RemoteConfig) -
         stories_search.add_argument("repo", help="Full repository path (e.g. group/project)")
         stories_search.add_argument("--query", required=True)
         stories_search.set_defaults(project=None)
-    _add_work_search_filters(stories_search)
+    _add_work_search_filters(stories_search, include_area=remote.provider != "youtrack")
     _add_output_format(stories_search)
     _set_handler(stories_search, handle_work_search, "stories.search", primary_path="stories search")
 

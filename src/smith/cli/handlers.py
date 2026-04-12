@@ -550,7 +550,7 @@ def handle_work_search(client: SmithClient, args: argparse.Namespace) -> int:
         query=args.query,
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
-        area=args.area,
+        area=getattr(args, "area", None),
         work_item_type=args.type,
         state=args.state,
         assigned_to=args.assigned_to,

@@ -268,7 +268,7 @@ def _load_remote_api_url(*, provider: str, remote: dict[str, Any], host: str) ->
 
 
 def _should_persist_api_url(remote: RemoteConfig) -> bool:
-    if remote.provider != "github":
+    if remote.provider not in {"github", "youtrack"}:
         return False
     normalized_api_url = _normalize_config_api_url(remote.api_url)
     if not normalized_api_url:

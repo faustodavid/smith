@@ -10,11 +10,17 @@ from smith.errors import SmithAuthError
 from smith.providers.youtrack import YouTrackProvider
 
 
-def _provider(*, api_url: str = "https://youtrack.example.test/api", config: Any | None = None) -> YouTrackProvider:
+def _provider(
+    *,
+    api_url: str = "https://youtrack.example.test/api",
+    config: Any | None = None,
+    token_env: str | None = None,
+) -> YouTrackProvider:
     return YouTrackProvider(
         config=config or make_runtime_config(),
         session=requests.Session(),
         youtrack_api_url=api_url,
+        token_env=token_env,
     )
 
 
@@ -36,8 +42,24 @@ def test_youtrack_token_requires_env(monkeypatch: Any) -> None:
     monkeypatch.delenv("YOUTRACK_TOKEN", raising=False)
     provider = _provider()
 
-    with pytest.raises(SmithAuthError, match="Failed to acquire YouTrack token"):
+    with pytest.raises(SmithAuthError, match="Failed to acquire YouTrack token. Set YOUTRACK_TOKEN and retry."):
         provider._get_token()
+
+
+def test_youtrack_token_requires_custom_env(monkeypatch: Any) -> None:
+    monkeypatch.delenv("COMPANY_YOUTRACK_TOKEN", raising=False)
+    provider = _provider(token_env="COMPANY_YOUTRACK_TOKEN")
+
+    with pytest.raises(
+        SmithAuthError,
+        match="Failed to acquire YouTrack token. Set COMPANY_YOUTRACK_TOKEN and retry.",
+    ):
+        provider._get_token()
+
+    assert provider._auth_error_message() == (
+        "YouTrack authentication rejected with HTTP 401/403. "
+        "Set COMPANY_YOUTRACK_TOKEN and retry."
+    )
 
 
 def test_youtrack_normalizes_custom_fields_and_comment_images() -> None:

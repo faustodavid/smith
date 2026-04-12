@@ -647,7 +647,7 @@ def test_execute_youtrack_work_methods_dispatch(monkeypatch: Any) -> None:
         query="patch flow",
         project=None,
         repo=None,
-        area=None,
+        area="Ops",
         work_item_type="Task",
         state="In Progress",
         assigned_to="fausto",
