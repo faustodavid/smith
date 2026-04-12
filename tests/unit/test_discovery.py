@@ -28,6 +28,14 @@ def test_discovery_query_compile_grep_rejects_invalid_regex() -> None:
         DiscoveryQuery.create(grep="(").compile_grep()
 
 
+def test_discovery_query_caches_compiled_grep_and_derives_server_search_term() -> None:
+    query = DiscoveryQuery.create(grep="platform/api")
+
+    assert query.compile_grep() is query.compile_grep()
+    assert query.server_search_term() == "platform/api"
+    assert DiscoveryQuery.create(grep="^platform").server_search_term() is None
+
+
 def test_build_discovery_payload_includes_truncation_warning() -> None:
     payload = build_discovery_payload(
         rows=[{"name": "platform/api"}],

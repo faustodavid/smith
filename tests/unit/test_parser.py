@@ -193,6 +193,23 @@ def test_gitlab_groups_parser_accepts_discovery_flags() -> None:
     assert args.take == 15
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["github", "repos", "--grep", "^platform"],
+        ["github", "repos", "--take", "10"],
+        ["azdo", "repos", "SRE", "--skip", "5"],
+        ["github", "groups"],
+        ["azdo", "groups"],
+    ],
+)
+def test_non_gitlab_discovery_flags_and_groups_fail_to_parse(argv: list[str]) -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(argv)
+
+
 def test_prs_list_parser_uses_canonical_command_id() -> None:
     parser = _build_test_parser()
     args = parser.parse_args(["azdo", "prs", "list", "SRE", "repo-a"])
