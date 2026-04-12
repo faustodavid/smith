@@ -640,7 +640,6 @@ def test_execute_youtrack_work_methods_dispatch(monkeypatch: Any) -> None:
         project=None,
         repo=None,
         work_item_id="RAD-1055",
-        no_images=True,
     )
     work_search = client.execute_work_search(
         remote_or_provider="youtrack",
@@ -666,7 +665,6 @@ def test_execute_youtrack_work_methods_dispatch(monkeypatch: Any) -> None:
     assert work_get["remotes"]["youtrack"]["data"]["method"] == "get_ticket_by_id"
     assert work_get["remotes"]["youtrack"]["data"]["kwargs"] == {
         "work_item_id": "RAD-1055",
-        "no_images": True,
     }
     assert work_search["remotes"]["youtrack"]["data"]["method"] == "search_work_items"
     assert work_search["remotes"]["youtrack"]["data"]["kwargs"] == {

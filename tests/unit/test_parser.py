@@ -102,9 +102,9 @@ def test_stories_group_parses_to_stories_command() -> None:
     assert args.id == 123
 
 
-def test_youtrack_stories_get_parser_accepts_string_id_and_no_images() -> None:
+def test_youtrack_stories_get_parser_accepts_string_id() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(["youtrack", "stories", "get", "RAD-1055", "--no-images"])
+    args = parser.parse_args(["youtrack", "stories", "get", "RAD-1055"])
 
     assert args.command_id == "stories.get"
     assert args.remote == "youtrack"
@@ -112,7 +112,13 @@ def test_youtrack_stories_get_parser_accepts_string_id_and_no_images() -> None:
     assert args.project is None
     assert args.repo is None
     assert args.id == "RAD-1055"
-    assert args.no_images is True
+
+
+def test_youtrack_stories_get_parser_rejects_removed_no_images_flag() -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["youtrack", "stories", "get", "RAD-1055", "--no-images"])
 
 
 def test_youtrack_stories_search_and_mine_omit_repo_and_project() -> None:

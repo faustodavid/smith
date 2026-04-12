@@ -530,9 +530,6 @@ def handle_work_get(client: SmithClient, args: argparse.Namespace) -> int:
         "repo": getattr(args, "repo", None),
         "work_item_id": args.id,
     }
-    if hasattr(args, "no_images"):
-        request_kwargs["no_images"] = bool(args.no_images)
-
     data = client.execute_work_get(
         **request_kwargs,
     )

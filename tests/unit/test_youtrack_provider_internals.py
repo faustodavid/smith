@@ -90,7 +90,6 @@ def test_youtrack_normalizes_custom_fields_and_comment_images() -> None:
             ],
             "reactions": [{"reaction": "thumbs-up", "author": {"login": "alice", "fullName": "Alice"}}],
         },
-        no_images=True,
     )
 
     assert custom_fields == [
@@ -100,8 +99,9 @@ def test_youtrack_normalizes_custom_fields_and_comment_images() -> None:
         {"id": None, "name": "Assignee", "type": "SingleUserIssueCustomField", "value": None},
     ]
     assert comment is not None
-    assert comment["text"] == "See screenshot [image omitted: image1.png]"
-    assert comment["attachments"] == []
+    assert comment["text"] == "See screenshot ![](image1.png)"
+    assert comment["attachments"][0]["name"] == "image1.png"
+    assert comment["attachments"][0]["url"] == "https://youtrack.example.test/api/files/1"
     assert comment["reactions"][0]["reaction"] == "thumbs-up"
 
 

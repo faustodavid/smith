@@ -634,7 +634,6 @@ class SmithClient:
         project: str | None,
         repo: str | None,
         work_item_id: int | str,
-        no_images: bool = False,
     ) -> dict[str, Any]:
         target = self._require_single_target(remote_or_provider, command="stories.get")
         effective_repo = repo or project
@@ -661,7 +660,6 @@ class SmithClient:
                 ),
                 "youtrack": lambda r: self._youtrack_provider(r).get_ticket_by_id(
                     work_item_id=work_item_id,
-                    no_images=no_images,
                 ),
             },
         )

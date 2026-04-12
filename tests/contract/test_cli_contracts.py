@@ -710,7 +710,7 @@ def test_handle_list_groups_forwards_selected_remote(monkeypatch: Any, capsys: A
     )]
 
 
-def test_handle_youtrack_work_get_forwards_no_images(monkeypatch: Any, capsys: Any) -> None:
+def test_handle_youtrack_work_get(monkeypatch: Any, capsys: Any) -> None:
     client = _RecordingClient(payload={"marker": "youtrack-get"})
     args = _make_args(
         command_id="stories.get",
@@ -719,7 +719,6 @@ def test_handle_youtrack_work_get_forwards_no_images(monkeypatch: Any, capsys: A
         project=None,
         repo=None,
         id="RAD-1055",
-        no_images=True,
     )
     monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
 
@@ -736,7 +735,6 @@ def test_handle_youtrack_work_get_forwards_no_images(monkeypatch: Any, capsys: A
                 "project": None,
                 "repo": None,
                 "work_item_id": "RAD-1055",
-                "no_images": True,
             },
         )
     ]

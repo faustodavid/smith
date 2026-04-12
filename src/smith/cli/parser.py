@@ -473,7 +473,6 @@ def _add_remote_stories_group(remote_subparsers: Any, *, remote: RemoteConfig) -
         stories_get.set_defaults(project=None)
     elif remote.provider == "youtrack":
         stories_get.add_argument("id", help="YouTrack issue ID (e.g. RAD-1055)")
-        stories_get.add_argument("--no-images", action="store_true", help="Exclude image attachments from the output")
         stories_get.set_defaults(project=None, repo=None)
     else:
         stories_get.add_argument("repo", help="Full repository path (e.g. group/project)")

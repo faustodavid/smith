@@ -1,18 +1,12 @@
 from __future__ import annotations
 
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import quote
 
 from smith.errors import SmithApiError
 
-if TYPE_CHECKING:
-    pass
-
-
-_IMAGE_MARKDOWN_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<target>[^)]+)\)")
 _YOUTRACK_COLLECTION_PAGE_SIZE = 100
 _YOUTRACK_ACTIVITY_CATEGORIES = [
     "AttachmentsCategory",
@@ -115,19 +109,6 @@ class YouTrackIssueMixin:
         if any(not char.isalnum() and char not in {"-", "_", "."} for char in normalized):
             return "{" + normalized + "}"
         return normalized
-
-    @staticmethod
-    def _strip_image_markdown(text: str, *, image_names: set[str]) -> str:
-        if not text.strip() or not image_names:
-            return text
-
-        def _replace(match: re.Match[str]) -> str:
-            target = match.group("target").strip()
-            if target in image_names:
-                return f"[image omitted: {target}]"
-            return match.group(0)
-
-        return _IMAGE_MARKDOWN_RE.sub(_replace, text)
 
     def _request_list(
         self: Any,
@@ -241,28 +222,7 @@ class YouTrackIssueMixin:
             "author_display": self._user_display(attachment.get("author")),
         }
 
-    def _filter_attachments(
-        self: Any,
-        attachments: list[dict[str, Any]],
-        *,
-        no_images: bool,
-    ) -> tuple[list[dict[str, Any]], set[str]]:
-        if not no_images:
-            return attachments, set()
-        hidden_images = {
-            str(attachment.get("name") or "").strip()
-            for attachment in attachments
-            if bool(attachment.get("isImage")) and str(attachment.get("name") or "").strip()
-        }
-        filtered = [attachment for attachment in attachments if not bool(attachment.get("isImage"))]
-        return filtered, hidden_images
-
-    def _normalize_comment(
-        self: Any,
-        comment: Any,
-        *,
-        no_images: bool,
-    ) -> dict[str, Any] | None:
+    def _normalize_comment(self: Any, comment: Any) -> dict[str, Any] | None:
         if not isinstance(comment, dict):
             return None
         attachments = [
@@ -270,10 +230,7 @@ class YouTrackIssueMixin:
             for normalized in (self._normalize_attachment(entry) for entry in comment.get("attachments") or [])
             if normalized
         ]
-        visible_attachments, hidden_images = self._filter_attachments(attachments, no_images=no_images)
         text = str(comment.get("text") or comment.get("textPreview") or "").strip()
-        if no_images and hidden_images:
-            text = self._strip_image_markdown(text, image_names=hidden_images)
 
         reactions: list[dict[str, Any]] = []
         for reaction in comment.get("reactions") or []:
@@ -297,7 +254,7 @@ class YouTrackIssueMixin:
             "pinned": bool(comment.get("pinned", False)),
             "author": self._user_payload(comment.get("author")),
             "author_display": self._user_display(comment.get("author")),
-            "attachments": visible_attachments,
+            "attachments": attachments,
             "reactions": reactions,
         }
 
@@ -445,33 +402,27 @@ class YouTrackIssueMixin:
             skip += len(entries)
         return all_items
 
-    def _fetch_issue_comments(self: Any, issue_id: str, *, no_images: bool) -> list[dict[str, Any]]:
+    def _fetch_issue_comments(self: Any, issue_id: str) -> list[dict[str, Any]]:
         comments = self._fetch_paginated_collection(
             f"/issues/{quote(issue_id, safe='')}/comments",
             fields=_YOUTRACK_COMMENT_FIELDS,
         )
         return [
             normalized
-            for normalized in (self._normalize_comment(comment, no_images=no_images) for comment in comments)
+            for normalized in (self._normalize_comment(comment) for comment in comments)
             if normalized
         ]
 
-    def _fetch_issue_attachments(
-        self: Any,
-        issue_id: str,
-        *,
-        no_images: bool,
-    ) -> tuple[list[dict[str, Any]], set[str]]:
+    def _fetch_issue_attachments(self: Any, issue_id: str) -> list[dict[str, Any]]:
         attachments = self._fetch_paginated_collection(
             f"/issues/{quote(issue_id, safe='')}/attachments",
             fields=_YOUTRACK_ATTACHMENT_FIELDS,
         )
-        normalized = [
+        return [
             attachment
             for attachment in (self._normalize_attachment(entry) for entry in attachments)
             if attachment
         ]
-        return self._filter_attachments(normalized, no_images=no_images)
 
     def _fetch_issue_links(self: Any, issue_id: str) -> list[dict[str, Any]]:
         links = self._fetch_paginated_collection(
@@ -618,7 +569,6 @@ class YouTrackIssueMixin:
         self: Any,
         *,
         work_item_id: int | str,
-        no_images: bool = False,
     ) -> dict[str, Any]:
         issue_id = str(work_item_id or "").strip()
         if not issue_id:
@@ -635,14 +585,13 @@ class YouTrackIssueMixin:
         warnings: list[str] = []
         partial = False
         issue_attachments: list[dict[str, Any]] = []
-        hidden_issue_images: set[str] = set()
         comments: list[dict[str, Any]] = []
         links: list[dict[str, Any]] = []
         timeline: list[dict[str, Any]] = []
 
         operations = {
-            "attachments": lambda: self._fetch_issue_attachments(issue_id, no_images=no_images),
-            "comments": lambda: self._fetch_issue_comments(issue_id, no_images=no_images),
+            "attachments": lambda: self._fetch_issue_attachments(issue_id),
+            "comments": lambda: self._fetch_issue_comments(issue_id),
             "links": lambda: self._fetch_issue_links(issue_id),
             "timeline": lambda: self._fetch_issue_timeline(issue_id),
         }
@@ -661,16 +610,13 @@ class YouTrackIssueMixin:
                     warnings.append(f"Failed to fetch {name}: {exc}")
                     continue
                 if name == "attachments":
-                    issue_attachments, hidden_issue_images = result
+                    issue_attachments = result
                 elif name == "comments":
                     comments = result
                 elif name == "links":
                     links = result
                 elif name == "timeline":
                     timeline = result
-
-        if no_images and hidden_issue_images:
-            description = self._strip_image_markdown(description, image_names=hidden_issue_images)
 
         reactions = [
             {

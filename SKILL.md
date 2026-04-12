@@ -66,7 +66,7 @@ Use the current CLI tree only:
   - `smith <azdo-remote-name> stories search <project> --query "<text>"`
   - `smith <github-remote-name> stories search <repo> --query "<text>"`
   - `smith <gitlab-remote-name> stories search <group/project> --query "<text>"`
-  - `smith <youtrack-remote-name> stories get <issue-id> [--no-images]`
+  - `smith <youtrack-remote-name> stories get <issue-id>`
   - `smith <youtrack-remote-name> stories search --query "<text>" [--state <name>] [--type <name>] [--assigned-to <user>]`
   - `smith <youtrack-remote-name> stories mine [--include-closed]`
 
@@ -82,7 +82,7 @@ Representative command examples:
 - `smith azdo-main stories search <project> --query "<text>"`
 - `smith gitlab-infra stories search <group/project> --query "<text>"`
 - `smith youtrack-main stories search --query "patch rollout" --state "In Progress"`
-- `smith youtrack-main stories get RAD-1055 --no-images`
+- `smith youtrack-main stories get ID-1545`
 
 Do not invent legacy paths such as `discover`, `organizations`, `work`, `ci`, `board`, `stories ticket`, the removed root command `smith search`, root-first forms like `smith code grep <remote>`, or repo-scoped `code`/`prs`/`pipelines` commands for YouTrack.
 

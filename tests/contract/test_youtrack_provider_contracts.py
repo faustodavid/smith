@@ -163,7 +163,7 @@ def test_youtrack_get_ticket_by_id_returns_rich_shape(monkeypatch: Any) -> None:
     monkeypatch.setenv("YOUTRACK_TOKEN", "test-token")
     with GitHubApiStubServer(routes=routes) as server:
         provider = _provider(base_url=server.base_url)
-        payload = provider.get_ticket_by_id(work_item_id="RAD-1055", no_images=True)
+        payload = provider.get_ticket_by_id(work_item_id="RAD-1055")
 
     assert payload["provider"] == "youtrack"
     assert payload["id"] == "RAD-1055"
@@ -174,9 +174,10 @@ def test_youtrack_get_ticket_by_id_returns_rich_shape(monkeypatch: Any) -> None:
     }
     assert payload["metadata"]["Project"] == "Release and Deployments (RAD)"
     assert payload["metadata"]["Impact"] == "4"
-    assert payload["description"] == "Ticket body\n[image omitted: image1.png]"
-    assert [attachment["name"] for attachment in payload["attachments"]] == ["notes.txt"]
-    assert payload["comments"][0]["text"] == "Looks good [image omitted: comment-image.png]"
+    assert payload["description"] == "Ticket body\n![](image1.png)"
+    assert [attachment["name"] for attachment in payload["attachments"]] == ["image1.png", "notes.txt"]
+    assert payload["comments"][0]["text"] == "Looks good ![](comment-image.png)"
+    assert payload["comments"][0]["attachments"][0]["url"] == f"{server.base_url}/api/files/4"
     assert payload["reactions"][0]["reaction"] == "thumbs-up"
     assert payload["links"][0]["issues"][0]["id"] == "RAD-1004"
     assert payload["timeline"][0]["action"] == "created issue"

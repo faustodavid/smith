@@ -147,8 +147,8 @@ smith azdo-main code grep SRE repo-a "timeout"
 # Search YouTrack issues on one configured remote
 smith youtrack-main stories search --query "patch rollout" --state "In Progress"
 
-# Read one YouTrack issue and hide inline images
-smith youtrack-main stories get RAD-1055 --no-images
+# Read one YouTrack issue
+smith youtrack-main stories get ID-1375
 
 # List my assigned YouTrack issues
 smith youtrack-main stories mine
