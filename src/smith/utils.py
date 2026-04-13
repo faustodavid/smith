@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+import logging
+import re
+from datetime import UTC, datetime
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_path(path: str | None) -> str:
+    if not path:
+        return "/"
+    if path.startswith("/"):
+        return path
+    return "/" + path
+
+
+def parse_iso_datetime(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        logger.debug("Could not parse datetime %r: %s", value, exc)
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def match_all_pattern(pattern: str) -> bool:
+    return pattern in (".*", "^.*$", ".*$", "^.*")
+
+
+def slice_lines(
+    lines: list[str],
+    *,
+    from_line: int | None,
+    to_line: int | None,
+) -> list[str]:
+    if from_line is None and to_line is None:
+        return lines
+    start_idx = (from_line - 1) if from_line and from_line > 0 else 0
+    end_idx = to_line if to_line and to_line > 0 else len(lines)
+    return lines[start_idx:end_idx]
+
+
+def compile_search_pattern(
+    pattern: str,
+    *,
+    case_insensitive: bool,
+) -> tuple[re.Pattern[str] | None, str | None]:
+    flags = re.IGNORECASE if case_insensitive else 0
+    try:
+        return re.compile(pattern, flags), None
+    except re.error as exc:
+        return None, f"Error: Invalid regex pattern - {exc}"
+
+

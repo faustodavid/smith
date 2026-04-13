@@ -1,0 +1,838 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+
+from smith.config import RemoteConfig, SmithConfig, load_config, parse_bool_env, parse_int_env, parse_runtime_config, save_config
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "default", "expected"),
+    [
+        ("true", False, True),
+        ("false", True, False),
+        ("1", False, True),
+        ("0", True, False),
+        ("yes", False, True),
+        ("no", True, False),
+        ("", True, True),
+        (None, False, False),
+    ],
+)
+def test_parse_bool_env_handles_expected_values(
+    monkeypatch: Any,
+    raw_value: str | None,
+    default: bool,
+    expected: bool,
+) -> None:
+    env_name = "SMITH_TEST_BOOL"
+    if raw_value is None:
+        monkeypatch.delenv(env_name, raising=False)
+    else:
+        monkeypatch.setenv(env_name, raw_value)
+
+    assert parse_bool_env(env_name, default=default) is expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "default", "min_value", "max_value", "expected"),
+    [
+        ("42", 10, 1, 100, 42),
+        ("not-an-int", 10, 1, 100, 10),
+        ("0", 10, 1, 100, 1),
+        ("999", 10, 1, 100, 100),
+        (None, 10, 1, 100, 10),
+    ],
+)
+def test_parse_int_env_handles_parsing_and_bounds(
+    monkeypatch: Any,
+    raw_value: str | None,
+    default: int,
+    min_value: int,
+    max_value: int,
+    expected: int,
+) -> None:
+    env_name = "SMITH_TEST_INT"
+    if raw_value is None:
+        monkeypatch.delenv(env_name, raising=False)
+    else:
+        monkeypatch.setenv(env_name, raw_value)
+
+    assert (
+        parse_int_env(
+            env_name,
+            default=default,
+            min_value=min_value,
+            max_value=max_value,
+        )
+        == expected
+    )
+
+
+def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -> None:
+    for env_name in (
+        "AZURE_DEVOPS_ORG",
+        "AZURE_DEVOPS_API_VERSION",
+        "AZURE_DEVOPS_TIMEOUT_SECONDS",
+        "THANOS_LOCAL_MAX_OUTPUT_CHARS",
+        "SMITH_GREP_MAX_FILES",
+        "GITHUB_ORG",
+        "GITHUB_API_URL",
+        "GITHUB_API_VERSION",
+        "GITHUB_TIMEOUT_SECONDS",
+        "GITHUB_MAX_CONCURRENT_REQUESTS",
+        "GITHUB_RATE_LIMIT_MAX_SLEEP_SECONDS",
+        "GITLAB_HOST",
+        "GITLAB_API_URL",
+        "GITLAB_TIMEOUT_SECONDS",
+        "SMITH_HTTP_POOL_MAXSIZE",
+        "SMITH_HTTP_POOL_CONNECTIONS",
+        "SMITH_HTTP_RETRY_MAX_ATTEMPTS",
+        "SMITH_HTTP_RETRY_BACKOFF_SECONDS",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.azdo_org == "example"
+    assert runtime.azdo_org_url == "https://dev.azure.com/example"
+    assert runtime.api_version == "7.1"
+    assert runtime.timeout_seconds == 30
+    assert runtime.max_output_chars == 10240
+    assert runtime.grep_max_files == 5000
+    assert runtime.github_org == ""
+    assert runtime.github_api_url == "https://api.github.com"
+    assert runtime.github_api_version == "2022-11-28"
+    assert runtime.github_timeout_seconds == 30
+    assert runtime.github_max_concurrent_requests == 2
+    assert runtime.github_rate_limit_max_sleep_seconds == 120
+    assert runtime.gitlab_api_url == "https://gitlab.com/api/v4"
+    assert runtime.gitlab_timeout_seconds == 30
+    assert runtime.http_pool_maxsize == 32
+    assert runtime.http_pool_connections == 16
+    assert runtime.http_retry_max_attempts == 2
+    assert runtime.http_retry_backoff_seconds == pytest.approx(0.4)
+
+
+def test_parse_runtime_config_applies_timeout_and_backoff_overrides(monkeypatch: Any) -> None:
+    monkeypatch.setenv("AZURE_DEVOPS_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("SMITH_GREP_MAX_FILES", "9000")
+    monkeypatch.setenv("GITHUB_TIMEOUT_SECONDS", "60")
+    monkeypatch.setenv("GITHUB_MAX_CONCURRENT_REQUESTS", "4")
+    monkeypatch.setenv("GITHUB_RATE_LIMIT_MAX_SLEEP_SECONDS", "180")
+    monkeypatch.setenv("GITLAB_TIMEOUT_SECONDS", "75")
+    monkeypatch.setenv("SMITH_HTTP_RETRY_BACKOFF_SECONDS", "1.75")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.timeout_seconds == 45
+    assert runtime.grep_max_files == 9000
+    assert runtime.github_timeout_seconds == 60
+    assert runtime.github_max_concurrent_requests == 4
+    assert runtime.github_rate_limit_max_sleep_seconds == 180
+    assert runtime.gitlab_timeout_seconds == 75
+    assert runtime.http_retry_backoff_seconds == pytest.approx(1.75)
+
+
+@pytest.mark.parametrize("azure_timeout_value", ["", "not-a-number"])
+def test_parse_runtime_config_handles_invalid_or_empty_azure_timeout_env(
+    monkeypatch: Any,
+    azure_timeout_value: str,
+) -> None:
+    monkeypatch.setenv("AZURE_DEVOPS_TIMEOUT_SECONDS", azure_timeout_value)
+    monkeypatch.delenv("GITHUB_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("GITLAB_TIMEOUT_SECONDS", raising=False)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=11,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.timeout_seconds == 11
+    assert runtime.github_timeout_seconds == 11
+    assert runtime.gitlab_timeout_seconds == 11
+
+
+def test_parse_runtime_config_falls_back_for_invalid_retry_backoff(monkeypatch: Any) -> None:
+    monkeypatch.setenv("SMITH_HTTP_RETRY_BACKOFF_SECONDS", "not-a-float")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.http_retry_backoff_seconds == pytest.approx(0.4)
+
+
+def test_parse_runtime_config_github_org_ignores_legacy_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.github_org == ""
+    assert runtime.github_configured is False
+
+
+def test_parse_runtime_config_removes_gitlab_group_from_runtime(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITLAB_GROUP", "platform/subgroup/")
+    monkeypatch.setenv("GITLAB_API_URL", "https://gitlab.com/api/v4")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert not hasattr(runtime, "gitlab_group")
+    assert runtime.gitlab_api_url == "https://gitlab.com/api/v4"
+
+
+def test_parse_runtime_config_gitlab_host_env_fallback(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITLAB_HOST", "gitlab.example.test")
+    monkeypatch.delenv("GITLAB_API_URL", raising=False)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.gitlab_api_url == "https://gitlab.example.test/api/v4"
+
+
+def test_parse_runtime_config_gitlab_glab_host_fallback(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_API_URL", raising=False)
+    calls: list[list[str]] = []
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        calls.append(args)
+        if args == ["glab", "config", "get", "host"]:
+            return subprocess.CompletedProcess(args, 0, stdout="gitlab.com\n")
+        if args == ["glab", "auth", "status", "--all"]:
+            raise subprocess.CalledProcessError(
+                1,
+                args,
+                output=(
+                    "gitlab.com:\n"
+                    "  ! No token found (checked config file, keyring, and environment variables).\n"
+                    "gitlab.example.test:\n"
+                    "  ✓ Logged in to https://gitlab.example.test as fausto\n"
+                    "  ✓ Token found: **************************\n"
+                ),
+            )
+        if args == ["glab", "config", "get", "api_protocol", "--host", "gitlab.example.test"]:
+            return subprocess.CompletedProcess(args, 0, stdout="\n")
+        raise AssertionError(f"unexpected glab command: {args}")
+
+    monkeypatch.setattr("smith.config.subprocess.run", _fake_run)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.gitlab_api_url == "https://gitlab.example.test/api/v4"
+    assert calls == [
+        ["glab", "config", "get", "host"],
+        ["glab", "auth", "status", "--all"],
+        ["glab", "config", "get", "api_protocol", "--host", "gitlab.example.test"],
+    ]
+
+
+def test_parse_runtime_config_gitlab_glab_host_fallback_preserves_api_protocol(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_API_URL", raising=False)
+    calls: list[list[str]] = []
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        calls.append(args)
+        if args == ["glab", "config", "get", "host"]:
+            return subprocess.CompletedProcess(args, 0, stdout="gitlab.example.test\n")
+        if args == ["glab", "auth", "status", "--all"]:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=(
+                    "gitlab.example.test:\n"
+                    "  ✓ Logged in to http://gitlab.example.test as fausto\n"
+                    "  ✓ Token found: **************************\n"
+                ),
+            )
+        if args == ["glab", "config", "get", "api_protocol", "--host", "gitlab.example.test"]:
+            return subprocess.CompletedProcess(args, 0, stdout="http\n")
+        raise AssertionError(f"unexpected glab command: {args}")
+
+    monkeypatch.setattr("smith.config.subprocess.run", _fake_run)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.gitlab_api_url == "http://gitlab.example.test/api/v4"
+    assert calls == [
+        ["glab", "config", "get", "host"],
+        ["glab", "auth", "status", "--all"],
+        ["glab", "config", "get", "api_protocol", "--host", "gitlab.example.test"],
+    ]
+
+
+def test_parse_runtime_config_gitlab_glab_host_fallback_supports_single_label_hosts(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_API_URL", raising=False)
+    calls: list[list[str]] = []
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        calls.append(args)
+        if args == ["glab", "config", "get", "host"]:
+            return subprocess.CompletedProcess(args, 0, stdout="gitlab\n")
+        if args == ["glab", "auth", "status", "--all"]:
+            raise subprocess.CalledProcessError(
+                1,
+                args,
+                output=(
+                    "gitlab:\n"
+                    "  ✓ Logged in to https://gitlab as fausto\n"
+                    "  ✓ Token found: **************************\n"
+                ),
+            )
+        if args == ["glab", "config", "get", "api_protocol", "--host", "gitlab"]:
+            return subprocess.CompletedProcess(args, 0, stdout="ftp\n")
+        raise AssertionError(f"unexpected glab command: {args}")
+
+    monkeypatch.setattr("smith.config.subprocess.run", _fake_run)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.gitlab_api_url == "https://gitlab/api/v4"
+    assert calls == [
+        ["glab", "config", "get", "host"],
+        ["glab", "auth", "status", "--all"],
+        ["glab", "config", "get", "api_protocol", "--host", "gitlab"],
+    ]
+
+
+def test_parse_runtime_config_gitlab_glab_host_fallback_without_status_all_support(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_API_URL", raising=False)
+    calls: list[list[str]] = []
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        calls.append(args)
+        if args == ["glab", "config", "get", "host"]:
+            return subprocess.CompletedProcess(args, 0, stdout="gitlab.com\n")
+        if args == ["glab", "auth", "status", "--all"]:
+            raise subprocess.CalledProcessError(1, args, stderr="unknown flag: --all\n")
+        if args == ["glab", "auth", "status"]:
+            raise subprocess.CalledProcessError(
+                1,
+                args,
+                output=(
+                    "gitlab.com:\n"
+                    "  ! No token found (checked config file, keyring, and environment variables).\n"
+                    "gitlab.example.test:\n"
+                    "  ✓ Logged in to gitlab.example.test as fausto\n"
+                    "  ✓ Token found: **************************\n"
+                ),
+            )
+        if args == ["glab", "config", "get", "api_protocol", "--host", "gitlab.example.test"]:
+            raise subprocess.CalledProcessError(1, args, stderr="unknown flag: --host\n")
+        raise AssertionError(f"unexpected glab command: {args}")
+
+    monkeypatch.setattr("smith.config.subprocess.run", _fake_run)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.gitlab_api_url == "https://gitlab.example.test/api/v4"
+    assert calls == [
+        ["glab", "config", "get", "host"],
+        ["glab", "auth", "status", "--all"],
+        ["glab", "auth", "status"],
+        ["glab", "config", "get", "api_protocol", "--host", "gitlab.example.test"],
+    ]
+
+
+def test_parse_runtime_config_gitlab_api_url_override_wins_over_host(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITLAB_HOST", "gitlab.example.test")
+    monkeypatch.setenv("GITLAB_API_URL", "https://gitlab.example.com/api/v4/")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.gitlab_api_url == "https://gitlab.example.com/api/v4"
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [("0", 1), ("3", 3), ("99", 16)],
+)
+def test_parse_runtime_config_bounds_github_max_concurrent_requests(
+    monkeypatch: Any,
+    raw_value: str,
+    expected: int,
+) -> None:
+    monkeypatch.setenv("GITHUB_MAX_CONCURRENT_REQUESTS", raw_value)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.github_max_concurrent_requests == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [("0", 1), ("90", 90), ("999", 900)],
+)
+def test_parse_runtime_config_bounds_github_rate_limit_max_sleep_seconds(
+    monkeypatch: Any,
+    raw_value: str,
+    expected: int,
+) -> None:
+    monkeypatch.setenv("GITHUB_RATE_LIMIT_MAX_SLEEP_SECONDS", raw_value)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.github_rate_limit_max_sleep_seconds == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [("0", 100), ("9000", 9000), ("999999", 100_000)],
+)
+def test_parse_runtime_config_bounds_grep_max_files(
+    monkeypatch: Any,
+    raw_value: str,
+    expected: int,
+) -> None:
+    monkeypatch.setenv("SMITH_GREP_MAX_FILES", raw_value)
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.grep_max_files == expected
+
+
+def test_load_config_requires_existing_file(tmp_path: Path) -> None:
+    missing_path = tmp_path / "config.yaml"
+
+    with pytest.raises(ValueError, match="Config file not found"):
+        load_config(config_path=missing_path)
+
+
+@pytest.mark.parametrize("remote_name", ["code", "prs"])
+def test_load_config_rejects_reserved_top_level_remote_names(tmp_path: Path, remote_name: str) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f"""
+remotes:
+  {remote_name}:
+    provider: github
+    org: octo-org
+    host: github.com
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="name is reserved"):
+        load_config(config_path=config_path)
+
+
+def test_load_config_preserves_explicit_github_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  github-stub:
+    provider: github
+    org: octo-org
+    host: 127.0.0.1:4010
+    token_env: GITHUB_TOKEN
+    enabled: true
+    api_url: http://127.0.0.1:4010/api/github
+defaults: {}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["github-stub"].host == "127.0.0.1:4010"
+    assert config.remotes["github-stub"].api_url == "http://127.0.0.1:4010/api/github"
+
+
+@pytest.mark.parametrize(
+    ("host", "api_url"),
+    [
+        ("127.0.0.1:4010", "http://127.0.0.1:4010/api/github"),
+        ("github.example.test", "https://github.example.test/custom/api"),
+    ],
+)
+def test_save_config_persists_non_derivable_github_api_url_override(
+    tmp_path: Path,
+    host: str,
+    api_url: str,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github-stub": RemoteConfig(
+                    name="github-stub",
+                    provider="github",
+                    org="octo-org",
+                    host=host,
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url=api_url,
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["github-stub"]["api_url"] == api_url
+    assert reloaded.remotes["github-stub"].api_url == api_url
+
+
+def test_save_config_omits_derived_github_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github-enterprise": RemoteConfig(
+                    name="github-enterprise",
+                    provider="github",
+                    org="octo-org",
+                    host="github.example.test",
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url="https://github.example.test/api/v3",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert "api_url" not in saved["remotes"]["github-enterprise"]
+
+
+def test_load_config_accepts_legacy_gitlab_group_field(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  gitlab-infra:
+    provider: gitlab
+    enabled: true
+    host: gitlab.example.test
+    group: platform/subgroup
+    token_env: GITLAB_TOKEN
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["gitlab-infra"].org == "platform/subgroup"
+
+
+def test_save_config_persists_gitlab_group_when_present(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "gitlab-infra": RemoteConfig(
+                    name="gitlab-infra",
+                    provider="gitlab",
+                    org="platform/subgroup",
+                    host="gitlab.example.test",
+                    token_env="GITLAB_TOKEN",
+                    enabled=True,
+                    api_url="https://gitlab.example.test/api/v4",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["gitlab-infra"]["group"] == "platform/subgroup"
+    assert "org" not in saved["remotes"]["gitlab-infra"]
+    assert reloaded.remotes["gitlab-infra"].org == "platform/subgroup"
+
+
+def test_load_config_derives_youtrack_api_url_from_host(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  youtrack:
+    provider: youtrack
+    host: youtrack.example.test
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["youtrack"].host == "youtrack.example.test"
+    assert config.remotes["youtrack"].api_url == "https://youtrack.example.test/api"
+
+
+def test_load_config_derives_youtrack_api_url_from_service_url(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  youtrack:
+    provider: youtrack
+    host: https://tracker.example.test/youtrack
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["youtrack"].api_url == "https://tracker.example.test/youtrack/api"
+
+
+def test_load_config_requires_youtrack_host(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  youtrack:
+    provider: youtrack
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="youtrack remotes require 'host' field"):
+        load_config(config_path=config_path)
+
+
+def test_save_config_persists_youtrack_host(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "youtrack": RemoteConfig(
+                    name="youtrack",
+                    provider="youtrack",
+                    org="",
+                    host="https://tracker.example.test/youtrack",
+                    token_env="YOUTRACK_TOKEN",
+                    enabled=True,
+                    api_url="https://tracker.example.test/youtrack/api",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["youtrack"]["host"] == "https://tracker.example.test/youtrack"
+    assert "org" not in saved["remotes"]["youtrack"]
+    assert reloaded.remotes["youtrack"].api_url == "https://tracker.example.test/youtrack/api"
+
+
+def test_load_config_preserves_explicit_youtrack_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  youtrack-stub:
+    provider: youtrack
+    host: 127.0.0.1:4010
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+    api_url: http://127.0.0.1:4010/api/youtrack
+defaults: {}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["youtrack-stub"].host == "127.0.0.1:4010"
+    assert config.remotes["youtrack-stub"].api_url == "http://127.0.0.1:4010/api/youtrack"
+
+
+def test_save_config_persists_non_derivable_youtrack_api_url_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "youtrack-stub": RemoteConfig(
+                    name="youtrack-stub",
+                    provider="youtrack",
+                    org="",
+                    host="127.0.0.1:4010",
+                    token_env="YOUTRACK_TOKEN",
+                    enabled=True,
+                    api_url="http://127.0.0.1:4010/api/youtrack",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert saved["remotes"]["youtrack-stub"]["api_url"] == "http://127.0.0.1:4010/api/youtrack"
+    assert reloaded.remotes["youtrack-stub"].api_url == "http://127.0.0.1:4010/api/youtrack"
+
+
+def test_save_config_omits_derived_youtrack_api_url(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "youtrack": RemoteConfig(
+                    name="youtrack",
+                    provider="youtrack",
+                    org="",
+                    host="https://tracker.example.test/youtrack",
+                    token_env="YOUTRACK_TOKEN",
+                    enabled=True,
+                    api_url="https://tracker.example.test/youtrack/api",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    reloaded = load_config(config_path=config_path)
+
+    assert "api_url" not in saved["remotes"]["youtrack"]
+    assert reloaded.remotes["youtrack"].api_url == "https://tracker.example.test/youtrack/api"

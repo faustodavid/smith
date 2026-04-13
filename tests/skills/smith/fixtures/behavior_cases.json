@@ -1,0 +1,61 @@
+[
+  {
+    "name": "default_loop",
+    "expected_sequence": [
+      "smith code search",
+      "smith <github-remote-name> code grep <repo> \".*\" --output-mode files_with_matches",
+      "smith <github-remote-name> code grep <repo> \"<regex>\""
+    ],
+    "required_phrase": "not enough evidence",
+    "requires_evidence_paths": true
+  },
+  {
+    "name": "discovery_helpers",
+    "expected_sequence": [
+      "smith <github-remote-name> orgs",
+      "smith <gitlab-remote-name> groups",
+      "smith <github-remote-name> repos",
+      "smith <gitlab-remote-name> repos",
+      "smith <azdo-remote-name> repos <project>"
+    ],
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "github_repo_shape_rule",
+    "required_phrase": "bare `<repo>`",
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "github_repo_shape_negative_example",
+    "required_phrase": "not `org/repo`",
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "gitlab_repo_shape_rule",
+    "required_phrase": "full `group/project` paths",
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "gitlab_repo_shape_negative_example",
+    "required_phrase": "not a short repo name",
+    "requires_evidence_paths": false
+  },
+  {
+    "name": "read_only_followups",
+    "expected_sequence": [
+      "smith <github-remote-name> prs list <repo>",
+      "smith <github-remote-name> pipelines logs list <repo> <id>",
+      "smith <azdo-remote-name> stories search <project> --query"
+    ],
+    "requires_evidence_paths": true
+  },
+  {
+    "name": "gitlab_followups",
+    "expected_sequence": [
+      "smith <gitlab-remote-name> prs list <group/project>",
+      "smith <gitlab-remote-name> pipelines logs list <group/project> <id>",
+      "smith <gitlab-remote-name> stories search <group/project> --query"
+    ],
+    "requires_evidence_paths": true
+  }
+]
