@@ -1,11 +1,11 @@
 ---
 name: smith
-description: Use when the task is a read-only GitHub, GitLab, or Azure DevOps investigation that needs repo, PR, pipeline, or story evidence. Do not use for write operations, public-web research, or unrelated analysis.
+description: Use when the task is a read-only GitHub, GitLab, Azure DevOps, or YouTrack investigation that needs repo, PR, pipeline, or story evidence. Do not use for write operations, public-web research, or unrelated analysis.
 ---
 
 # Smith
 
-Run Azure DevOps, GitHub, and GitLab investigations with a deterministic broad-to-narrow workflow and evidence-first outputs.
+Run Azure DevOps, GitHub, GitLab, and YouTrack investigations with a deterministic broad-to-narrow workflow and evidence-first outputs.
 
 ## Trigger Decision
 
@@ -13,7 +13,7 @@ Run Azure DevOps, GitHub, and GitLab investigations with a deterministic broad-t
 
 - The user asks to search, locate, or grep code or config in GitHub, GitLab, or Azure DevOps.
 - The user asks to inspect pull requests, merge requests, review threads, build failures, or pipeline logs.
-- The user asks to read work items, GitHub issues, or GitLab issues.
+- The user asks to read work items, GitHub issues, GitLab issues, or YouTrack issues.
 - The user asks "Where is X configured?" and the likely source of truth is a repository, PR, pipeline, or story.
 
 ### Do not use smith when
@@ -26,6 +26,7 @@ Run Azure DevOps, GitHub, and GitLab investigations with a deterministic broad-t
 ### Ambiguous request fallback
 
 - If GitHub, GitLab, or Azure DevOps is the likely source of truth, start broad with `smith code search "<query>"`.
+- If YouTrack is the likely source of truth, start with `smith <youtrack-remote-name> stories search --query "<stable noun>"`.
 - For unfamiliar repos, prefer `smith code search "<stable noun>"` over repo-wide grep.
 - If repo or project scope is unknown, use discovery helpers first.
 - If the request is still unclear after discovery, return the findings so far and the best next narrowing command.
@@ -65,6 +66,9 @@ Use the current CLI tree only:
   - `smith <azdo-remote-name> stories search <project> --query "<text>"`
   - `smith <github-remote-name> stories search <repo> --query "<text>"`
   - `smith <gitlab-remote-name> stories search <group/project> --query "<text>"`
+  - `smith <youtrack-remote-name> stories get <issue-id>`
+  - `smith <youtrack-remote-name> stories search --query "<text>" [--state <name>] [--type <name>] [--assigned-to <user>]`
+  - `smith <youtrack-remote-name> stories mine [--include-closed]`
 
 Representative command examples:
 
@@ -77,8 +81,10 @@ Representative command examples:
 - `smith gitlab-infra pipelines logs list <group/project> <id>`
 - `smith azdo-main stories search <project> --query "<text>"`
 - `smith gitlab-infra stories search <group/project> --query "<text>"`
+- `smith youtrack-main stories search --query "patch rollout" --state "In Progress"`
+- `smith youtrack-main stories get ID-1545`
 
-Do not invent legacy paths such as `discover`, `organizations`, `work`, `ci`, `board`, `stories ticket`, the removed root command `smith search`, or root-first forms like `smith code grep <remote>`.
+Do not invent legacy paths such as `discover`, `organizations`, `work`, `ci`, `board`, `stories ticket`, the removed root command `smith search`, root-first forms like `smith code grep <remote>`, or repo-scoped `code`/`prs`/`pipelines` commands for YouTrack.
 
 ## Remote Argument Rules
 
@@ -87,6 +93,7 @@ All provider-specific commands use configured remote names as the leading positi
 - Azure DevOps remotes take `<project>` and, when needed, `<repo>`.
 - GitHub remotes take a bare `<repo>` slug without the org prefix, not `org/repo`.
 - GitLab remotes take full `group/project` paths.
+- YouTrack remotes take issue IDs and search filters only; they do not take project or repo arguments.
 - `smith code search` always searches all configured remotes.
 - To target one remote, use `smith <remote> code search "<query>"`.
 - Global `smith code search` does not accept `--remote`, `--project`, or `--repo`.
@@ -135,7 +142,8 @@ Important pipeline ID rule:
 
 1. Discover candidate scope cautiously.
    - Do not start with a broad regex over the whole repo unless you already know the subsystem path.
-   - Start with `smith code search "<stable noun>"` to locate the relevant area.
+   - For repo-backed providers, start with `smith code search "<stable noun>"` to locate the relevant area.
+   - For YouTrack, start with `smith <youtrack-remote-name> stories search --query "<stable noun>"`.
    - Important: If the remote is already known, use `smith <remote> code search "<stable noun>"`.
    - Only add `--project` or `--repo` on remote-scoped `smith <remote> code search`, using the provider-appropriate repo shape.
    - If org, project, or repo scope is unclear, use `smith <remote> orgs`, `smith <remote> repos`, or `smith <gitlab-remote> groups`.
@@ -159,10 +167,15 @@ Important pipeline ID rule:
    - Use `stories` for work-item or issue context.
 5. Report only what the retrieved evidence supports.
 
+## Stories and Image Context
+
+When retrieving a story via `smith <remote> stories get <id>`, extract image URLs from the description/comments, download them to `/tmp` on macOS/Linux or `%TEMP%` on Windows, and read the images for full context before analyzing.
+
 ## Query Discipline
 
 - Start code search with plain, high-signal terms.
 - Prefer another simple search over one overloaded search string.
+- For YouTrack, prefer `--state`, `--type`, and `--assigned-to` over manually encoding the same filters in `--query`.
 - Do not assume wildcard qualifier support such as `org:foo/bar-*`.
 - When search already returns the exact file you need, move to focused grep instead of dumping the whole repo.
 
@@ -201,6 +214,7 @@ Use `references/auth-troubleshooting.md` for env or credential setup and `refere
   - Azure DevOps: `project/repository:path`
   - GitHub: `org/repository:path`
   - GitLab: `group/repository:path`
+  - YouTrack: issue IDs like `RAD-1055` or the full issue URL
 - End with a `Sources` section.
 - In `Sources`, use exact provider paths unless the caller explicitly requires `repo:path`.
 - Multi-provider answers should be split by provider.
@@ -216,6 +230,7 @@ Use `references/auth-troubleshooting.md` for env or credential setup and `refere
   - Azure DevOps: export the PAT env var referenced by `<azdo-remote-name>` and run `az login` when required.
   - GitHub: export the token env var referenced by `<github-remote-name>` or `gh auth login`.
   - GitLab: export the token env var referenced by `<gitlab-remote-name>` or `glab auth login`.
+  - YouTrack: export the token env var referenced by `<youtrack-remote-name>`.
 - Use `SMITH_CONFIG=/path/to/config.yaml` when the target remotes live outside the default config path.
 
 Some benchmark harnesses expose only a GitHub subset such as `code search`, `<github-remote-name> code search`, `<github-remote-name> code grep`, `<github-remote-name> orgs`, and `<github-remote-name> repos`. In that environment, stay within the exposed subset instead of switching tools. The single enabled benchmark remote is often named `github`.

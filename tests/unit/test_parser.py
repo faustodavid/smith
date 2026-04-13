@@ -47,6 +47,15 @@ def _build_test_parser() -> object:
                     enabled=True,
                     api_url="https://gitlab-infra.example.com/api/v4",
                 ),
+                "youtrack": RemoteConfig(
+                    name="youtrack",
+                    provider="youtrack",
+                    org="",
+                    host="youtrack.example.com",
+                    token_env="YOUTRACK_TOKEN",
+                    enabled=True,
+                    api_url="https://youtrack.example.com/api",
+                ),
             },
             defaults={},
         )
@@ -91,6 +100,49 @@ def test_stories_group_parses_to_stories_command() -> None:
     assert args.remote_provider == "azdo"
     assert args.project == "SRE"
     assert args.id == 123
+
+
+def test_youtrack_stories_get_parser_accepts_string_id() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["youtrack", "stories", "get", "RAD-1055"])
+
+    assert args.command_id == "stories.get"
+    assert args.remote == "youtrack"
+    assert args.remote_provider == "youtrack"
+    assert args.project is None
+    assert args.repo is None
+    assert args.id == "RAD-1055"
+
+
+def test_youtrack_stories_get_parser_rejects_removed_no_images_flag() -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["youtrack", "stories", "get", "RAD-1055", "--no-images"])
+
+
+def test_youtrack_stories_search_and_mine_omit_repo_and_project() -> None:
+    parser = _build_test_parser()
+    search_args = parser.parse_args(["youtrack", "stories", "search", "--query", "patching flow"])
+    mine_args = parser.parse_args(["youtrack", "stories", "mine", "--include-closed"])
+
+    assert search_args.command_id == "stories.search"
+    assert search_args.project is None
+    assert search_args.repo is None
+    assert search_args.area is None
+    assert search_args.query == "patching flow"
+
+    assert mine_args.command_id == "stories.mine"
+    assert mine_args.project is None
+    assert mine_args.repo is None
+    assert mine_args.include_closed is True
+
+
+def test_youtrack_stories_search_rejects_hidden_area_flag() -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["youtrack", "stories", "search", "--query", "patching flow", "--area", "Ops"])
 
 
 @pytest.mark.parametrize("provider", ["azdo", "github"])
@@ -204,6 +256,23 @@ def test_gitlab_groups_parser_accepts_discovery_flags() -> None:
     ],
 )
 def test_non_gitlab_discovery_flags_and_groups_fail_to_parse(argv: list[str]) -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(argv)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["youtrack", "repos"],
+        ["youtrack", "orgs"],
+        ["youtrack", "code", "search", "patch"],
+        ["youtrack", "prs", "list", "repo-a"],
+        ["youtrack", "pipelines", "logs", "list", "42"],
+    ],
+)
+def test_youtrack_unsupported_groups_fail_to_parse(argv: list[str]) -> None:
     parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
@@ -430,6 +499,7 @@ def test_root_help_lists_new_command_tree(capsys: pytest.CaptureFixture[str]) ->
     assert "azdo" in output
     assert "github" in output
     assert "gitlab" in output
+    assert "youtrack" in output
     assert "cache" in output
     assert "config" in output
     assert "discover" not in output
@@ -452,6 +522,21 @@ def test_remote_help_lists_provider_commands(capsys: pytest.CaptureFixture[str])
     assert "prs" in output
     assert "pipelines" in output
     assert "stories" in output
+    assert "orgs" not in output
+
+
+def test_youtrack_remote_help_lists_only_stories(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["youtrack", "--help"])
+
+    output = capsys.readouterr().out
+    assert "stories" in output
+    assert "repos" not in output
+    assert "code" not in output
+    assert "prs" not in output
+    assert "pipelines" not in output
     assert "orgs" not in output
 
 

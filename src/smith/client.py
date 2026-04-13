@@ -18,6 +18,7 @@ from smith.providers.azdo import AzdoProvider
 from smith.providers.base import BaseProvider
 from smith.providers.github import GITHUB_DEFAULT_API_URL, GITHUB_DEFAULT_API_VERSION, GitHubProvider
 from smith.providers.gitlab import GITLAB_DEFAULT_API_URL, GitLabProvider
+from smith.providers.youtrack import YouTrackProvider
 
 _NO_REMOTES_CONFIGURED_MESSAGE = (
     "No remotes configured in ~/.config/smith/config.yaml. "
@@ -103,6 +104,13 @@ class SmithClient:
                 azdo_org=remote.org,
                 token_env=remote.token_env,
             )
+        elif remote.provider == "youtrack":
+            provider = YouTrackProvider(
+                config=self._runtime,
+                session=self._main_session,
+                youtrack_api_url=remote.api_url,
+                token_env=remote.token_env,
+            )
         else:
             raise ValueError(f"Unsupported provider: {remote.provider}")
 
@@ -117,6 +125,9 @@ class SmithClient:
 
     def _gitlab_provider(self, remote: RemoteConfig) -> GitLabProvider:
         return cast(GitLabProvider, self._get_provider_for_remote(remote))
+
+    def _youtrack_provider(self, remote: RemoteConfig) -> YouTrackProvider:
+        return cast(YouTrackProvider, self._get_provider_for_remote(remote))
 
     @staticmethod
     def _remote_warnings_and_partial(payload: Any) -> tuple[list[str], bool]:
@@ -168,6 +179,9 @@ class SmithClient:
         operations: dict[str, Callable[[RemoteConfig], Any]],
     ) -> dict[str, Any]:
         remotes = self._resolve_remotes(remote_or_provider)
+        if not remotes:
+            raise ValueError(f"No enabled remote found for '{remote_or_provider}'")
+        remotes = [remote for remote in remotes if remote.provider in operations]
         if not remotes:
             raise ValueError(f"No enabled remote found for '{remote_or_provider}'")
 
@@ -619,16 +633,34 @@ class SmithClient:
         remote_or_provider: str,
         project: str | None,
         repo: str | None,
-        work_item_id: int,
+        work_item_id: int | str,
     ) -> dict[str, Any]:
         target = self._require_single_target(remote_or_provider, command="stories.get")
         effective_repo = repo or project
+
+        def _numeric_work_item_id() -> int:
+            if isinstance(work_item_id, int):
+                return work_item_id
+            return int(work_item_id)
+
         return self._fanout(
             remote_or_provider=target,
             operations={
-                "azdo": lambda r: self._azdo_provider(r).get_ticket_by_id(project=str(project), work_item_id=work_item_id),
-                "github": lambda r: self._github_provider(r).get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
-                "gitlab": lambda r: self._gitlab_provider(r).get_ticket_by_id(repo=str(effective_repo), work_item_id=work_item_id),
+                "azdo": lambda r: self._azdo_provider(r).get_ticket_by_id(
+                    project=str(project),
+                    work_item_id=_numeric_work_item_id(),
+                ),
+                "github": lambda r: self._github_provider(r).get_ticket_by_id(
+                    repo=str(effective_repo),
+                    work_item_id=_numeric_work_item_id(),
+                ),
+                "gitlab": lambda r: self._gitlab_provider(r).get_ticket_by_id(
+                    repo=str(effective_repo),
+                    work_item_id=_numeric_work_item_id(),
+                ),
+                "youtrack": lambda r: self._youtrack_provider(r).get_ticket_by_id(
+                    work_item_id=work_item_id,
+                ),
             },
         )
 
@@ -680,6 +712,17 @@ class SmithClient:
                     take=take,
                     include_closed=True,
                 ),
+                "youtrack": lambda r: self._youtrack_provider(r).search_work_items(
+                    query=query,
+                    project=project,
+                    repo=repo,
+                    state=state,
+                    assigned_to=assigned_to,
+                    work_item_type=work_item_type,
+                    skip=skip,
+                    take=take,
+                    include_closed=True,
+                ),
             },
         )
 
@@ -711,6 +754,13 @@ class SmithClient:
                     take=take,
                 ),
                 "gitlab": lambda r: self._gitlab_provider(r).get_my_work_items(
+                    project=project,
+                    repo=repo,
+                    include_closed=include_closed,
+                    skip=skip,
+                    take=take,
+                ),
+                "youtrack": lambda r: self._youtrack_provider(r).get_my_work_items(
                     project=project,
                     repo=repo,
                     include_closed=include_closed,

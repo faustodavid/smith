@@ -331,6 +331,156 @@ def _render_board_ticket(data: Any) -> str:
     ])
 
 
+def _render_youtrack_ticket(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _render_board_ticket(data)
+
+    raw_metadata = data.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    raw_comments = data.get("comments")
+    comments = raw_comments if isinstance(raw_comments, list) else []
+    raw_links = data.get("links")
+    links = raw_links if isinstance(raw_links, list) else []
+    raw_attachments = data.get("attachments")
+    attachments = raw_attachments if isinstance(raw_attachments, list) else []
+    raw_timeline = data.get("timeline")
+    timeline = raw_timeline if isinstance(raw_timeline, list) else []
+
+    lines = [
+        f"id: {data.get('id')}",
+        f"title: {data.get('title') or ((data.get('fields') or {}).get('System.Title', ''))}",
+        f"url: {data.get('url') or ''}",
+    ]
+
+    core_metadata_keys = [
+        "Project",
+        "Type",
+        "State",
+        "Priority",
+        "Reporter",
+        "Updater",
+        "Created",
+        "Updated",
+        "Resolved",
+        "Votes",
+        "Comments",
+        "Tags",
+    ]
+    for key in core_metadata_keys:
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            lines.append(f"{key.lower()}: {value}")
+
+    extra_metadata_lines = []
+    for key, value in metadata.items():
+        if key in core_metadata_keys:
+            continue
+        rendered = str(value or "").strip() or "-"
+        extra_metadata_lines.append(f"{key}: {rendered}")
+    if extra_metadata_lines:
+        lines.extend(["", "--- metadata ---", *extra_metadata_lines])
+
+    description = str(data.get("description") or "").strip()
+    if description:
+        lines.extend(["", "--- description ---", description])
+
+    if attachments:
+        lines.extend(["", "--- attachments ---"])
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            details = [str(attachment.get("name") or "").strip()]
+            mime_type = str(attachment.get("mimeType") or "").strip()
+            if mime_type:
+                details.append(mime_type)
+            size = attachment.get("size")
+            if size not in (None, ""):
+                details.append(f"{size} bytes")
+            url = str(attachment.get("url") or "").strip()
+            line = " | ".join(part for part in details if part)
+            if url:
+                line = f"{line} | {url}" if line else url
+            if line:
+                lines.append(line)
+
+    if links:
+        lines.extend(["", "--- related items ---"])
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            link_name = str(link.get("type") or "Related").strip()
+            raw_issue_entries = link.get("issues")
+            issue_entries = raw_issue_entries if isinstance(raw_issue_entries, list) else []
+            rendered_issues = []
+            for issue in issue_entries:
+                if not isinstance(issue, dict):
+                    continue
+                issue_id = str(issue.get("id") or "").strip()
+                summary = str(issue.get("summary") or "").strip()
+                rendered_issues.append(f"{issue_id} {summary}".strip())
+            if rendered_issues:
+                lines.append(f"{link_name}: {' | '.join(rendered_issues)}")
+
+    if comments:
+        lines.extend(["", f"--- comments ({len(comments)}) ---"])
+        for index, comment in enumerate(comments, start=1):
+            if not isinstance(comment, dict):
+                continue
+            header_bits = [
+                f"[{index}]",
+                str(comment.get("author_display") or "unknown"),
+                str(comment.get("created") or "-"),
+            ]
+            raw_reactions = comment.get("reactions")
+            reactions = raw_reactions if isinstance(raw_reactions, list) else []
+            reaction_summary = ", ".join(
+                " ".join(
+                    part
+                    for part in [
+                        str(reaction.get("reaction") or "").strip(),
+                        (
+                            f"by {reaction.get('author_display')}"
+                            if str(reaction.get("author_display") or "").strip()
+                            else ""
+                        ),
+                    ]
+                    if part
+                )
+                for reaction in reactions
+                if isinstance(reaction, dict)
+            )
+            if reaction_summary:
+                header_bits.append(f"[reactions: {reaction_summary}]")
+            lines.append(" ".join(part for part in header_bits if part))
+            comment_text = str(comment.get("text") or "").strip()
+            if comment_text:
+                lines.append(comment_text)
+            raw_comment_attachments = comment.get("attachments")
+            comment_attachments = raw_comment_attachments if isinstance(raw_comment_attachments, list) else []
+            for attachment in comment_attachments:
+                if not isinstance(attachment, dict):
+                    continue
+                attachment_name = str(attachment.get("name") or "").strip()
+                attachment_url = str(attachment.get("url") or "").strip()
+                if attachment_name or attachment_url:
+                    lines.append(f"attachment: {attachment_name} {attachment_url}".strip())
+            lines.append("")
+        while lines and lines[-1] == "":
+            lines.pop()
+
+    if timeline:
+        lines.extend(["", f"--- timeline ({len(timeline)}) ---"])
+        for entry in timeline:
+            if not isinstance(entry, dict):
+                continue
+            timestamp = str(entry.get("timestamp") or "-")
+            author = str(entry.get("author_display") or "unknown")
+            action = str(entry.get("action") or "updated issue")
+            lines.append(f"{timestamp} {author}: {action}")
+
+    return "\n".join(lines)
+
+
 def _render_board_table(data: Any) -> str:
     rows = data.get("results", []) if isinstance(data, dict) else []
     lines = [_fmt_table_line(["id", "type", "state", "title"])]
@@ -352,6 +502,37 @@ def _render_board_table(data: Any) -> str:
     return "\n".join(lines)
 
 
+def _render_story_ticket(data: Any) -> str:
+    if isinstance(data, dict) and data.get("provider") == "youtrack":
+        return _render_youtrack_ticket(data)
+    return _render_board_ticket(data)
+
+
+def _render_story_table(data: Any) -> str:
+    if not isinstance(data, dict) or data.get("provider") != "youtrack":
+        return _render_board_table(data)
+
+    rows = data.get("results", []) if isinstance(data.get("results"), list) else []
+    lines = [_fmt_table_line(["id", "project", "type", "state", "title"])]
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            _fmt_table_line([
+                str(row.get("id", "")),
+                str(row.get("project") or row.get("project_name") or ""),
+                str(row.get("type", "")),
+                str(row.get("state", "")),
+                str(row.get("title", "")),
+            ])
+        )
+    if "returned_count" in data:
+        lines.append(f"returned_count: {data['returned_count']}")
+    if "has_more" in data:
+        lines.append(f"has_more: {data['has_more']}")
+    return "\n".join(lines)
+
+
 _RENDER_DISPATCH: dict[str, Any] = {
     "orgs": _render_name_list,
     "groups": _render_name_list,
@@ -365,9 +546,9 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "prs.get": _render_pr_get,
     "prs.threads": _render_pr_threads,
     "pipelines.logs.list": _render_build_logs,
-    "stories.get": _render_board_ticket,
-    "stories.search": _render_board_table,
-    "stories.mine": _render_board_table,
+    "stories.get": _render_story_ticket,
+    "stories.search": _render_story_table,
+    "stories.mine": _render_story_table,
 }
 
 

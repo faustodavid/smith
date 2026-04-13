@@ -170,8 +170,11 @@ def _add_ci_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--case-sensitive", action="store_true")
 
 
-def _add_work_search_filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--area")
+def _add_work_search_filters(parser: argparse.ArgumentParser, *, include_area: bool = True) -> None:
+    if include_area:
+        parser.add_argument("--area")
+    else:
+        parser.set_defaults(area=None)
     parser.add_argument("--type")
     parser.add_argument("--state")
     parser.add_argument("--assigned-to")
@@ -468,6 +471,9 @@ def _add_remote_stories_group(remote_subparsers: Any, *, remote: RemoteConfig) -
         stories_get.add_argument("repo", help="Repository name")
         stories_get.add_argument("id", type=int)
         stories_get.set_defaults(project=None)
+    elif remote.provider == "youtrack":
+        stories_get.add_argument("id", help="YouTrack issue ID (e.g. RAD-1055)")
+        stories_get.set_defaults(project=None, repo=None)
     else:
         stories_get.add_argument("repo", help="Full repository path (e.g. group/project)")
         stories_get.add_argument("id", type=int)
@@ -484,11 +490,14 @@ def _add_remote_stories_group(remote_subparsers: Any, *, remote: RemoteConfig) -
         stories_search.add_argument("repo", help="Repository name")
         stories_search.add_argument("--query", required=True)
         stories_search.set_defaults(project=None)
+    elif remote.provider == "youtrack":
+        stories_search.add_argument("--query", required=True)
+        stories_search.set_defaults(project=None, repo=None)
     else:
         stories_search.add_argument("repo", help="Full repository path (e.g. group/project)")
         stories_search.add_argument("--query", required=True)
         stories_search.set_defaults(project=None)
-    _add_work_search_filters(stories_search)
+    _add_work_search_filters(stories_search, include_area=remote.provider != "youtrack")
     _add_output_format(stories_search)
     _set_handler(stories_search, handle_work_search, "stories.search", primary_path="stories search")
 
@@ -499,6 +508,8 @@ def _add_remote_stories_group(remote_subparsers: Any, *, remote: RemoteConfig) -
     elif remote.provider == "github":
         stories_mine.add_argument("repo", help="Repository name")
         stories_mine.set_defaults(project=None)
+    elif remote.provider == "youtrack":
+        stories_mine.set_defaults(project=None, repo=None)
     else:
         stories_mine.add_argument("repo", help="Full repository path (e.g. group/project)")
         stories_mine.set_defaults(project=None)
@@ -518,6 +529,10 @@ def _add_remote_command_tree(root_subparsers: Any, *, remote: RemoteConfig) -> N
     _set_remote_defaults(remote_parser, remote=remote)
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command", required=True)
 
+    if remote.provider == "youtrack":
+        _add_remote_stories_group(remote_subparsers, remote=remote)
+        return
+
     _add_remote_repos_command(remote_subparsers, remote=remote)
     if remote.provider != "gitlab":
         _add_remote_orgs_command(remote_subparsers)
@@ -535,7 +550,7 @@ def build_parser(*, smith_config: SmithConfig | None = None) -> argparse.Argumen
     _CURRENT_REMOTE_HINT = remote_hint
     parser = SmithArgumentParser(
         prog="smith",
-        description="Smith Azure DevOps, GitHub, and GitLab read-only workflows with local credentials.",
+        description="Smith Azure DevOps, GitHub, GitLab, and YouTrack read-only workflows with local credentials.",
         remote_hint=remote_hint,
     )
     parser.add_argument(

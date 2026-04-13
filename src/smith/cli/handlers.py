@@ -524,11 +524,14 @@ def handle_ci_grep(client: SmithClient, args: argparse.Namespace) -> int:
 
 
 def handle_work_get(client: SmithClient, args: argparse.Namespace) -> int:
+    request_kwargs: dict[str, Any] = {
+        "remote_or_provider": _selected_target(args),
+        "project": getattr(args, "project", None),
+        "repo": getattr(args, "repo", None),
+        "work_item_id": args.id,
+    }
     data = client.execute_work_get(
-        remote_or_provider=_selected_target(args),
-        project=getattr(args, "project", None),
-        repo=getattr(args, "repo", None),
-        work_item_id=args.id,
+        **request_kwargs,
     )
     return _emit_success(
         args=args,
@@ -544,7 +547,7 @@ def handle_work_search(client: SmithClient, args: argparse.Namespace) -> int:
         query=args.query,
         project=getattr(args, "project", None),
         repo=getattr(args, "repo", None),
-        area=args.area,
+        area=getattr(args, "area", None),
         work_item_type=args.type,
         state=args.state,
         assigned_to=args.assigned_to,
