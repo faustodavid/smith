@@ -39,7 +39,7 @@ Smith returns just the matching lines with surrounding context. The agent gets e
 
 ### Compact search results
 
-`smith code search` returns `repo:/path` pointers, not file contents. The agent sees where matches live across every configured remote, then drills into only the relevant files. A single search can fan out to GitHub, GitLab, and Azure DevOps in parallel and return a unified result set.
+`smith code search` returns `repo:/path` pointers, without any extra metadata to keep the result set compact. The agent sees where matches live across every configured remote, then drills into only the relevant files. A single search can fan out to GitHub, GitLab, and Azure DevOps in parallel and return a unified result set.
 
 ### Grep pipeline logs too
 
