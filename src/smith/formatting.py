@@ -542,6 +542,7 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "code.grep": _render_grep,
     "cache.clean": _render_cache_clean,
     "pipelines.logs.grep": _render_grep,
+    "prs.search": _render_pr_list,
     "prs.list": _render_pr_list,
     "prs.get": _render_pr_get,
     "prs.threads": _render_pr_threads,

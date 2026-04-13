@@ -20,6 +20,68 @@ class GitHubPullRequestMixin:
             return "completed"
         return "abandoned"
 
+    @staticmethod
+    def _normalize_pr_statuses(statuses: list[str] | None) -> list[str]:
+        allowed_status = {"active", "completed", "abandoned"}
+        effective_status = statuses or ["active", "completed", "abandoned"]
+        normalized_status: list[str] = []
+        for status in effective_status:
+            lowered = status.strip().lower()
+            if lowered not in allowed_status:
+                raise ValueError("status must be one of: active, completed, abandoned")
+            if lowered not in normalized_status:
+                normalized_status.append(lowered)
+        return normalized_status
+
+    @staticmethod
+    def _search_issue_repo_name(issue: dict[str, Any]) -> str:
+        repository_url = str(issue.get("repository_url") or "").rstrip("/")
+        if not repository_url:
+            return ""
+        return repository_url.rsplit("/", 1)[-1]
+
+    def _pull_request_row(
+        self: Any,
+        *,
+        repo_name: str,
+        item: dict[str, Any],
+        status: str,
+        include_labels: bool,
+    ) -> dict[str, Any]:
+        closed_dt = parse_iso_datetime(item.get("closed_at"))
+        repository = (
+            (item.get("base") or {}).get("repo")
+            or (item.get("head") or {}).get("repo")
+            or {}
+        )
+        labels: list[str] = []
+        if include_labels:
+            for label in item.get("labels") or []:
+                if isinstance(label, dict):
+                    name = str(label.get("name") or "").strip()
+                    if name:
+                        labels.append(name)
+
+        return {
+            "pr_id": item.get("number"),
+            "title": item.get("title") or "",
+            "created_by": str((item.get("user") or {}).get("login") or ""),
+            "status": status,
+            "creation_date": item.get("created_at"),
+            "project_name": self._require_github_org(),
+            "repository_name": repo_name,
+            "repository_id": repository.get("id") or item.get("id"),
+            "closed_date": (
+                closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
+                if closed_dt
+                else None
+            ),
+            "source_branch": item.get("head", {}).get("ref"),
+            "target_branch": item.get("base", {}).get("ref"),
+            "target_ref": item.get("base", {}).get("ref"),
+            "labels": labels,
+        }
+
     def list_pull_requests(
         self: Any,
         *,
@@ -33,15 +95,7 @@ class GitHubPullRequestMixin:
         exclude_drafts: bool = False,
         include_labels: bool = False,
     ) -> dict[str, Any]:
-        allowed_status = {"active", "completed", "abandoned"}
-        effective_status = statuses or ["active", "completed", "abandoned"]
-        normalized_status: list[str] = []
-        for status in effective_status:
-            lowered = status.strip().lower()
-            if lowered not in allowed_status:
-                raise ValueError("status must be one of: active, completed, abandoned")
-            if lowered not in normalized_status:
-                normalized_status.append(lowered)
+        normalized_status = self._normalize_pr_statuses(statuses)
 
         repo_names = [item for item in (repos or []) if item]
         if not repo_names:
@@ -101,35 +155,13 @@ class GitHubPullRequestMixin:
                             continue
                         if to_dt and reference_dt and reference_dt > to_dt:
                             continue
-
-                        labels: list[str] = []
-                        if include_labels:
-                            for label in item.get("labels") or []:
-                                if isinstance(label, dict):
-                                    name = str(label.get("name") or "").strip()
-                                    if name:
-                                        labels.append(name)
-
                         output.append(
-                            {
-                                "pr_id": item.get("number"),
-                                "title": item.get("title") or "",
-                                "created_by": creator,
-                                "status": status,
-                                "creation_date": item.get("created_at"),
-                                "project_name": self._require_github_org(),
-                                "repository_name": repo_name,
-                                "repository_id": item.get("id"),
-                                "closed_date": (
-                                    closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
-                                    if closed_dt
-                                    else None
-                                ),
-                                "source_branch": item.get("head", {}).get("ref"),
-                                "target_branch": item.get("base", {}).get("ref"),
-                                "target_ref": item.get("base", {}).get("ref"),
-                                "labels": labels,
-                            }
+                            self._pull_request_row(
+                                repo_name=repo_name,
+                                item=item,
+                                status=status,
+                                include_labels=include_labels,
+                            )
                         )
 
                     if single_repo_mode and len(output) >= desired_count:
@@ -146,6 +178,141 @@ class GitHubPullRequestMixin:
                     page += 1
                 if single_repo_mode and len(output) >= desired_count:
                     break
+
+        output.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
+        paged = paginate_results(output, skip=skip, take=take)
+        has_more = len(output) > max(0, skip) + len(paged)
+        return {
+            "returned_count": len(paged),
+            "has_more": has_more,
+            "results": paged,
+        }
+
+    def search_pull_requests(
+        self: Any,
+        *,
+        query: str,
+        project: str | None = None,
+        repos: list[str] | None = None,
+        statuses: list[str] | None = None,
+        creators: list[str] | None = None,
+        date_from: str | datetime | None = None,
+        date_to: str | datetime | None = None,
+        skip: int = 0,
+        take: int = 20,
+        exclude_drafts: bool = False,
+        include_labels: bool = False,
+    ) -> dict[str, Any]:
+        del project
+        normalized_status = self._normalize_pr_statuses(statuses)
+
+        org = self._require_github_org()
+        repo_names = list(dict.fromkeys(str(item).strip().lower() for item in (repos or []) if str(item).strip()))
+        repo_filter = set(repo_names)
+        creator_filter = [item.lower() for item in creators or []]
+        from_dt = parse_iso_datetime(date_from)
+        to_dt = parse_iso_datetime(date_to)
+        desired_count = max(0, skip) + max(1, take) + 1
+        search_targets: list[str | None] = list(dict.fromkeys(repo_names)) if repo_names else [None]
+
+        per_page = 100
+        output: list[dict[str, Any]] = []
+        seen_pull_requests: set[tuple[str, str]] = set()
+
+        for repo_name in search_targets:
+            qualifiers: list[str] = [query.strip(), "is:pr"]
+            if repo_name:
+                qualifiers.append(f"repo:{org}/{repo_name}")
+            else:
+                qualifiers.append(f"org:{org}")
+            if normalized_status == ["active"]:
+                qualifiers.append("is:open")
+            elif all(status in {"completed", "abandoned"} for status in normalized_status):
+                qualifiers.append("is:closed")
+
+            page = 1
+            target_matches = 0
+            while True:
+                data = self._request_json(
+                    "GET",
+                    "/search/issues",
+                    params={
+                        "q": " ".join(item for item in qualifiers if item),
+                        "sort": "created",
+                        "order": "desc",
+                        "per_page": per_page,
+                        "page": page,
+                    },
+                )
+                issues = [item for item in data.get("items", []) if isinstance(item, dict)]
+                if not issues:
+                    break
+
+                for issue in issues:
+                    resolved_repo_name = self._search_issue_repo_name(issue)
+                    normalized_repo_name = resolved_repo_name.lower()
+                    if repo_filter and normalized_repo_name not in repo_filter:
+                        continue
+
+                    pr_info = issue.get("pull_request") or {}
+                    pr_url = str(pr_info.get("url") or "").strip()
+                    pr_number = issue.get("number")
+                    if resolved_repo_name and pr_number is not None:
+                        pr_path = f"{self._repo_prefix(resolved_repo_name)}/pulls/{pr_number}"
+                    elif pr_url:
+                        pr_path = pr_url
+                    else:
+                        continue
+
+                    pr_detail = self._request_json("GET", pr_path)
+                    merged_pr = dict(pr_detail)
+                    merged_pr.setdefault("labels", issue.get("labels"))
+                    merged_pr.setdefault("title", issue.get("title"))
+                    merged_pr.setdefault("user", issue.get("user"))
+                    merged_pr.setdefault("created_at", issue.get("created_at"))
+                    merged_pr.setdefault("closed_at", issue.get("closed_at"))
+
+                    status = self._pr_status(merged_pr)
+                    if status not in normalized_status:
+                        continue
+                    if exclude_drafts and bool(merged_pr.get("draft")):
+                        continue
+
+                    creator = str((merged_pr.get("user") or {}).get("login") or "")
+                    if creator_filter and not any(token in creator.lower() for token in creator_filter):
+                        continue
+
+                    created_dt = parse_iso_datetime(merged_pr.get("created_at"))
+                    merged_dt = parse_iso_datetime(merged_pr.get("merged_at"))
+                    closed_dt = parse_iso_datetime(merged_pr.get("closed_at"))
+                    reference_dt = (merged_dt or closed_dt) if status in {"completed", "abandoned"} else created_dt
+                    if from_dt and reference_dt and reference_dt < from_dt:
+                        continue
+                    if to_dt and reference_dt and reference_dt > to_dt:
+                        continue
+
+                    pr_key = (normalized_repo_name, str(merged_pr.get("number") or pr_number))
+                    if pr_key in seen_pull_requests:
+                        continue
+                    seen_pull_requests.add(pr_key)
+
+                    output.append(
+                        self._pull_request_row(
+                            repo_name=resolved_repo_name,
+                            item=merged_pr,
+                            status=status,
+                            include_labels=include_labels,
+                        )
+                    )
+                    target_matches += 1
+                    if target_matches >= desired_count:
+                        break
+
+                if target_matches >= desired_count:
+                    break
+                if len(issues) < per_page:
+                    break
+                page += 1
 
         output.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
         paged = paginate_results(output, skip=skip, take=take)

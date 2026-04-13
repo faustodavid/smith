@@ -290,6 +290,51 @@ def test_prs_list_parser_uses_canonical_command_id() -> None:
     assert args.repo == "repo-a"
 
 
+def test_global_prs_search_parser_defaults() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["prs", "search", "rollout"])
+
+    assert args.command_id == "prs.search"
+    assert args.remote == "all"
+    assert args.remote_provider == ""
+    assert args.query == "rollout"
+    assert args.project is None
+    assert args.repo is None
+    assert args.repos is None
+    assert args.take == 20
+
+
+@pytest.mark.parametrize(
+    ("argv", "provider", "project", "repos"),
+    [
+        (["azdo", "prs", "search", "rollout", "--project", "SRE", "--repo", "repo-a"], "azdo", "SRE", ["repo-a"]),
+        (["github", "prs", "search", "rollout"], "github", None, None),
+        (["gitlab", "prs", "search", "rollout"], "gitlab", None, None),
+        (
+            ["gitlab-infra", "prs", "search", "rollout", "--repo", "engineering-tools/repo-a"],
+            "gitlab",
+            None,
+            ["engineering-tools/repo-a"],
+        ),
+    ],
+)
+def test_remote_prs_search_parser_uses_expected_scope(
+    argv: list[str],
+    provider: str,
+    project: str | None,
+    repos: list[str] | None,
+) -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(argv)
+
+    assert args.command_id == "prs.search"
+    assert args.remote_provider == provider
+    assert args.project == project
+    assert args.repos == repos
+    assert args.query == "rollout"
+    assert args.take == 20
+
+
 def test_prs_get_parser_uses_canonical_command_id() -> None:
     parser = _build_test_parser()
     args = parser.parse_args(["github", "prs", "get", "repo-a", "42"])
