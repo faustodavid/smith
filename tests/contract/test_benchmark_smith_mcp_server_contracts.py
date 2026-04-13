@@ -7,6 +7,7 @@ from typing import Any
 from tests.support import GitHubApiStubServer, StubRequest, StubResponse
 
 from smith.benchmark import smith_mcp_server
+from smith.benchmark.smith_cli import InProcessSmithCliRunner
 
 
 def _benchmark_env(*, base_url: str) -> dict[str, str]:
@@ -72,6 +73,9 @@ def test_benchmark_smith_mcp_server_shares_backpressure_across_concurrent_calls(
         env = _benchmark_env(base_url=server.base_url)
         for key, value in env.items():
             monkeypatch.setenv(key, value)
+
+        # Reset the module-level runner so it's recreated with the patched environment
+        smith_mcp_server._RUNNER = InProcessSmithCliRunner()
 
         barrier = threading.Barrier(3)
         outputs: list[str] = []
