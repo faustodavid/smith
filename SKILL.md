@@ -37,6 +37,7 @@ Use the current CLI tree only:
 
 - Global:
   - `smith code search "<query>"`
+  - `smith prs search "<query>"`
   - `smith config <subcommand>`
   - `smith cache clean [--remote <configured-remote-name>|--remote all]`
 - Discovery:
@@ -55,6 +56,9 @@ Use the current CLI tree only:
   - `smith <github-remote-name> code grep <repo> "<regex>" [--no-clone]`
   - `smith <gitlab-remote-name> code grep <group/project> "<regex>" [--no-clone]`
 - Pull requests:
+  - `smith <azdo-remote-name> prs search "<query>" [--project <project>] [--repo <repo>]`
+  - `smith <github-remote-name> prs search "<query>" [--repo <repo>]`
+  - `smith <gitlab-remote-name> prs search "<query>" [--repo <group/project>]`
   - `smith <azdo-remote-name> prs list <project> <repo>`
   - `smith <github-remote-name> prs list <repo>`
   - `smith <gitlab-remote-name> prs list <group/project>`
@@ -73,8 +77,10 @@ Use the current CLI tree only:
 Representative command examples:
 
 - `smith code search "grafana loki retention"`
+- `smith prs search "grafana rollout" --status active --exclude-drafts`
 - `smith gitlab-infra groups --grep "^platform" --take 25`
 - `smith github-readonly code search "OPENAI_WEBHOOK_SECRET" --repo openai-python`
+- `smith github-readonly prs search "migration" --repo openai-python --creator alice`
 - `smith github-readonly prs list <repo>`
 - `smith gitlab-infra prs list <group/project>`
 - `smith github-readonly pipelines logs list <repo> <id>`
@@ -88,15 +94,16 @@ Do not invent legacy paths such as `discover`, `organizations`, `work`, `ci`, `b
 
 ## Remote Argument Rules
 
-All provider-specific commands use configured remote names as the leading positional argument. Only `code search`, `config`, and `cache` are global entry points.
+All provider-specific commands use configured remote names as the leading positional argument. Only `code search`, `prs search`, `config`, and `cache` are global entry points.
 
 - Azure DevOps remotes take `<project>` and, when needed, `<repo>`.
 - GitHub remotes take a bare `<repo>` slug without the org prefix, not `org/repo`.
 - GitLab remotes take full `group/project` paths.
 - YouTrack remotes take issue IDs and search filters only; they do not take project or repo arguments.
 - `smith code search` always searches all configured remotes.
-- To target one remote, use `smith <remote> code search "<query>"`.
-- Global `smith code search` does not accept `--remote`, `--project`, or `--repo`.
+- `smith prs search` always searches all configured remotes.
+- To target one remote, use `smith <remote> code search "<query>"` or `smith <remote> prs search "<query>"`.
+- Global `smith code search` and `smith prs search` do not accept `--remote`, `--project`, or `--repo`.
 
 Important GitHub repo-shape rule:
 
