@@ -167,6 +167,10 @@ Important pipeline ID rule:
    - Use `stories` for work-item or issue context.
 5. Report only what the retrieved evidence supports.
 
+## Stories and Image Context
+
+When retrieving a story via `smith <remote> stories get <id>`, extract image URLs from the description/comments, download them to `/tmp` on macOS/Linux or `%TEMP%` on Windows, and read the images for full context before analyzing.
+
 ## Query Discipline
 
 - Start code search with plain, high-signal terms.
