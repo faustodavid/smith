@@ -129,6 +129,76 @@ smith config path          # prints the path (~/.config/smith/config.yaml)
 $EDITOR ~/.config/smith/config.yaml
 ```
 
+Each remote gets a user-chosen name (like `github-public` or `azdo-main`) that you use as the first argument in provider-scoped commands:
+
+```yaml
+defaults:
+  timeout_seconds: 30
+  max_output_chars: 20000
+
+remotes:
+  github-public:
+    provider: github
+    org: acme
+    token_env: GITHUB_TOKEN
+    enabled: true
+
+  gitlab-platform:
+    provider: gitlab
+    group: acme/platform
+    token_env: GITLAB_TOKEN
+    enabled: true
+
+  azdo-main:
+    provider: azdo
+    org: acme
+    enabled: true
+
+  youtrack-main:
+    provider: youtrack
+    host: https://youtrack.acme.com
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+```
+
+Override the config path with `SMITH_CONFIG=/path/to/config.yaml`.
+
+For GitHub Enterprise, self-hosted GitLab, or YouTrack on a custom domain, add `host`:
+
+```yaml
+remotes:
+  github-enterprise:
+    provider: github
+    org: platform
+    host: github.acme.internal
+    token_env: GITHUB_ENTERPRISE_TOKEN
+    enabled: true
+
+  gitlab-self-hosted:
+    provider: gitlab
+    group: platform/backend
+    host: gitlab.acme.internal
+    token_env: GITLAB_SELF_HOSTED_TOKEN
+    enabled: true
+
+  youtrack-self-hosted:
+    provider: youtrack
+    host: https://youtrack.acme.internal
+    token_env: YOUTRACK_TOKEN
+    enabled: true
+```
+
+> **YouTrack note:** Set `host` to the service root URL. Smith appends `/api` automatically. If your instance is mounted under a subpath, use the full base URL.
+
+Manage remotes without editing the file:
+
+```bash
+smith config list                  # list all remotes and their status
+smith config show github-public    # show details for one remote
+smith config enable azdo-main      # enable a disabled remote
+smith config disable azdo-main     # disable a remote without removing it
+```
+
 ### 3. Set up authentication
 
 Smith reads tokens from environment variables. Set them for your session or, better, store them in your OS keychain so they persist securely:
@@ -172,84 +242,6 @@ smith code search "grafana"                                # search across all r
 smith github-public code grep my-repo "TODO" --path src    # targeted grep
 smith gitlab-platform repos --grep "^platform/"            # discover repos
 smith youtrack-main stories search --query "patch rollout" # find issues
-```
-
----
-
-## Configuration
-
-Smith reads remotes from `~/.config/smith/config.yaml`. Override the path with `SMITH_CONFIG=/path/to/config.yaml`.
-
-Each remote gets a user-chosen name (like `github-public` or `azdo-main`) that you use as the first argument in provider-scoped commands.
-
-### Example config
-
-```yaml
-defaults:
-  timeout_seconds: 30
-  max_output_chars: 20000
-
-remotes:
-  github-public:
-    provider: github
-    org: acme
-    token_env: GITHUB_TOKEN
-    enabled: true
-
-  gitlab-platform:
-    provider: gitlab
-    group: acme/platform
-    token_env: GITLAB_TOKEN
-    enabled: true
-
-  azdo-main:
-    provider: azdo
-    org: acme
-    enabled: true
-
-  youtrack-main:
-    provider: youtrack
-    host: https://youtrack.acme.com
-    token_env: YOUTRACK_TOKEN
-    enabled: true
-```
-
-### Self-hosted instances
-
-For GitHub Enterprise, self-hosted GitLab, or YouTrack on a custom domain, add `host`:
-
-```yaml
-remotes:
-  github-enterprise:
-    provider: github
-    org: platform
-    host: github.acme.internal
-    token_env: GITHUB_ENTERPRISE_TOKEN
-    enabled: true
-
-  gitlab-self-hosted:
-    provider: gitlab
-    group: platform/backend
-    host: gitlab.acme.internal
-    token_env: GITLAB_SELF_HOSTED_TOKEN
-    enabled: true
-
-  youtrack-self-hosted:
-    provider: youtrack
-    host: https://youtrack.acme.internal
-    token_env: YOUTRACK_TOKEN
-    enabled: true
-```
-
-> **YouTrack note:** Set `host` to the service root URL. Smith appends `/api` automatically. If your instance is mounted under a subpath, use the full base URL.
-
-### Managing remotes
-
-```bash
-smith config list                  # list all remotes and their status
-smith config show github-public    # show details for one remote
-smith config enable azdo-main      # enable a disabled remote
-smith config disable azdo-main     # disable a remote without removing it
 ```
 
 ---
