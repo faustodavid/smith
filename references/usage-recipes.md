@@ -73,6 +73,10 @@ smith <gitlab-remote-name> groups --grep "^platform" --take 25
 ## Pull Requests
 
 ```bash
+smith prs search "<query>" --status active --exclude-drafts
+smith <azdo-remote-name> prs search "<query>" [--project <project>] [--repo <repo>] --status active
+smith <github-remote-name> prs search "<query>" [--repo <repo>] --creator <user>
+smith <gitlab-remote-name> prs search "<query>" [--repo <group/project>] --date-from 2025-01-01
 smith <azdo-remote-name> prs list <project> <repo> --status active,completed --take 25
 smith <azdo-remote-name> prs get <project> <repo> <id>
 smith <azdo-remote-name> prs threads <project> <repo> <id>

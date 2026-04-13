@@ -12,6 +12,10 @@ glab auth status >/dev/null
 ```
 
 Required arguments:
+- Search global: `prs search "<query>" [--status <s>] [--creator <c>] [--date-from <d>] [--date-to <d>] [--exclude-drafts] [--include-labels]`
+- Search AZDO: `<azdo-remote-name> prs search "<query>" [--project <project>] [--repo <repo>] [filters]`
+- Search GitHub: `<github-remote-name> prs search "<query>" [--repo <repo>] [filters]`
+- Search GitLab: `<gitlab-remote-name> prs search "<query>" [--repo <group/project>] [filters]`
 - List AZDO: `<azdo-remote-name> prs list <project> <repo> [filters]`
 - List GitHub: `<github-remote-name> prs list <repo> [filters]`
 - List GitLab: `<gitlab-remote-name> prs list <group/project> [filters]`

@@ -212,6 +212,184 @@ def test_azdo_list_pull_requests_maps_filters_statuses_and_labels(monkeypatch: A
     assert calls[0]["params"]["searchCriteria.includeLabels"] == "true"
 
 
+def test_azdo_search_pull_requests_filters_query_and_maps_results(monkeypatch: Any) -> None:
+    provider = _provider()
+    active_pr = {
+        "pullRequestId": 1,
+        "title": "Rollout fix",
+        "description": "Fix the rollout flow",
+        "isDraft": False,
+        "creationDate": "2025-01-10T00:00:00Z",
+        "closedDate": None,
+        "createdBy": {"displayName": "alice", "uniqueName": "alice@example.com"},
+        "repository": {"name": "repo-a", "id": "repo-id"},
+        "sourceRefName": "refs/heads/feature",
+        "targetRefName": "refs/heads/main",
+        "labels": [{"name": "bug"}],
+    }
+    completed_pr = {
+        "pullRequestId": 2,
+        "title": "Completed change",
+        "description": "rollout completed successfully",
+        "isDraft": False,
+        "creationDate": "2025-01-09T00:00:00Z",
+        "closedDate": "2025-01-10T00:00:00Z",
+        "createdBy": {"displayName": "bob", "uniqueName": "bob@example.com"},
+        "repository": {"name": "repo-a", "id": "repo-id"},
+        "sourceRefName": "refs/heads/feature-two",
+        "targetRefName": "refs/heads/main",
+        "labels": [{"name": "enhancement"}],
+    }
+    unrelated_pr = {
+        "pullRequestId": 3,
+        "title": "Refactor",
+        "description": "cleanup only",
+        "isDraft": False,
+        "creationDate": "2025-01-08T00:00:00Z",
+        "closedDate": "2025-01-09T00:00:00Z",
+        "createdBy": {"displayName": "carol", "uniqueName": "carol@example.com"},
+        "repository": {"name": "repo-a", "id": "repo-id"},
+        "sourceRefName": "refs/heads/feature-three",
+        "targetRefName": "refs/heads/main",
+        "labels": [],
+    }
+
+    def _fake_request_json(method: str, url: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        status = (params or {}).get("searchCriteria.status")
+        if status == "active":
+            return {"value": [active_pr]}
+        if status == "completed":
+            return {"value": [completed_pr]}
+        if status == "abandoned":
+            return {"value": [unrelated_pr]}
+        return {"value": []}
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_pull_requests(
+        query="rollout",
+        project="proj-a",
+        repos=["repo-a"],
+        statuses=["active", "completed", "abandoned"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=10,
+        exclude_drafts=True,
+        include_labels=True,
+    )
+
+    assert result == {
+        "returned_count": 2,
+        "has_more": False,
+        "results": [
+            {
+                "pr_id": 1,
+                "title": "Rollout fix",
+                "created_by": "alice",
+                "status": "active",
+                "creation_date": "2025-01-10T00:00:00Z",
+                "project_name": "proj-a",
+                "repository_name": "repo-a",
+                "repository_id": "repo-id",
+                "closed_date": None,
+                "source_branch": "feature",
+                "target_branch": "main",
+                "target_ref": "refs/heads/main",
+                "labels": ["bug"],
+            },
+            {
+                "pr_id": 2,
+                "title": "Completed change",
+                "created_by": "bob",
+                "status": "completed",
+                "creation_date": "2025-01-09T00:00:00Z",
+                "project_name": "proj-a",
+                "repository_name": "repo-a",
+                "repository_id": "repo-id",
+                "closed_date": "2025-01-10",
+                "source_branch": "feature-two",
+                "target_branch": "main",
+                "target_ref": "refs/heads/main",
+                "labels": ["enhancement"],
+            },
+        ],
+    }
+
+
+def test_azdo_search_pull_requests_requires_project_for_repo_filters() -> None:
+    provider = _provider()
+
+    with pytest.raises(ValueError, match="Repository filter requires --project"):
+        provider.search_pull_requests(
+            query="rollout",
+            project=None,
+            repos=["repo-a"],
+            statuses=["active"],
+            creators=None,
+            date_from=None,
+            date_to=None,
+            skip=0,
+            take=10,
+            exclude_drafts=False,
+            include_labels=False,
+        )
+
+
+def test_azdo_search_pull_requests_dedupes_repo_filters(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+    active_pr = {
+        "pullRequestId": 1,
+        "title": "Rollout fix",
+        "description": "Fix the rollout flow",
+        "isDraft": False,
+        "creationDate": "2025-01-10T00:00:00Z",
+        "closedDate": None,
+        "createdBy": {"displayName": "alice", "uniqueName": "alice@example.com"},
+        "repository": {"name": "repo-a", "id": "repo-id"},
+        "sourceRefName": "refs/heads/feature",
+        "targetRefName": "refs/heads/main",
+        "labels": [],
+    }
+
+    def _fake_request_json(method: str, url: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "url": url, "params": params})
+        return {"value": [active_pr]}
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_pull_requests(
+        query="rollout",
+        project="proj-a",
+        repos=["repo-a", "repo-a"],
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=10,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert result["returned_count"] == 1
+    assert calls == [
+        {
+            "method": "GET",
+            "url": f"{provider.org_url}/proj-a/_apis/git/repositories/repo-a/pullrequests",
+            "params": {
+                "api-version": provider.api_version,
+                "searchCriteria.status": "active",
+                "$top": 10,
+                "$skip": 0,
+                "searchCriteria.queryTimeRangeType": "created",
+            },
+        }
+    ]
+
+
 def test_azdo_pull_request_views_build_logs_and_grep(monkeypatch: Any) -> None:
     provider = _provider()
 

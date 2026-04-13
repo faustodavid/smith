@@ -1374,6 +1374,252 @@ def test_gitlab_list_pull_requests_uses_combined_single_repo_stream_for_mixed_st
     ]
 
 
+def test_gitlab_search_pull_requests_uses_search_endpoint_and_maps_results(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    active_mr = {
+        "iid": 1,
+        "title": "Rollout fix",
+        "state": "opened",
+        "draft": False,
+        "author": {"username": "alice"},
+        "created_at": "2025-01-10T00:00:00Z",
+        "closed_at": None,
+        "merged_at": None,
+        "source_branch": "feature/rollout",
+        "target_branch": "main",
+        "labels": ["bug"],
+        "project_id": 101,
+        "references": {"full": "gitlab-org/repo-a!1"},
+    }
+    merged_mr = {
+        "iid": 2,
+        "title": "Merged rollout",
+        "state": "merged",
+        "draft": False,
+        "author": {"username": "bob"},
+        "created_at": "2025-01-09T00:00:00Z",
+        "closed_at": "2025-01-10T00:00:00Z",
+        "merged_at": "2025-01-10T00:00:00Z",
+        "source_branch": "feature/merged",
+        "target_branch": "main",
+        "labels": ["enhancement"],
+        "project_id": 102,
+        "references": {"full": "gitlab-org/repo-b!2"},
+    }
+    draft_mr = {
+        "iid": 3,
+        "title": "Draft rollout",
+        "state": "opened",
+        "draft": True,
+        "author": {"username": "carol"},
+        "created_at": "2025-01-08T00:00:00Z",
+        "closed_at": None,
+        "merged_at": None,
+        "source_branch": "feature/draft",
+        "target_branch": "main",
+        "labels": ["wip"],
+        "project_id": 103,
+        "references": {"full": "gitlab-org/repo-c!3"},
+    }
+
+    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        if path == "/groups/gitlab-org/merge_requests":
+            return [active_mr, merged_mr, draft_mr]
+        raise AssertionError(f"unexpected request: {method} {path} {params}")
+
+    monkeypatch.setattr(provider, "_request", _fake_request)
+
+    result = provider.search_pull_requests(
+        query="rollout",
+        repos=None,
+        statuses=["active", "completed"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=10,
+        exclude_drafts=True,
+        include_labels=True,
+    )
+
+    assert result == {
+        "returned_count": 2,
+        "has_more": False,
+        "results": [
+            {
+                "pr_id": 1,
+                "title": "Rollout fix",
+                "created_by": "alice",
+                "status": "active",
+                "creation_date": "2025-01-10T00:00:00Z",
+                "project_name": "gitlab-org",
+                "repository_name": "repo-a",
+                "repository_id": 101,
+                "closed_date": None,
+                "source_branch": "feature/rollout",
+                "target_branch": "main",
+                "target_ref": "main",
+                "labels": ["bug"],
+            },
+            {
+                "pr_id": 2,
+                "title": "Merged rollout",
+                "created_by": "bob",
+                "status": "completed",
+                "creation_date": "2025-01-09T00:00:00Z",
+                "project_name": "gitlab-org",
+                "repository_name": "repo-b",
+                "repository_id": 102,
+                "closed_date": "2025-01-10",
+                "source_branch": "feature/merged",
+                "target_branch": "main",
+                "target_ref": "main",
+                "labels": ["enhancement"],
+            },
+        ],
+    }
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/groups/gitlab-org/merge_requests",
+            "params": {
+                "state": "all",
+                "scope": "all",
+                "search": "rollout",
+                "order_by": "created_at",
+                "sort": "desc",
+                "per_page": 100,
+                "page": 1,
+            },
+        }
+    ]
+
+
+def test_gitlab_search_pull_requests_queries_all_requested_repos_before_paging(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    older_repo_a_mr = {
+        "iid": 1,
+        "title": "Older repo-a match",
+        "state": "opened",
+        "draft": False,
+        "author": {"username": "alice"},
+        "created_at": "2025-01-09T00:00:00Z",
+        "closed_at": None,
+        "merged_at": None,
+        "source_branch": "feature/a",
+        "target_branch": "main",
+        "labels": [],
+        "project_id": 101,
+    }
+    newer_repo_b_mr = {
+        "iid": 2,
+        "title": "Newer repo-b match",
+        "state": "opened",
+        "draft": False,
+        "author": {"username": "bob"},
+        "created_at": "2025-01-10T00:00:00Z",
+        "closed_at": None,
+        "merged_at": None,
+        "source_branch": "feature/b",
+        "target_branch": "main",
+        "labels": [],
+        "project_id": 102,
+    }
+
+    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        if path == "/projects/gitlab-org%2Frepo-a/merge_requests":
+            return [older_repo_a_mr]
+        if path == "/projects/gitlab-org%2Frepo-b/merge_requests":
+            return [newer_repo_b_mr]
+        raise AssertionError(f"unexpected request: {method} {path} {params}")
+
+    monkeypatch.setattr(provider, "_request", _fake_request)
+
+    result = provider.search_pull_requests(
+        query="rollout",
+        repos=["gitlab-org/repo-a", "gitlab-org/repo-b"],
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=1,
+        exclude_drafts=True,
+        include_labels=False,
+    )
+
+    assert result["results"] == [
+        {
+            "pr_id": 2,
+            "title": "Newer repo-b match",
+            "created_by": "bob",
+            "status": "active",
+            "creation_date": "2025-01-10T00:00:00Z",
+            "project_name": "gitlab-org",
+            "repository_name": "repo-b",
+            "repository_id": 102,
+            "closed_date": None,
+            "source_branch": "feature/b",
+            "target_branch": "main",
+            "target_ref": "main",
+            "labels": [],
+        }
+    ]
+    assert [call["path"] for call in calls] == [
+        "/projects/gitlab-org%2Frepo-a/merge_requests",
+        "/projects/gitlab-org%2Frepo-b/merge_requests",
+    ]
+
+
+def test_gitlab_search_pull_requests_dedupes_repo_filters(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+    repo_a_mr = {
+        "iid": 1,
+        "title": "Rollout fix",
+        "state": "opened",
+        "draft": False,
+        "author": {"username": "alice"},
+        "created_at": "2025-01-10T00:00:00Z",
+        "closed_at": None,
+        "merged_at": None,
+        "source_branch": "feature/a",
+        "target_branch": "main",
+        "labels": [],
+        "project_id": 101,
+    }
+
+    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        if path == "/projects/gitlab-org%2Frepo-a/merge_requests":
+            return [repo_a_mr]
+        raise AssertionError(f"unexpected request: {method} {path} {params}")
+
+    monkeypatch.setattr(provider, "_request", _fake_request)
+
+    result = provider.search_pull_requests(
+        query="rollout",
+        repos=["gitlab-org/repo-a", "gitlab-org/repo-a"],
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=10,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert result["returned_count"] == 1
+    assert [call["path"] for call in calls] == ["/projects/gitlab-org%2Frepo-a/merge_requests"]
+
+
 def test_gitlab_merge_request_views_build_logs_and_grep(monkeypatch: Any) -> None:
     provider = _provider()
 

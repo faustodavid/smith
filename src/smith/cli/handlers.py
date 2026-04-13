@@ -98,6 +98,8 @@ def validate_args_for_remote(args: argparse.Namespace) -> None:
     repo_filters = getattr(args, "repos", None)
     has_repo_filters = isinstance(repo_filters, list) and any(str(item or "").strip() for item in repo_filters)
     has_project_filter = bool(str(getattr(args, "project", "") or "").strip())
+    has_repo_arg = bool(str(getattr(args, "repo", "") or "").strip())
+    pr_statuses = getattr(args, "status", None)
 
     if command == "code.search" and not str(getattr(args, "query", "") or "").strip():
         raise ValueError('code search requires a query. Example: smith code search "grafana.*"')
@@ -105,17 +107,32 @@ def validate_args_for_remote(args: argparse.Namespace) -> None:
         raise ValueError("`smith code search` searches all remotes and does not support `--project`. Use `smith <remote> code search`.")
     if command == "code.search" and remote == "all" and has_repo_filters:
         raise ValueError("`smith code search` searches all remotes and does not support `--repo`. Use `smith <remote> code search`.")
+    if command == "prs.search" and not str(getattr(args, "query", "") or "").strip():
+        raise ValueError('prs search requires a query. Example: smith prs search "grafana rollout"')
+    if command == "prs.search" and remote == "all" and has_project_filter:
+        raise ValueError("`smith prs search` searches all remotes and does not support `--project`. Use `smith <remote> prs search`.")
+    if command == "prs.search" and remote == "all" and (has_repo_filters or has_repo_arg):
+        raise ValueError("`smith prs search` searches all remotes and does not support `--repo`. Use `smith <remote> prs search`.")
+    if command in {"prs.list", "prs.search"} and pr_statuses:
+        allowed_pr_statuses = {"active", "completed", "abandoned"}
+        for status in pr_statuses:
+            if str(status).strip().lower() not in allowed_pr_statuses:
+                raise ValueError("status must be one of: active, completed, abandoned")
 
     if not remote:
         return
 
-    if command != "code.search" and remote == "all":
+    if command not in {"code.search", "prs.search"} and remote == "all":
         raise ValueError(f"{command} does not support remote 'all'. Use a configured remote name.")
 
     if command == "code.search" and provider == "github" and str(getattr(args, "project", "") or "").strip():
         raise ValueError("GitHub code search does not support `--project`. Use `--repo` instead.")
     if command == "code.search" and provider == "gitlab" and str(getattr(args, "project", "") or "").strip():
         raise ValueError("GitLab code search does not support `--project`. Use `--repo` instead.")
+    if command == "prs.search" and provider == "github" and str(getattr(args, "project", "") or "").strip():
+        raise ValueError("GitHub PR search does not support `--project`. Use `--repo` instead.")
+    if command == "prs.search" and provider == "gitlab" and str(getattr(args, "project", "") or "").strip():
+        raise ValueError("GitLab PR search does not support `--project`. Use `--repo` instead.")
     if provider == "gitlab":
         repo = str(getattr(args, "repo", "") or "").strip()
         if repo and not _is_full_gitlab_repo_path(repo):
@@ -439,6 +456,29 @@ def handle_pr_list(client: SmithClient, args: argparse.Namespace) -> int:
         remote_or_provider=_selected_target(args),
         projects=projects,
         repos=repos,
+        statuses=args.status,
+        creators=args.creator,
+        date_from=args.date_from,
+        date_to=args.date_to,
+        skip=args.skip,
+        take=args.take,
+        exclude_drafts=args.exclude_drafts,
+        include_labels=args.include_labels,
+    )
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=data,
+        partial=_is_partial_result(data),
+    )
+
+
+def handle_pr_search(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_pr_search(
+        remote_or_provider=_selected_target(args),
+        query=args.query,
+        project=getattr(args, "project", None),
+        repos=getattr(args, "repos", None),
         statuses=args.status,
         creators=args.creator,
         date_from=args.date_from,

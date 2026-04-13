@@ -248,6 +248,7 @@ These work across all enabled remotes at once:
 
 ```bash
 smith code search "<query>"                     # search code across every enabled remote
+smith prs search "<query>"                      # search pull requests across every enabled remote
 smith config <init|path|list|show|enable|disable>
 smith cache clean [--remote <name>|--remote all]
 ```
@@ -278,12 +279,13 @@ smith <remote> code grep <repo> "<regex>"       # targeted grep in a repository
 #### Pull Requests / Merge Requests
 
 ```bash
+smith <remote> prs search "<query>"             # search PRs in one remote
 smith <remote> prs list <repo>                  # list PRs
 smith <remote> prs get <repo> <id>              # get PR details
 smith <remote> prs threads <repo> <id>          # get review comments
 ```
 
-Supports `--status`, `--creator`, `--date-from`, `--date-to`, `--skip`, `--take`, `--exclude-drafts`, and `--include-labels`.
+`prs search` and `prs list` support `--status`, `--creator`, `--date-from`, `--date-to`, `--skip`, `--take`, `--exclude-drafts`, and `--include-labels`.
 
 #### Pipelines
 

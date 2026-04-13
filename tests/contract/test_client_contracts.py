@@ -329,6 +329,38 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
             {"repo": "repo-a", "pull_request_id": 17},
         ),
         (
+            "execute_pr_search",
+            {
+                "remote_or_provider": "github",
+                "query": "rollout",
+                "project": None,
+                "repos": ["repo-a"],
+                "statuses": ["active"],
+                "creators": ["alice"],
+                "date_from": "2025-01-01T00:00:00Z",
+                "date_to": "2025-01-31T00:00:00Z",
+                "skip": 2,
+                "take": 5,
+                "exclude_drafts": True,
+                "include_labels": True,
+            },
+            "github",
+            "search_pull_requests",
+            {
+                "query": "rollout",
+                "project": None,
+                "repos": ["repo-a"],
+                "statuses": ["active"],
+                "creators": ["alice"],
+                "date_from": "2025-01-01T00:00:00Z",
+                "date_to": "2025-01-31T00:00:00Z",
+                "skip": 2,
+                "take": 5,
+                "exclude_drafts": True,
+                "include_labels": True,
+            },
+        ),
+        (
             "execute_ci_logs",
             {"remote_or_provider": "github", "project": "proj-a", "repo": None, "build_id": 19},
             "github",
@@ -501,6 +533,32 @@ def test_execute_methods_dispatch_to_remote_operations(
     remote_entry = result["remotes"][expected_provider]["data"]
     assert remote_entry["method"] == expected_method
     assert remote_entry["kwargs"] == expected_kwargs
+
+
+def test_execute_pr_search_fans_out_to_all_supported_providers(monkeypatch: Any) -> None:
+    runtime = make_runtime_config()
+    calls = _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
+
+    result = client.execute_pr_search(
+        remote_or_provider="all",
+        query="rollout",
+        project=None,
+        repos=None,
+        statuses=["active"],
+        creators=["alice"],
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=10,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert calls["run_fanout"] == {"remotes": ["github", "gitlab", "azdo"], "requested_remote": "all"}
+    assert result["remotes"]["github"]["data"]["method"] == "search_pull_requests"
+    assert result["remotes"]["gitlab"]["data"]["method"] == "search_pull_requests"
+    assert result["remotes"]["azdo"]["data"]["method"] == "search_pull_requests"
 
 
 def test_execute_discover_repos_for_azdo_project_calls_list_repositories(monkeypatch: Any) -> None:

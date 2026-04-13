@@ -63,6 +63,14 @@ def test_render_text_renders_prs_pipeline_and_story_views() -> None:
             "has_more": False,
         },
     )
+    pr_search = render_text(
+        "prs.search",
+        {
+            "results": [{"project_name": "proj", "repository_name": "repo", "pr_id": 18, "status": "completed", "title": "Search"}],
+            "returned_count": 1,
+            "has_more": False,
+        },
+    )
     pr_get = render_text(
         "prs.get",
         {
@@ -118,6 +126,12 @@ def test_render_text_renders_prs_pipeline_and_story_views() -> None:
     assert pr_list == (
         "project | repo | pr_id | status | title\n"
         "proj | repo | 17 | active | Fix\n"
+        "returned_count: 1\n"
+        "has_more: False"
+    )
+    assert pr_search == (
+        "project | repo | pr_id | status | title\n"
+        "proj | repo | 18 | completed | Search\n"
         "returned_count: 1\n"
         "has_more: False"
     )

@@ -22,6 +22,7 @@ from smith.cli.handlers import (
     handle_list_groups,
     handle_pr_get,
     handle_pr_list,
+    handle_pr_search,
     handle_pr_threads,
     handle_work_get,
     handle_work_mine,
@@ -138,7 +139,7 @@ def _add_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-clone", action="store_true", help="Skip local clone and fetch files via provider APIs instead")
 
 
-def _add_pr_list_filters(parser: argparse.ArgumentParser) -> None:
+def _add_pr_list_filters(parser: argparse.ArgumentParser, *, default_take: int = 100) -> None:
     parser.add_argument(
         "--status",
         type=_csv_list,
@@ -148,7 +149,7 @@ def _add_pr_list_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--date-from", help="ISO date/datetime lower bound")
     parser.add_argument("--date-to", help="ISO date/datetime upper bound")
     parser.add_argument("--skip", type=int, default=0)
-    parser.add_argument("--take", type=int, default=100)
+    parser.add_argument("--take", type=int, default=default_take)
     parser.add_argument("--exclude-drafts", action="store_true")
     parser.add_argument("--include-labels", action="store_true")
 
@@ -203,6 +204,22 @@ def _add_global_code_group(root_subparsers: Any) -> None:
     code_search.set_defaults(remote="all", remote_provider="", project=None, repos=None)
     _add_output_format(code_search)
     _set_handler(code_search, handle_code_search, "code.search", primary_path="code search")
+
+
+def _add_global_prs_group(root_subparsers: Any) -> None:
+    prs = _add_parser(root_subparsers, "prs", help_text="Search pull requests across all configured remotes")
+    prs_sub = prs.add_subparsers(dest="global_prs_action", required=True)
+
+    pr_search = _add_parser(
+        prs_sub,
+        "search",
+        help_text="Search pull requests across all configured remotes",
+    )
+    pr_search.add_argument("query", nargs="?", help="Search query text")
+    _add_pr_list_filters(pr_search, default_take=20)
+    pr_search.set_defaults(remote="all", remote_provider="", project=None, repo=None, repos=None)
+    _add_output_format(pr_search)
+    _set_handler(pr_search, handle_pr_search, "prs.search", primary_path="prs search")
 
 
 def _add_config_group(root_subparsers: Any) -> None:
@@ -371,8 +388,30 @@ def _add_remote_code_group(remote_subparsers: Any, *, remote: RemoteConfig) -> N
 
 
 def _add_remote_prs_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
-    prs = _add_parser(remote_subparsers, "prs", help_text="List, get, and read pull request comments")
+    prs = _add_parser(remote_subparsers, "prs", help_text="Search, list, get, and read pull request comments")
     pr_sub = prs.add_subparsers(dest="prs_action", required=True)
+
+    pr_search = _add_parser(pr_sub, "search", help_text="Search pull requests")
+    if remote.provider == "azdo":
+        pr_search.add_argument("--project", help="Azure DevOps project filter")
+    else:
+        pr_search.set_defaults(project=None)
+    pr_search.add_argument("query", nargs="?", help="Search query text")
+    pr_search.add_argument(
+        "--repo",
+        dest="repos",
+        action="append",
+        default=None,
+        metavar="REPO",
+        help=(
+            "Repository filter (repeatable)"
+            if remote.provider != "gitlab"
+            else "Full repository path filter (repeatable, e.g. group/project)"
+        ),
+    )
+    _add_pr_list_filters(pr_search, default_take=20)
+    _add_output_format(pr_search)
+    _set_handler(pr_search, handle_pr_search, "prs.search", primary_path="prs search")
 
     pr_list = _add_parser(pr_sub, "list", help_text="List pull requests")
     if remote.provider == "azdo":
@@ -564,6 +603,7 @@ def build_parser(*, smith_config: SmithConfig | None = None) -> argparse.Argumen
     root_subparsers = parser.add_subparsers(dest="root_command", required=True)
 
     _add_global_code_group(root_subparsers)
+    _add_global_prs_group(root_subparsers)
     _add_config_group(root_subparsers)
     _add_cache_group(root_subparsers, remotes=remotes)
     for remote in remotes:

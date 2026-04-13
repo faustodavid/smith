@@ -440,6 +440,67 @@ class SmithClient:
             },
         )
 
+    def execute_pr_search(
+        self,
+        *,
+        remote_or_provider: str,
+        query: str,
+        project: str | None,
+        repos: list[str] | None,
+        statuses: list[str] | None,
+        creators: list[str] | None,
+        date_from: str | datetime | None,
+        date_to: str | datetime | None,
+        skip: int,
+        take: int,
+        exclude_drafts: bool,
+        include_labels: bool,
+    ) -> dict[str, Any]:
+        return self._fanout(
+            remote_or_provider=remote_or_provider,
+            operations={
+                "azdo": lambda r: self._azdo_provider(r).search_pull_requests(
+                    query=query,
+                    project=project,
+                    repos=repos,
+                    statuses=statuses,
+                    creators=creators,
+                    date_from=date_from,
+                    date_to=date_to,
+                    skip=skip,
+                    take=take,
+                    exclude_drafts=exclude_drafts,
+                    include_labels=include_labels,
+                ),
+                "github": lambda r: self._github_provider(r).search_pull_requests(
+                    query=query,
+                    project=project,
+                    repos=repos,
+                    statuses=statuses,
+                    creators=creators,
+                    date_from=date_from,
+                    date_to=date_to,
+                    skip=skip,
+                    take=take,
+                    exclude_drafts=exclude_drafts,
+                    include_labels=include_labels,
+                ),
+                "gitlab": lambda r: self._gitlab_provider(r).search_pull_requests(
+                    query=query,
+                    project=project,
+                    repos=repos,
+                    statuses=statuses,
+                    creators=creators,
+                    date_from=date_from,
+                    date_to=date_to,
+                    skip=skip,
+                    take=take,
+                    exclude_drafts=exclude_drafts,
+                    include_labels=include_labels,
+                ),
+            },
+        )
+
     def execute_pr_list(
         self,
         *,

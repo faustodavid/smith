@@ -612,6 +612,290 @@ def test_github_list_pull_requests_maps_statuses_filters_and_labels(monkeypatch:
     assert calls[1]["params"]["state"] == "closed"
 
 
+def test_github_search_pull_requests_uses_issue_search_and_maps_results(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    search_items = [
+        {
+            "number": 1,
+            "title": "Rollout fix",
+            "repository_url": "https://api.github.com/repos/octo-org/repo-a",
+            "pull_request": {"url": "https://api.github.com/repos/octo-org/repo-a/pulls/1"},
+            "user": {"login": "alice"},
+            "created_at": "2025-01-10T00:00:00Z",
+            "closed_at": None,
+            "labels": [{"name": "bug"}],
+        },
+        {
+            "number": 2,
+            "title": "Draft rollout",
+            "repository_url": "https://api.github.com/repos/octo-org/repo-b",
+            "pull_request": {"url": "https://api.github.com/repos/octo-org/repo-b/pulls/2"},
+            "user": {"login": "bob"},
+            "created_at": "2025-01-09T00:00:00Z",
+            "closed_at": None,
+            "labels": [{"name": "wip"}],
+        },
+    ]
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        if path == "/search/issues":
+            return {"items": search_items}
+        if path == "/repos/octo-org/repo-a/pulls/1":
+            return {
+                "number": 1,
+                "title": "Rollout fix",
+                "state": "open",
+                "draft": False,
+                "user": {"login": "alice"},
+                "created_at": "2025-01-10T00:00:00Z",
+                "closed_at": None,
+                "merged_at": None,
+                "head": {"ref": "feature/rollout"},
+                "base": {"ref": "main", "repo": {"id": 501}},
+                "id": 1001,
+            }
+        if path == "/repos/octo-org/repo-b/pulls/2":
+            return {
+                "number": 2,
+                "title": "Draft rollout",
+                "state": "open",
+                "draft": True,
+                "user": {"login": "bob"},
+                "created_at": "2025-01-09T00:00:00Z",
+                "closed_at": None,
+                "merged_at": None,
+                "head": {"ref": "feature/draft"},
+                "base": {"ref": "main", "repo": {"id": 502}},
+                "id": 1002,
+            }
+        raise AssertionError(f"unexpected request: {method} {path} {params}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_pull_requests(
+        query="rollout",
+        repos=None,
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=10,
+        exclude_drafts=True,
+        include_labels=True,
+    )
+
+    assert result == {
+        "returned_count": 1,
+        "has_more": False,
+        "results": [
+            {
+                "pr_id": 1,
+                "title": "Rollout fix",
+                "created_by": "alice",
+                "status": "active",
+                "creation_date": "2025-01-10T00:00:00Z",
+                "project_name": "octo-org",
+                "repository_name": "repo-a",
+                "repository_id": 501,
+                "closed_date": None,
+                "source_branch": "feature/rollout",
+                "target_branch": "main",
+                "target_ref": "main",
+                "labels": ["bug"],
+            }
+        ],
+    }
+    assert calls[0] == {
+        "method": "GET",
+        "path": "/search/issues",
+        "params": {
+            "q": "rollout is:pr org:octo-org is:open",
+            "sort": "created",
+            "order": "desc",
+            "per_page": 100,
+            "page": 1,
+        },
+    }
+
+
+def test_github_search_pull_requests_queries_each_requested_repo(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    repo_a_issue = {
+        "number": 1,
+        "title": "Older repo-a match",
+        "repository_url": "https://api.github.com/repos/octo-org/repo-a",
+        "pull_request": {"url": "https://api.github.com/repos/octo-org/repo-a/pulls/1"},
+        "user": {"login": "alice"},
+        "created_at": "2025-01-09T00:00:00Z",
+        "closed_at": None,
+        "labels": [],
+    }
+    repo_b_issue = {
+        "number": 2,
+        "title": "Newer repo-b match",
+        "repository_url": "https://api.github.com/repos/octo-org/repo-b",
+        "pull_request": {"url": "https://api.github.com/repos/octo-org/repo-b/pulls/2"},
+        "user": {"login": "bob"},
+        "created_at": "2025-01-10T00:00:00Z",
+        "closed_at": None,
+        "labels": [],
+    }
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        if path == "/search/issues":
+            query = (params or {}).get("q")
+            if query == "rollout is:pr repo:octo-org/repo-a is:open":
+                return {"items": [repo_a_issue]}
+            if query == "rollout is:pr repo:octo-org/repo-b is:open":
+                return {"items": [repo_b_issue]}
+            raise AssertionError(f"unexpected search query: {query}")
+        if path == "/repos/octo-org/repo-a/pulls/1":
+            return {
+                "number": 1,
+                "title": "Older repo-a match",
+                "state": "open",
+                "draft": False,
+                "user": {"login": "alice"},
+                "created_at": "2025-01-09T00:00:00Z",
+                "closed_at": None,
+                "merged_at": None,
+                "head": {"ref": "feature/a"},
+                "base": {"ref": "main", "repo": {"id": 501}},
+                "id": 1001,
+            }
+        if path == "/repos/octo-org/repo-b/pulls/2":
+            return {
+                "number": 2,
+                "title": "Newer repo-b match",
+                "state": "open",
+                "draft": False,
+                "user": {"login": "bob"},
+                "created_at": "2025-01-10T00:00:00Z",
+                "closed_at": None,
+                "merged_at": None,
+                "head": {"ref": "feature/b"},
+                "base": {"ref": "main", "repo": {"id": 502}},
+                "id": 1002,
+            }
+        raise AssertionError(f"unexpected request: {method} {path} {params}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_pull_requests(
+        query="rollout",
+        repos=["repo-a", "repo-b"],
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=1,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert result["results"] == [
+        {
+            "pr_id": 2,
+            "title": "Newer repo-b match",
+            "created_by": "bob",
+            "status": "active",
+            "creation_date": "2025-01-10T00:00:00Z",
+            "project_name": "octo-org",
+            "repository_name": "repo-b",
+            "repository_id": 502,
+            "closed_date": None,
+            "source_branch": "feature/b",
+            "target_branch": "main",
+            "target_ref": "main",
+            "labels": [],
+        }
+    ]
+    assert calls[0] == {
+        "method": "GET",
+        "path": "/search/issues",
+        "params": {
+            "q": "rollout is:pr repo:octo-org/repo-a is:open",
+            "sort": "created",
+            "order": "desc",
+            "per_page": 100,
+            "page": 1,
+        },
+    }
+    assert calls[2] == {
+        "method": "GET",
+        "path": "/search/issues",
+        "params": {
+            "q": "rollout is:pr repo:octo-org/repo-b is:open",
+            "sort": "created",
+            "order": "desc",
+            "per_page": 100,
+            "page": 1,
+        },
+    }
+
+
+def test_github_search_pull_requests_dedupes_case_variant_repo_filters(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+    repo_a_issue = {
+        "number": 1,
+        "title": "Rollout fix",
+        "repository_url": "https://api.github.com/repos/octo-org/repo-a",
+        "pull_request": {"url": "https://api.github.com/repos/octo-org/repo-a/pulls/1"},
+        "user": {"login": "alice"},
+        "created_at": "2025-01-10T00:00:00Z",
+        "closed_at": None,
+        "labels": [],
+    }
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        if path == "/search/issues":
+            assert (params or {}).get("q") == "rollout is:pr repo:octo-org/repo-a is:open"
+            return {"items": [repo_a_issue]}
+        if path == "/repos/octo-org/repo-a/pulls/1":
+            return {
+                "number": 1,
+                "title": "Rollout fix",
+                "state": "open",
+                "draft": False,
+                "user": {"login": "alice"},
+                "created_at": "2025-01-10T00:00:00Z",
+                "closed_at": None,
+                "merged_at": None,
+                "head": {"ref": "feature/a"},
+                "base": {"ref": "main", "repo": {"id": 501}},
+                "id": 1001,
+            }
+        raise AssertionError(f"unexpected request: {method} {path} {params}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_pull_requests(
+        query="rollout",
+        repos=["Repo-A", "repo-a"],
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=10,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert result["returned_count"] == 1
+    assert [call["path"] for call in calls] == ["/search/issues", "/repos/octo-org/repo-a/pulls/1"]
+
+
 def test_github_get_pull_request_and_threads_map_review_data(monkeypatch: Any) -> None:
     provider = _provider()
     monkeypatch.setattr(

@@ -16,6 +16,75 @@ logger = logging.getLogger(__name__)
 
 
 class AzdoPullRequestMixin:
+    @staticmethod
+    def _normalize_pr_statuses(statuses: list[str] | None) -> list[str]:
+        allowed_status = {"active", "completed", "abandoned"}
+        effective_status = statuses or ["active", "completed", "abandoned"]
+        normalized_status: list[str] = []
+        for status in effective_status:
+            lowered = status.strip().lower()
+            if lowered not in allowed_status:
+                raise ValueError("status must be one of: active, completed, abandoned")
+            if lowered not in normalized_status:
+                normalized_status.append(lowered)
+        return normalized_status
+
+    @staticmethod
+    def _query_tokens(query: str | None) -> list[str]:
+        return [token for token in str(query or "").strip().lower().split() if token]
+
+    @classmethod
+    def _matches_pr_query(cls, item: dict[str, Any], query: str | None) -> bool:
+        tokens = cls._query_tokens(query)
+        if not tokens:
+            return True
+        searchable = " ".join([
+            str(item.get("title") or ""),
+            str(item.get("description") or ""),
+        ]).lower()
+        return all(token in searchable for token in tokens)
+
+    def _pull_request_row(
+        self: Any,
+        *,
+        project_name: str,
+        status: str,
+        item: dict[str, Any],
+        include_labels: bool,
+    ) -> dict[str, Any]:
+        repository = item.get("repository") or {}
+        closed_dt = parse_iso_datetime(item.get("closedDate"))
+        labels: list[str] = []
+        if include_labels:
+            for label in item.get("labels") or []:
+                if isinstance(label, dict):
+                    name = str(label.get("name") or "").strip()
+                    if name:
+                        labels.append(name)
+
+        created_by = item.get("createdBy") or {}
+        creator_display = str(created_by.get("displayName") or "")
+        creator_unique = str(created_by.get("uniqueName") or "")
+        return {
+            "pr_id": item.get("pullRequestId"),
+            "title": item.get("title") or "",
+            "created_by": creator_display or creator_unique,
+            "status": status,
+            "creation_date": item.get("creationDate"),
+            "project_name": project_name,
+            "repository_name": str(repository.get("name") or ""),
+            "repository_id": str(repository.get("id") or ""),
+            "closed_date": (
+                closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
+                if closed_dt
+                else None
+            ),
+            "source_branch": normalize_branch_name(item.get("sourceRefName")),
+            "target_branch": normalize_branch_name(item.get("targetRefName")),
+            "target_ref": item.get("targetRefName"),
+            "labels": labels,
+        }
+
     def list_pull_requests(
         self: Any,
         *,
@@ -30,22 +99,14 @@ class AzdoPullRequestMixin:
         exclude_drafts: bool = False,
         include_labels: bool = False,
     ) -> dict[str, Any]:
-        allowed_status = {"active", "completed", "abandoned"}
-        effective_status = statuses or ["active", "completed", "abandoned"]
-        normalized_status: list[str] = []
-        for status in effective_status:
-            lowered = status.strip().lower()
-            if lowered not in allowed_status:
-                raise ValueError("status must be one of: active, completed, abandoned")
-            if lowered not in normalized_status:
-                normalized_status.append(lowered)
+        normalized_status = self._normalize_pr_statuses(statuses)
 
         if projects:
             project_names = projects
         else:
             project_names = [entry["name"] for entry in self.list_projects() if entry.get("name")]
 
-        repo_targets = [repo for repo in repos or [] if repo]
+        repo_targets = list(dict.fromkeys(repo for repo in repos or [] if repo))
         repo_filter = {repo.lower() for repo in repo_targets}
         creator_filter = [creator.lower() for creator in creators or []]
 
@@ -126,35 +187,13 @@ class AzdoPullRequestMixin:
                                 continue
                             if to_dt and ref_dt and ref_dt > to_dt:
                                 continue
-
-                            labels: list[str] = []
-                            if include_labels:
-                                for label in item.get("labels") or []:
-                                    if isinstance(label, dict):
-                                        name = str(label.get("name") or "").strip()
-                                        if name:
-                                            labels.append(name)
-
                             results.append(
-                                {
-                                    "pr_id": item.get("pullRequestId"),
-                                    "title": item.get("title") or "",
-                                    "created_by": creator_display or creator_unique,
-                                    "status": status,
-                                    "creation_date": item.get("creationDate"),
-                                    "project_name": project_name,
-                                    "repository_name": repository_name,
-                                    "repository_id": repository_id,
-                                    "closed_date": (
-                                        closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
-                                        if closed_dt
-                                        else None
-                                    ),
-                                    "source_branch": normalize_branch_name(item.get("sourceRefName")),
-                                    "target_branch": normalize_branch_name(item.get("targetRefName")),
-                                    "target_ref": item.get("targetRefName"),
-                                    "labels": labels,
-                                }
+                                self._pull_request_row(
+                                    project_name=project_name,
+                                    status=status,
+                                    item=item,
+                                    include_labels=include_labels,
+                                )
                             )
 
                         if len(items) < page_size:
@@ -166,6 +205,133 @@ class AzdoPullRequestMixin:
         paged = paginate_results(results, skip=skip, take=take)
         has_more = total > max(0, skip) + len(paged)
 
+        return {
+            "returned_count": len(paged),
+            "has_more": has_more,
+            "results": paged,
+        }
+
+    def search_pull_requests(
+        self: Any,
+        *,
+        query: str,
+        project: str | None = None,
+        repos: list[str] | None = None,
+        statuses: list[str] | None = None,
+        creators: list[str] | None = None,
+        date_from: str | datetime | None = None,
+        date_to: str | datetime | None = None,
+        skip: int = 0,
+        take: int = 20,
+        exclude_drafts: bool = False,
+        include_labels: bool = False,
+    ) -> dict[str, Any]:
+        if repos and not project:
+            raise ValueError("Repository filter requires --project")
+        normalized_status = self._normalize_pr_statuses(statuses)
+
+        if project:
+            project_names = [project]
+        else:
+            project_names = [entry["name"] for entry in self.list_projects() if entry.get("name")]
+
+        repo_targets = list(dict.fromkeys(repo for repo in repos or [] if repo))
+        repo_filter = {repo.lower() for repo in repo_targets}
+        creator_filter = [creator.lower() for creator in creators or []]
+        from_dt = parse_iso_datetime(date_from)
+        to_dt = parse_iso_datetime(date_to)
+
+        results: list[dict[str, Any]] = []
+
+        for project_name in project_names:
+            repo_scopes: list[str | None] = list(repo_targets) if repo_targets else [None]
+            for repo_scope in repo_scopes:
+                for status in normalized_status:
+                    page_size = min(max(take, 1), 100)
+                    local_skip = 0
+                    if repo_scope:
+                        url = (
+                            f"{self.org_url}/{project_name}/_apis/git/repositories/"
+                            f"{quote(str(repo_scope), safe='')}/pullrequests"
+                        )
+                    else:
+                        url = f"{self.org_url}/{project_name}/_apis/git/pullrequests"
+                    while True:
+                        params: dict[str, Any] = {
+                            "api-version": self.api_version,
+                            "searchCriteria.status": status,
+                            "$top": page_size,
+                            "$skip": local_skip,
+                        }
+                        if include_labels:
+                            params["searchCriteria.includeLabels"] = "true"
+                        params["searchCriteria.queryTimeRangeType"] = (
+                            "closed" if status in {"completed", "abandoned"} else "created"
+                        )
+                        if from_dt:
+                            params["searchCriteria.minTime"] = from_dt.astimezone(UTC).strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            )
+                        if to_dt:
+                            params["searchCriteria.maxTime"] = to_dt.astimezone(UTC).strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            )
+
+                        data = self._request_json("GET", url, params=params)
+                        items = data.get("value", [])
+                        if not isinstance(items, list) or not items:
+                            break
+
+                        for item in items:
+                            if not isinstance(item, dict):
+                                continue
+                            if not self._matches_pr_query(item, query):
+                                continue
+                            if exclude_drafts and item.get("isDraft"):
+                                continue
+
+                            repository = item.get("repository") or {}
+                            repository_name = str(repository.get("name") or "")
+                            repository_id = str(repository.get("id") or "")
+                            if repo_scope is None and repo_filter:
+                                if (
+                                    repository_name.lower() not in repo_filter
+                                    and repository_id.lower() not in repo_filter
+                                ):
+                                    continue
+
+                            created_by = item.get("createdBy") or {}
+                            creator_display = str(created_by.get("displayName") or "")
+                            creator_unique = str(created_by.get("uniqueName") or "")
+                            if creator_filter:
+                                source = f"{creator_display} {creator_unique}".lower()
+                                if not any(token in source for token in creator_filter):
+                                    continue
+
+                            creation_dt = parse_iso_datetime(item.get("creationDate"))
+                            closed_dt = parse_iso_datetime(item.get("closedDate"))
+                            ref_dt = closed_dt if status in {"completed", "abandoned"} else creation_dt
+                            if from_dt and ref_dt and ref_dt < from_dt:
+                                continue
+                            if to_dt and ref_dt and ref_dt > to_dt:
+                                continue
+
+                            results.append(
+                                self._pull_request_row(
+                                    project_name=project_name,
+                                    status=status,
+                                    item=item,
+                                    include_labels=include_labels,
+                                )
+                            )
+
+                        if len(items) < page_size:
+                            break
+                        local_skip += page_size
+
+        results.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
+        paged = paginate_results(results, skip=skip, take=take)
+        has_more = len(results) > max(0, skip) + len(paged)
         return {
             "returned_count": len(paged),
             "has_more": has_more,

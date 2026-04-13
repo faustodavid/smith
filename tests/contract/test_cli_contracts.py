@@ -155,6 +155,13 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
          "does not support `--project`"),
         (_make_args(command_id="code.search", remote="all", remote_provider="", project=None, repos=["repo-a"]),
          "does not support `--repo`"),
+        (_make_args(command_id="prs.search", query="   ", repo=None, repos=None), "prs search requires a query"),
+        (_make_args(command_id="prs.search", remote="all", remote_provider="", project="proj-a", repo=None, repos=None),
+         "does not support `--project`"),
+        (_make_args(command_id="prs.search", remote="all", remote_provider="", project=None, repo=None, repos=["repo-a"]),
+         "does not support `--repo`"),
+        (_make_args(command_id="prs.search", remote="all", remote_provider="", project=None, status=["stale"], repo=None, repos=None),
+         "status must be one of"),
         (_make_args(command_id="code.search", remote="github", remote_provider="github", project="proj-a"),
          "GitHub code search does not support `--project`"),
         (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project="proj-a"),
@@ -162,6 +169,8 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
         (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project=None, repos=["repo-a"]),
          "GitLab repositories must use full `group/project` paths"),
         (_make_args(command_id="code.grep", remote="gitlab", remote_provider="gitlab", project=None, repo="repo-a"),
+         "GitLab repositories must use full `group/project` paths"),
+        (_make_args(command_id="prs.search", remote="gitlab", remote_provider="gitlab", project=None, repo=None, repos=["repo-a"]),
          "GitLab repositories must use full `group/project` paths"),
     ],
 )
@@ -175,6 +184,19 @@ def test_validate_args_for_remote_rejects_invalid_inputs(
 
 def test_validate_args_for_remote_allows_code_search_all() -> None:
     args = _make_args(command_id="code.search", remote="all", remote_provider="", project=None, repos=None)
+
+    handlers.validate_args_for_remote(args)
+
+
+def test_validate_args_for_remote_allows_prs_search_all() -> None:
+    args = _make_args(
+        command_id="prs.search",
+        remote="all",
+        remote_provider="",
+        project=None,
+        repo=None,
+        repos=None,
+    )
 
     handlers.validate_args_for_remote(args)
 
@@ -791,6 +813,96 @@ def test_handle_pr_list_branches_by_provider(
                 "remote_or_provider": provider,
                 "projects": expected_projects,
                 "repos": expected_repos,
+                "statuses": ["active"],
+                "creators": ["alice"],
+                "date_from": "2025-01-01T00:00:00Z",
+                "date_to": "2025-01-31T00:00:00Z",
+                "skip": 3,
+                "take": 7,
+                "exclude_drafts": True,
+                "include_labels": True,
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("provider", "project", "repos"),
+    [
+        ("azdo", "proj-a", ["repo-a"]),
+        ("github", None, ["repo-a"]),
+        ("gitlab", None, None),
+    ],
+)
+def test_handle_pr_search_branches_by_provider(
+    monkeypatch: Any,
+    capsys: Any,
+    provider: str,
+    project: str | None,
+    repos: list[str] | None,
+) -> None:
+    client = _RecordingClient(payload={"marker": provider})
+    args = _make_args(
+        command_id="prs.search",
+        remote=provider,
+        remote_provider=provider,
+        project=project,
+        repo=None,
+        repos=repos,
+    )
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
+
+    exit_code = handlers.handle_pr_search(client, args)
+    output = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert output.out.strip() == f"prs.search:{provider}"
+    assert client.calls == [
+        (
+            "execute_pr_search",
+            {
+                "remote_or_provider": provider,
+                "query": "grafana",
+                "project": project,
+                "repos": repos,
+                "statuses": ["active"],
+                "creators": ["alice"],
+                "date_from": "2025-01-01T00:00:00Z",
+                "date_to": "2025-01-31T00:00:00Z",
+                "skip": 3,
+                "take": 7,
+                "exclude_drafts": True,
+                "include_labels": True,
+            },
+        )
+    ]
+
+
+def test_handle_global_pr_search_uses_all_target(monkeypatch: Any, capsys: Any) -> None:
+    client = _RecordingClient(payload={"marker": "all"})
+    args = _make_args(
+        command_id="prs.search",
+        remote="all",
+        remote_provider="",
+        project=None,
+        repo=None,
+        repos=None,
+    )
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
+
+    exit_code = handlers.handle_pr_search(client, args)
+    output = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert output.out.strip() == "prs.search:all"
+    assert client.calls == [
+        (
+            "execute_pr_search",
+            {
+                "remote_or_provider": "all",
+                "query": "grafana",
+                "project": None,
+                "repos": None,
                 "statuses": ["active"],
                 "creators": ["alice"],
                 "date_from": "2025-01-01T00:00:00Z",
