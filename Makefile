@@ -1,4 +1,4 @@
-.PHONY: lint typecheck test-unit test-contract test-integration test check install
+.PHONY: lint typecheck test-unit test-contract test-integration test check install install-global
 
 lint:
 	ruff check .
@@ -23,3 +23,6 @@ check: lint typecheck test
 
 install:
 	python3 -m pip install -e ".[dev]"
+
+install-global:
+	bash scripts/install.sh

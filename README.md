@@ -77,25 +77,39 @@ Every command also supports `--format json` for machine consumption alongside th
 
 ### Prerequisites
 
-- **Python 3.12+**
-- **[uv](https://docs.astral.sh/uv/)** (recommended) or pip
+- **git**
+- **[uv](https://docs.astral.sh/uv/)**
 
-### Install with uv
+### Install from GitHub
 
 ```bash
-uv tool install --editable .
+curl -sSL https://raw.githubusercontent.com/faustodavid/smith/main/scripts/install.sh | bash
 ```
 
-This places the `smith` executable in `~/.local/bin`. If your shell doesn't find it, run:
+### Install from a local clone
 
 ```bash
-uv tool update-shell
+make install-global
+```
+
+The installer syncs Smith into `~/.agents/skills/smith` and installs the `smith` CLI with `uv` so it stays aligned with the checked-out repo.
+
+### Update
+
+```bash
+cd ~/.agents/skills/smith && git pull
 ```
 
 ### Verify
 
 ```bash
 smith --help
+```
+
+If your shell does not find `smith`, run:
+
+```bash
+uv tool update-shell
 ```
 
 ---
