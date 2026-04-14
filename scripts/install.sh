@@ -2,8 +2,9 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/faustodavid/smith.git"
-INSTALL_DIR="$HOME/.agents/skills/smith"
-SKILL_DIR="$INSTALL_DIR/skills/smith"
+REPO_DIR="$HOME/.local/share/smith"
+SKILL_DIR="$REPO_DIR/skills/smith"
+TARGET_SKILL_DIR="$HOME/.agents/skills/smith"
 
 echo "==> Smith installer"
 
@@ -19,26 +20,37 @@ if ! command -v git &>/dev/null; then
   exit 1
 fi
 
+mkdir -p "$HOME/.local/share"
 mkdir -p "$HOME/.agents/skills"
 
-if [[ -d "$INSTALL_DIR/.git" ]]; then
-  echo "==> Updating existing installation at $INSTALL_DIR"
-  cd "$INSTALL_DIR"
-  git pull --ff-only origin main
+if [[ -d "$REPO_DIR/.git" ]]; then
+  echo "==> Updating repo checkout at $REPO_DIR"
+  git -C "$REPO_DIR" pull --ff-only origin main
 else
-  echo "==> Cloning smith to $INSTALL_DIR"
-  git clone "$REPO_URL" "$INSTALL_DIR"
+  echo "==> Cloning smith to $REPO_DIR"
+  rm -rf "$REPO_DIR"
+  git clone "$REPO_URL" "$REPO_DIR"
 fi
 
+if [[ ! -d "$SKILL_DIR" ]]; then
+  echo "Error: skill directory not found after install: $SKILL_DIR" >&2
+  exit 1
+fi
+
+echo "==> Syncing skill to $TARGET_SKILL_DIR"
+rm -rf "$TARGET_SKILL_DIR"
+cp -R "$SKILL_DIR" "$TARGET_SKILL_DIR"
+
 echo "==> Installing smith CLI globally with uv"
-uv tool install -e "$INSTALL_DIR" --force
+uv tool install -e "$REPO_DIR" --force
 
 echo ""
 echo "✅ Smith installed successfully!"
 echo ""
-echo "  Location: $INSTALL_DIR"
-echo "  Skill:    $SKILL_DIR"
+echo "  Repo:     $REPO_DIR"
+echo "  Skill:    $TARGET_SKILL_DIR"
 echo "  CLI:      smith"
-echo "  Update:   cd $INSTALL_DIR && git pull"
+echo "  Update:   bash $REPO_DIR/scripts/install.sh"
 echo ""
 echo "Try: smith --help"
+
