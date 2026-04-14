@@ -4,18 +4,24 @@
 
 **The investigation CLI built for AI agents.**
 
-One tool to search code, grep files, inspect PRs, read pipelines, and track issues across GitHub, GitLab, Azure DevOps, and YouTrack — token-efficient, read-only, and agent-ready.
+One tool/skill to search code, grep files, inspect PRs, read pipelines, and track issues across GitHub, GitLab, Azure DevOps, and YouTrack — token-efficient, read-only, and agent-ready.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/faustodavid/smith)
 
 </div>
 
 ---
 
+Smith is a read-only investigation CLI and AI tool. With a single command, it searches code, greps files, and inspects PRs or pipelines across GitHub, GitLab, Azure DevOps, and YouTrack in parallel. Smith prioritizes efficiency, returning only the smallest useful result.
+<div align="center">
+  <img src="assets/smith_diagram_overview.jpg" alt="Smith architecture overview" width="700" />
+</div>
+
 ## The Problem
 
-AI coding agents need to investigate code across repositories. The existing approach — provider-specific MCPs like the GitHub MCP — wasn't designed for this.
+AI coding agents need to investigate code across repositories and multiple remotes. The existing approach — provider-specific MCPs like the GitHub MCP — wasn't designed for this.
 
 **Reading files is expensive.** Provider MCPs expose `get_file_contents`, which downloads the entire file. A Helm values file can be 2,000+ lines, but you only need the six lines under `resources.limits`. That's thousands of wasted tokens per read, and in an agentic loop, the agent may read dozens of files per investigation.
 
@@ -24,22 +30,38 @@ AI coding agents need to investigate code across repositories. The existing appr
 **Cross-platform investigations don't exist.** If the answer spans a GitHub repo, a GitLab pipeline, and a YouTrack ticket, the agent needs three different tools with three different interfaces. Most MCPs only cover one provider.
 
 ## How Smith Solves It
+### Crossed providers search
 
-Smith is a single CLI that replaces bloated provider MCPs for read operations. Every command is optimized to return **the smallest useful result** rather than the full raw API payload.
+You can start broad with a content search acrossed all your configured remotes. It will fans out and returns compact `repo:/path` pointers, so then the agent knows where to drill in.
+
+```bash
+$ smith code search "auth middleware"
+[github-public] matches: 3
+infra-helm/src/auth/middleware.go
+api-service/src/auth/middleware.ts
+web-app/src/auth/middleware.rs
+
+[gitlab-platform] matches: 2
+acme/platform/api/src/auth/middleware.go
+acme/platform/web/src/auth/middleware.ts
+
+[gitlab-internal] matches: 3
+acme/internal/auth/handler.go
+acme/internal/services/authentication.rs
+acme/internal/lib/auth.ts
+```
+
+This gives the model clear direction for the next step: targeted grep in the right repos.
 
 ### Grep instead of read
 
-Smith implements `code grep` across **every provider** — GitHub, GitLab, and Azure DevOps — with regex, path scoping, glob filters, context lines, and line ranges. Instead of downloading a 2,000-line Helm chart, the agent runs:
+Smith implements `code grep` across **every provider** — GitHub, GitLab, and Azure DevOps — with regex, path scoping, glob filters, context lines, and line ranges.
 
 ```bash
 smith github-public code grep infra-helm "resources:" --path charts/ --glob "*.yaml" --context-lines 5
 ```
 
 Smith returns just the matching lines with surrounding context. The agent gets exactly what it needs in a fraction of the tokens.
-
-### Compact search results
-
-`smith code search` returns `repo:/path` pointers, without any extra metadata to keep the result set compact. The agent sees where matches live across every configured remote, then drills into only the relevant files. A single search can fan out to GitHub, GitLab, and Azure DevOps in parallel and return a unified result set.
 
 ### Grep pipeline logs too
 
@@ -50,15 +72,19 @@ smith github-public pipelines logs grep my-repo 12345 "error|fatal" --context-li
 smith azdo-main pipelines logs grep SRE 6789 "timeout" --log-id 42
 ```
 
-### Local clone cache
 
-For repos that get grepped repeatedly, Smith shallow-clones the repo once and runs `git grep` locally on subsequent calls. This is dramatically faster than fetching files through the API on every invocation, and the cache auto-refreshes when it goes stale.
 
-### Built for agents, usable by humans
+## AI Skill
 
-Smith ships with `SKILL.md` — a structured prompt document that teaches LLM-powered editors how to drive Smith autonomously. Register it as a skill in Windsurf, Copilot, Codex, or Claude Code, and the agent learns the full command vocabulary, the broad-to-narrow investigation algorithm, failure recovery, and the answer format — no prompt engineering required.
+Smith was built for AI agents from the ground up. The `SKILL.md` file is a structured prompt document that gives any LLM-powered editor the full playbook:
 
-Every command also supports `--format json` for machine consumption alongside the default human-readable text output.
+- **Trigger decision** — when to reach for Smith vs. other tools
+- **Complete command vocabulary** — every valid CLI path with correct argument shapes per provider
+- **Investigation algorithm** — a deterministic broad-to-narrow workflow: discover scope → locate with search → extract proof with grep → corroborate with PRs/pipelines/stories → report with citations
+- **Failure recovery** — specific handlers for 401/403, 429, truncation, empty results, and wrong-repo misses
+- **Answer contract** — evidence-first format with exact path citations and a `Sources` section
+
+Register `SKILL.md` as a skill in your editor — Windsurf, GitHub Copilot, Codex, Claude Code — and the agent drives Smith commands autonomously.
 
 ---
 
@@ -323,19 +349,7 @@ smith <remote> stories mine                     # list my assigned items
 
 ---
 
-## AI Skill
 
-Smith was built for AI agents from the ground up. The `SKILL.md` file is a structured prompt document that gives any LLM-powered editor the full playbook:
-
-- **Trigger decision** — when to reach for Smith vs. other tools
-- **Complete command vocabulary** — every valid CLI path with correct argument shapes per provider
-- **Investigation algorithm** — a deterministic broad-to-narrow workflow: discover scope → locate with search → extract proof with grep → corroborate with PRs/pipelines/stories → report with citations
-- **Failure recovery** — specific handlers for 401/403, 429, truncation, empty results, and wrong-repo misses
-- **Answer contract** — evidence-first format with exact path citations and a `Sources` section
-
-Register `SKILL.md` as a skill in your editor — Windsurf, GitHub Copilot, Codex, Claude Code — and the agent drives Smith commands autonomously. No prompt engineering needed.
-
----
 
 ## Development
 
