@@ -14,6 +14,12 @@ One tool/skill to search code, grep files, inspect PRs, read pipelines, and trac
 
 ---
 
+Smith is a single CLI/skill that replaces bloated provider MCPs for read operations. Every command is optimized to return **the smallest useful result** rather than the full raw API payload.
+
+<div align="center">
+  <img src="assets/smith_diagram_overview.jpg" alt="Smith architecture overview" width="700" />
+</div>
+
 ## The Problem
 
 AI coding agents need to investigate code across repositories and multiple remotes. The existing approach — provider-specific MCPs like the GitHub MCP — wasn't designed for this.
@@ -25,13 +31,6 @@ AI coding agents need to investigate code across repositories and multiple remot
 **Cross-platform investigations don't exist.** If the answer spans a GitHub repo, a GitLab pipeline, and a YouTrack ticket, the agent needs three different tools with three different interfaces. Most MCPs only cover one provider.
 
 ## How Smith Solves It
-
-Smith is a single CLI that replaces bloated provider MCPs for read operations. Every command is optimized to return **the smallest useful result** rather than the full raw API payload.
-
-<div align="center">
-  <img src="assets/smith_diagram_overview.jpg" alt="Smith architecture overview" width="700" />
-</div>
-
 ### Crossed providers search
 
 You can start broad with a content search acrossed all your configured remotes. It will fans out and returns compact `repo:/path` pointers, so then the agent knows where to drill in.
