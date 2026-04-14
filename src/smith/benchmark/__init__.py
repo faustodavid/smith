@@ -13,8 +13,8 @@ from smith.benchmark.github_mcp import (
     resolve_github_mcp_token,
 )
 from smith.benchmark.grading import grade_run_directory
-from smith.benchmark.runtime import RUNTIME_SCENARIOS_PATH, load_runtime_scenarios, run_runtime_scenarios
 from smith.benchmark.runner import run_benchmark
+from smith.benchmark.runtime import RUNTIME_SCENARIOS_PATH, load_runtime_scenarios, run_runtime_scenarios
 
 __all__ = [
     "ALLOWED_GITHUB_MCP_TOOLS",
