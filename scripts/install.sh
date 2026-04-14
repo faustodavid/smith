@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/faustodavid/smith.git"
 INSTALL_DIR="$HOME/.agents/skills/smith"
+SKILL_DIR="$INSTALL_DIR/skills/smith"
 
 echo "==> Smith installer"
 
@@ -36,6 +37,7 @@ echo ""
 echo "✅ Smith installed successfully!"
 echo ""
 echo "  Location: $INSTALL_DIR"
+echo "  Skill:    $SKILL_DIR"
 echo "  CLI:      smith"
 echo "  Update:   cd $INSTALL_DIR && git pull"
 echo ""

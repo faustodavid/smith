@@ -124,7 +124,6 @@ smith <gitlab-remote-name> code grep <group/project> "<regex>" --format json
 export GITHUB_GREP_ENABLE_PARALLEL=true
 export GITHUB_GREP_MAX_WORKERS=8
 smith <github-remote-name> code grep <repo> "<regex>" --path <path> --glob "<glob>" --branch <branch>
-bash scripts/install_claude_commands.sh . copy
 ```
 
 If rate-limited or slow, lower workers or disable parallel fetch.

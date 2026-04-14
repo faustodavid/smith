@@ -76,7 +76,7 @@ smith azdo-main pipelines logs grep SRE 6789 "timeout" --log-id 42
 
 ## AI Skill
 
-Smith was built for AI agents from the ground up. The `SKILL.md` file is a structured prompt document that gives any LLM-powered editor the full playbook:
+Smith was built for AI agents from the ground up. The `skills/smith/SKILL.md` file is a structured prompt document that gives any LLM-powered editor the full playbook:
 
 - **Trigger decision** — when to reach for Smith vs. other tools
 - **Complete command vocabulary** — every valid CLI path with correct argument shapes per provider
@@ -84,7 +84,7 @@ Smith was built for AI agents from the ground up. The `SKILL.md` file is a struc
 - **Failure recovery** — specific handlers for 401/403, 429, truncation, empty results, and wrong-repo misses
 - **Answer contract** — evidence-first format with exact path citations and a `Sources` section
 
-Register `SKILL.md` as a skill in your editor — Windsurf, GitHub Copilot, Codex, Claude Code — and the agent drives Smith commands autonomously.
+Register `skills/smith/SKILL.md` as a skill in your editor — Windsurf, GitHub Copilot, Codex, Claude Code — and the agent drives Smith commands autonomously.
 
 ---
 
@@ -118,7 +118,7 @@ curl -sSL https://raw.githubusercontent.com/faustodavid/smith/main/scripts/insta
 make install-global
 ```
 
-The installer syncs Smith into `~/.agents/skills/smith` and installs the `smith` CLI with `uv` so it stays aligned with the checked-out repo.
+The installer syncs Smith into `~/.agents/skills/smith`, keeps the canonical skill at `~/.agents/skills/smith/skills/smith`, and installs the `smith` CLI with `uv` so it stays aligned with the checked-out repo.
 
 ### Update
 

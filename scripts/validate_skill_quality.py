@@ -8,14 +8,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-SKILL_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SKILL_DIR = REPO_ROOT / "skills" / "smith"
 SKILL_MD = SKILL_DIR / "SKILL.md"
 USAGE_RECIPES = SKILL_DIR / "references" / "usage-recipes.md"
 AUTH_TROUBLE = SKILL_DIR / "references" / "auth-troubleshooting.md"
 TRIGGER_CASES_DOC = SKILL_DIR / "references" / "trigger-cases.md"
 BEHAVIOR_GATES_DOC = SKILL_DIR / "references" / "behavioral-quality-gates.md"
 FAILURE_PLAYBOOK_DOC = SKILL_DIR / "references" / "failure-playbook.md"
-CLAUDE_COMMANDS_DIR = SKILL_DIR / "assets" / "claude-commands"
 
 def _candidate_roots() -> list[Path]:
     candidates: list[Path] = []
@@ -298,26 +298,6 @@ def run_behavior_checks() -> list[str]:
     for marker in command_markers:
         if marker not in recipes_text and marker not in skill_text:
             errors.append(f"Command coverage missing marker: {marker}")
-
-    templates = sorted(CLAUDE_COMMANDS_DIR.glob("smith-*.md"))
-    if len(templates) < 5:
-        errors.append("Expected at least 5 Claude command templates.")
-    required_template_terms = [
-        "Preflight",
-        "Required arguments",
-        "First command to run",
-        "If no results",
-        "Output contract",
-        "read-only",
-        "smith_cli.py",
-    ]
-    for template in templates:
-        content = _read(template)
-        for term in required_template_terms:
-            if term not in content:
-                errors.append(f"Template {template.name} missing '{term}'")
-        if not _has_evidence_path_contract(content):
-            errors.append(f"Template {template.name} missing evidence-path requirement")
 
     behavior_cases = _load_json(BEHAVIOR_FIXTURE)
     if not isinstance(behavior_cases, list) or not behavior_cases:
