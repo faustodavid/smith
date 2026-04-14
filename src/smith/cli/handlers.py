@@ -255,13 +255,68 @@ def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> 
             exit_code=EXIT_INVALID_ARGS,
         )
 
-    config = SmithConfig(remotes={}, defaults={})
-    save_config(config, config_path=path)
+    if args.output_format == "json":
+        config = SmithConfig(remotes={}, defaults={})
+        save_config(config, config_path=path)
+        return _emit_success(
+            args=args,
+            command=args.command_id,
+            data={"path": str(path), "remotes_count": 0},
+            partial=False,
+        )
 
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    from smith.cli.onboarding import (
+        _print_manual_setup_instructions,
+        run_interactive_init,
+    )
+
+    print("Welcome to Smith!")
+    print()
+    print("How would you like to configure your remotes?")
+    print("  1) Interactive setup")
+    print("  2) Manual setup (edit config.yaml yourself)")
+
+    while True:
+        try:
+            raw = input("Choice [1]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            raise SystemExit(1)
+        if not raw or raw == "1":
+            config = run_interactive_init(config_path=path)
+            return _emit_success(
+                args=args,
+                command=args.command_id,
+                data={"path": str(path), "remotes_count": len(config.remotes)},
+                partial=False,
+            )
+        if raw == "2":
+            config = SmithConfig(remotes={}, defaults={})
+            save_config(config, config_path=path)
+            _print_manual_setup_instructions(path)
+            return _emit_success(
+                args=args,
+                command=args.command_id,
+                data={"path": str(path), "remotes_count": 0},
+                partial=False,
+            )
+        print("  Enter 1 or 2.")
+
+
+def handle_config_edit(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    config = load_config()
+    path = _default_config_path()
+
+    from smith.cli.onboarding import run_interactive_edit
+
+    updated = run_interactive_edit(config, config_path=path)
     return _emit_success(
         args=args,
         command=args.command_id,
-        data={"path": str(path), "remotes_count": 0},
+        data={"path": str(path), "remotes_count": len(updated.remotes)},
         partial=False,
     )
 
