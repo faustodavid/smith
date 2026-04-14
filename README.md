@@ -8,6 +8,7 @@ One tool to search code, grep files, inspect PRs, read pipelines, and track issu
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/faustodavid/smith)
 
 </div>
 
