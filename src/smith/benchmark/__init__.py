@@ -14,6 +14,7 @@ from smith.benchmark.github_mcp import (
 )
 from smith.benchmark.grading import grade_run_directory
 from smith.benchmark.runner import run_benchmark
+from smith.benchmark.runtime import RUNTIME_SCENARIOS_PATH, load_runtime_scenarios, run_runtime_scenarios
 
 __all__ = [
     "ALLOWED_GITHUB_MCP_TOOLS",
@@ -23,9 +24,12 @@ __all__ = [
     "build_smith_copilot_payload",
     "github_mcp_tool_filter",
     "grade_run_directory",
+    "load_runtime_scenarios",
+    "RUNTIME_SCENARIOS_PATH",
     "resolve_codex_cli_path",
     "resolve_copilot_cli_path",
     "resolve_copilot_sdk_path",
     "resolve_github_mcp_token",
     "run_benchmark",
+    "run_runtime_scenarios",
 ]

@@ -45,8 +45,8 @@ from smith.benchmark.grading import grade_run_directory
 from smith.benchmark.smith_cli import InProcessSmithCliRunner, execute_smith_cli_command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-EVALS_PATH = REPO_ROOT / "evals" / "evals.json"
-SKILL_PATH = REPO_ROOT / "skills" / "smith" / "SKILL.md"
+EVALS_PATH = REPO_ROOT / "benchmarks" / "evals" / "smith_skill_cases.json"
+SKILL_PATH = REPO_ROOT / "SKILL.md"
 DEFAULT_WORKSPACE_ROOT = REPO_ROOT / "benchmarks" / "workspaces"
 CONFIG_ORDER = ("smith_skill", "github_mcp")
 
@@ -999,9 +999,10 @@ async def run_benchmark(
     workspace: Path | None = None,
     config: str = "all",
     executor: str = "openai",
+    evals_path: Path = EVALS_PATH,
 ) -> Path:
     selected_configs = normalize_config_selection(config)
-    all_evals = load_evals()
+    all_evals = load_evals(evals_path=evals_path)
     evals_run = resolve_eval_selection(all_evals, eval_ids)
     if not evals_run:
         raise ValueError("No evals selected.")

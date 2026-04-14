@@ -1,0 +1,51 @@
+{
+  "scenarios": [
+    {
+      "key": "code_search_webhook_secret",
+      "description": "smith code search \"OPENAI_WEBHOOK_SECRET\" --take 20",
+      "command": [
+        "smith",
+        "code",
+        "search",
+        "OPENAI_WEBHOOK_SECRET",
+        "--take",
+        "20"
+      ],
+      "target_improvement_pct": 20.0
+    },
+    {
+      "key": "code_grep_webhook_python",
+      "description": "smith github code grep openai-python \"OPENAI_WEBHOOK_SECRET|def unwrap|def verify_signature\" --path /src/openai --output-mode files_with_matches",
+      "command": [
+        "smith",
+        "github",
+        "code",
+        "grep",
+        "openai-python",
+        "OPENAI_WEBHOOK_SECRET|def unwrap|def verify_signature",
+        "--path",
+        "/src/openai",
+        "--output-mode",
+        "files_with_matches"
+      ],
+      "target_improvement_pct": 25.0
+    },
+    {
+      "key": "code_grep_webhook_node",
+      "description": "smith github code grep openai-node \"OPENAI_WEBHOOK_SECRET|unwrap|verifySignature\" --path /src --output-mode files_with_matches",
+      "command": [
+        "smith",
+        "github",
+        "code",
+        "grep",
+        "openai-node",
+        "OPENAI_WEBHOOK_SECRET|unwrap|verifySignature",
+        "--path",
+        "/src",
+        "--output-mode",
+        "files_with_matches"
+      ],
+      "target_improvement_pct": 15.0
+    }
+  ]
+}
