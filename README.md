@@ -28,6 +28,10 @@ AI coding agents need to investigate code across repositories and multiple remot
 
 Smith is a single CLI that replaces bloated provider MCPs for read operations. Every command is optimized to return **the smallest useful result** rather than the full raw API payload.
 
+<div align="center">
+  <img src="assets/smith_diagram_overview.jpg" alt="Smith architecture overview" width="700" />
+</div>
+
 ### Crossed providers search
 
 You can start broad with a content search acrossed all your configured remotes. It will fans out and returns compact `repo:/path` pointers, so then the agent knows where to drill in.
