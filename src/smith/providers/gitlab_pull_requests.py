@@ -367,6 +367,11 @@ class GitLabPullRequestMixin:
             for item in changes.get("changes", [])
             if isinstance(item, dict) and str(item.get("new_path") or item.get("old_path") or "").strip()
         ]
+        diffs = {
+            str(item.get("new_path") or item.get("old_path") or ""): str(item.get("diff") or "")
+            for item in changes.get("changes", [])
+            if isinstance(item, dict) and str(item.get("new_path") or item.get("old_path") or "").strip()
+        }
         threads_data = self.get_pull_request_threads(repo=repo, pull_request_id=pull_request_id)
         mapped_pr = {
             "pullRequestId": merge_request.get("iid") or merge_request.get("id"),
@@ -383,6 +388,7 @@ class GitLabPullRequestMixin:
             "pull_request": mapped_pr,
             "threads": threads_data.get("threads", []),
             "changed_files": changed_files,
+            "diffs": diffs,
         }
 
     def get_pull_request_threads(

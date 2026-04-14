@@ -335,6 +335,11 @@ class GitHubPullRequestMixin:
             limit=2000,
         )
         changed_files = [str(item.get("filename")) for item in files if item.get("filename")]
+        diffs = {
+            str(item.get("filename")): str(item.get("patch") or "")
+            for item in files
+            if item.get("filename")
+        }
         threads_data = self.get_pull_request_threads(repo=repo, pull_request_id=pull_request_id)
         mapped_pr = {
             "pullRequestId": pr.get("number"),
@@ -348,6 +353,7 @@ class GitHubPullRequestMixin:
             "pull_request": mapped_pr,
             "threads": threads_data.get("threads", []),
             "changed_files": changed_files,
+            "diffs": diffs,
         }
 
     def get_pull_request_threads(
