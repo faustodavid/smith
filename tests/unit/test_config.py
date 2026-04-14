@@ -194,7 +194,7 @@ def test_parse_runtime_config_falls_back_for_invalid_retry_backoff(monkeypatch: 
     assert runtime.http_retry_backoff_seconds == pytest.approx(0.4)
 
 
-def test_parse_runtime_config_github_org_ignores_legacy_env(monkeypatch: Any) -> None:
+def test_parse_runtime_config_github_org_ignores_removed_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("GITHUB_ORG", "env-gh-org")
 
     runtime = parse_runtime_config(
@@ -626,7 +626,7 @@ def test_save_config_omits_derived_github_api_url_override(tmp_path: Path) -> No
     assert "api_url" not in saved["remotes"]["github-enterprise"]
 
 
-def test_load_config_accepts_legacy_gitlab_group_field(tmp_path: Path) -> None:
+def test_load_config_rejects_invalid_gitlab_group_field(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         """
@@ -641,12 +641,11 @@ remotes:
         encoding="utf-8",
     )
 
-    config = load_config(config_path=config_path)
+    with pytest.raises(ValueError, match="invalid GitLab config field 'group'; use 'org'"):
+        load_config(config_path=config_path)
 
-    assert config.remotes["gitlab-infra"].org == "platform/subgroup"
 
-
-def test_save_config_persists_gitlab_group_when_present(tmp_path: Path) -> None:
+def test_save_config_persists_gitlab_org_when_present(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     save_config(
         SmithConfig(
@@ -669,8 +668,8 @@ def test_save_config_persists_gitlab_group_when_present(tmp_path: Path) -> None:
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     reloaded = load_config(config_path=config_path)
 
-    assert saved["remotes"]["gitlab-infra"]["group"] == "platform/subgroup"
-    assert "org" not in saved["remotes"]["gitlab-infra"]
+    assert saved["remotes"]["gitlab-infra"]["org"] == "platform/subgroup"
+    assert "group" not in saved["remotes"]["gitlab-infra"]
     assert reloaded.remotes["gitlab-infra"].org == "platform/subgroup"
 
 

@@ -171,7 +171,7 @@ remotes:
 
   gitlab-platform:
     provider: gitlab
-    group: acme/platform
+    org: acme/platform
     token_env: GITLAB_TOKEN
     enabled: true
 
@@ -202,7 +202,7 @@ remotes:
 
   gitlab-self-hosted:
     provider: gitlab
-    group: platform/backend
+    org: platform/backend
     host: gitlab.acme.internal
     token_env: GITLAB_SELF_HOSTED_TOKEN
     enabled: true
@@ -378,12 +378,11 @@ uv run python scripts/run_skill_benchmark.py --executor codex --model gpt-5.4 --
 
 # Run runtime/performance benchmarks
 uv run python scripts/run_runtime_benchmark.py --runs 3 --write-json benchmarks/runtime/baselines/local.json
+```
 
 Capability benchmark outputs land in `benchmarks/workspaces/<timestamp>/` and include `benchmark.json`, `benchmark.md`, per-run transcripts, timing data, grading artifacts, and auditable tool traces.
 
 Checked-in benchmark assets live under `benchmarks/evals/` and `benchmarks/runtime/`. Generated capability benchmark outputs stay under `benchmarks/workspaces/`, which is gitignored.
-
-The older `scripts/benchmark_smith_runtime.py` entrypoint remains as a thin compatibility wrapper over `scripts/run_runtime_benchmark.py`.
 
 The Codex capability benchmark executor creates an isolated `CODEX_HOME` and copies your `auth.json` from `~/.codex` (or `CODEX_AUTH_HOME`) so it never modifies your real desktop configuration.
 
