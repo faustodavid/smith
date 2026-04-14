@@ -449,6 +449,7 @@ def test_azdo_pull_request_views_build_logs_and_grep(monkeypatch: Any) -> None:
 
     assert pr["pull_request"] == {"pullRequestId": 17, "title": "Fix", "status": "active"}
     assert pr["changed_files"] == ["/src/app.py", "/src/util.py"]
+    assert pr["diffs"] == {}
     assert pr["threads"][0]["id"] == 1
     assert pr["threads"][0]["comments"][0]["author"] == {"displayName": "alice"}
     assert threads["returned_count"] == 1

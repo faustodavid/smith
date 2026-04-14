@@ -396,6 +396,7 @@ class AzdoPullRequestMixin:
             "pull_request": pr,
             "threads": threads,
             "changed_files": changed_files,
+            "diffs": {},
         }
 
     def get_pull_request_threads(

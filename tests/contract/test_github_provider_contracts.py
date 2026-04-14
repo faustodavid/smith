@@ -913,7 +913,10 @@ def test_github_get_pull_request_and_threads_map_review_data(monkeypatch: Any) -
     monkeypatch.setattr(
         provider,
         "_get_paginated_list",
-        lambda path, **kwargs: [{"filename": "src/app.py"}, {"filename": "src/util.py"}],
+        lambda path, **kwargs: [
+            {"filename": "src/app.py", "patch": "@@ -1 +1 @@\n-old\n+new"},
+            {"filename": "src/util.py", "patch": "@@ -1 +1 @@\n-before\n+after"},
+        ],
     )
     monkeypatch.setattr(provider, "get_pull_request_threads", lambda **kwargs: {"threads": [{"id": "review-1"}]})
 
@@ -930,6 +933,10 @@ def test_github_get_pull_request_and_threads_map_review_data(monkeypatch: Any) -
         },
         "threads": [{"id": "review-1"}],
         "changed_files": ["src/app.py", "src/util.py"],
+        "diffs": {
+            "src/app.py": "@@ -1 +1 @@\n-old\n+new",
+            "src/util.py": "@@ -1 +1 @@\n-before\n+after",
+        },
     }
 
     thread_provider = _provider()

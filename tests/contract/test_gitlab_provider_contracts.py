@@ -1634,7 +1634,12 @@ def test_gitlab_merge_request_views_build_logs_and_grep(monkeypatch: Any) -> Non
                 "target_branch": "main",
             }
         if path.endswith("/merge_requests/17/changes"):
-            return {"changes": [{"new_path": "src/app.py"}, {"new_path": "src/util.py"}]}
+            return {
+                "changes": [
+                    {"new_path": "src/app.py", "diff": "@@ -1 +1 @@\n-old\n+new"},
+                    {"new_path": "src/util.py", "diff": "@@ -1 +1 @@\n-before\n+after"},
+                ]
+            }
         if path.endswith("/pipelines/55"):
             return {
                 "id": 55,
@@ -1699,6 +1704,10 @@ def test_gitlab_merge_request_views_build_logs_and_grep(monkeypatch: Any) -> Non
         },
         "threads": threads["threads"],
         "changed_files": ["src/app.py", "src/util.py"],
+        "diffs": {
+            "src/app.py": "@@ -1 +1 @@\n-old\n+new",
+            "src/util.py": "@@ -1 +1 @@\n-before\n+after",
+        },
     }
     assert threads["returned_count"] == 2
     assert threads["total_comments"] == 2
