@@ -16,8 +16,7 @@ mypy src
 pytest -q
 ```
 
-## Compatibility Policy
+## Contract Stability
 
 - Keep CLI flags, positional args, and exit codes stable.
 - Preserve JSON envelope and text renderer contracts.
-- Preserve legacy script wrappers and import aliases.

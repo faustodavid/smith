@@ -44,7 +44,7 @@ remotes:
     enabled: true
   gitlab-platform:
     provider: gitlab
-    group: platform-team
+    org: platform-team
     token_env: GITLAB_TOKEN
     enabled: true
 """
@@ -175,7 +175,7 @@ def _collect_remote(existing_names: set[str]) -> RemoteConfig:
     if provider in {"github", "azdo"}:
         org = _prompt_text("Organization", required=True)
     elif provider == "gitlab":
-        org = _prompt_text("Group (optional, press Enter to skip)")
+        org = _prompt_text("Org / group path (optional, press Enter to skip)")
 
     default_host = _DEFAULT_HOSTS[provider]
     if provider == "youtrack":

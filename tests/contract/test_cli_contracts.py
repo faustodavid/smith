@@ -19,7 +19,7 @@ def _make_args(**overrides: Any) -> Namespace:
         "command_id": "orgs",
         "primary_path": "orgs",
         "alias_used": None,
-        "deprecated_flags": [],
+        "removed_flags": [],
         "query": "grafana",
         "github_org": None,
         "azdo_org": None,
