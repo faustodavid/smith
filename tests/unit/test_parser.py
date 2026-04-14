@@ -526,7 +526,7 @@ def test_grep_commands_fail_when_pattern_contract_is_not_met(argv: list[str]) ->
         ["ci", "logs", "azdo", "SRE", "42"],
     ],
 )
-def test_legacy_paths_fail_to_parse(argv: list[str]) -> None:
+def test_removed_paths_fail_to_parse(argv: list[str]) -> None:
     parser = _build_test_parser()
 
     with pytest.raises(SystemExit):

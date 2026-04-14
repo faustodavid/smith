@@ -90,7 +90,6 @@ Representative command examples:
 - `smith youtrack-main stories search --query "patch rollout" --state "In Progress"`
 - `smith youtrack-main stories get ID-1545`
 
-Do not invent legacy paths such as `discover`, `organizations`, `work`, `ci`, `board`, `stories ticket`, the removed root command `smith search`, root-first forms like `smith code grep <remote>`, or repo-scoped `code`/`prs`/`pipelines` commands for YouTrack.
 
 ## Remote Argument Rules
 

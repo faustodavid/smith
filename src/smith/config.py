@@ -286,6 +286,8 @@ def _validate_remote_dict(name: str, remote: dict[str, Any]) -> None:
         raise ValueError(
             f"Remote '{name}': provider must be one of github, gitlab, azdo, youtrack (got '{provider}')"
         )
+    if provider == "gitlab" and "group" in remote:
+        raise ValueError(f"Remote '{name}': invalid GitLab config field 'group'; use 'org'")
 
     if provider in {"github", "azdo"}:
         org = remote.get("org", "").strip()
@@ -324,8 +326,6 @@ def load_config(*, config_path: Path | None = None) -> SmithConfig:
 
         provider = remote["provider"].strip().lower()
         org = remote.get("org", "").strip()
-        if provider == "gitlab" and not org:
-            org = remote.get("group", "").strip()
         host = remote.get("host", "").strip()
         if not host:
             if provider == "github":
@@ -366,10 +366,8 @@ def save_config(config: SmithConfig, *, config_path: Path | None = None) -> None
             "provider": remote.provider,
             "enabled": remote.enabled,
         }
-        if remote.provider in {"github", "azdo"} and remote.org:
+        if remote.provider in {"github", "gitlab", "azdo"} and remote.org:
             remote_dict["org"] = remote.org
-        elif remote.provider == "gitlab" and remote.org:
-            remote_dict["group"] = remote.org
 
         if remote.host:
             if remote.provider == "github" and remote.host != "github.com":
