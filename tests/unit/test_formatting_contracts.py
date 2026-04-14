@@ -163,6 +163,46 @@ def test_render_text_renders_prs_pipeline_and_story_views() -> None:
     assert work_search == "id | type | state | title\n9 | Bug | Active | Fix login\nreturned_count: 1\nhas_more: False"
 
 
+def test_render_text_renders_pr_get_diffs_when_present() -> None:
+    rendered = render_text(
+        "prs.get",
+        {
+            "pull_request": {
+                "pullRequestId": 17,
+                "title": "Fix it",
+                "status": "active",
+                "createdBy": {"displayName": "alice"},
+                "sourceRefName": "refs/heads/feature",
+                "targetRefName": "refs/heads/main",
+            },
+            "threads": [],
+            "diffs": {
+                "src/app.py": "@@ -1 +1 @@\n-old\n+new",
+                "src/util.py": "@@ -2 +2 @@\n-before\n+after",
+            },
+        },
+    )
+
+    assert rendered == (
+        "id: 17\n"
+        "title: Fix it\n"
+        "status: active\n"
+        "creator: alice\n"
+        "source_branch: feature\n"
+        "target_branch: main\n"
+        "comments_threads: 0\n"
+        "diffs:\n"
+        "diff: src/app.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+        "diff: src/util.py\n"
+        "@@ -2 +2 @@\n"
+        "-before\n"
+        "+after"
+    )
+
+
 def test_render_text_code_search_shows_total_and_displayed_counts() -> None:
     rendered = render_text(
         "code.search",

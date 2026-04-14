@@ -255,7 +255,8 @@ def _render_pr_list(data: Any) -> str:
 def _render_pr_get(data: Any) -> str:
     pr = data.get("pull_request", {}) if isinstance(data, dict) else {}
     threads = data.get("threads", []) if isinstance(data, dict) else []
-    return "\n".join([
+    diffs = data.get("diffs", {}) if isinstance(data, dict) else {}
+    lines = [
         f"id: {pr.get('pullRequestId')}",
         f"title: {pr.get('title', '')}",
         f"status: {pr.get('status', '')}",
@@ -263,7 +264,20 @@ def _render_pr_get(data: Any) -> str:
         f"source_branch: {normalize_branch_name(pr.get('sourceRefName')) or ''}",
         f"target_branch: {normalize_branch_name(pr.get('targetRefName')) or ''}",
         f"comments_threads: {len(threads)}",
-    ])
+    ]
+    if isinstance(diffs, dict):
+        rendered_diffs: list[str] = []
+        for path, diff in diffs.items():
+            path_text = str(path or "").strip()
+            diff_text = str(diff or "").rstrip("\n")
+            if not path_text or not diff_text:
+                continue
+            rendered_diffs.append(f"diff: {path_text}")
+            rendered_diffs.extend(diff_text.splitlines())
+        if rendered_diffs:
+            lines.append("diffs:")
+            lines.extend(rendered_diffs)
+    return "\n".join(lines)
 
 
 def _render_pr_threads(data: Any) -> str:
