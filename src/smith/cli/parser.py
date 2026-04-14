@@ -12,6 +12,7 @@ from smith.cli.handlers import (
     handle_code_grep,
     handle_code_search,
     handle_config_disable,
+    handle_config_edit,
     handle_config_enable,
     handle_config_init,
     handle_config_list,
@@ -254,6 +255,16 @@ def _add_config_group(root_subparsers: Any) -> None:
         handle_config_init,
         "config.init",
         primary_path="config init",
+        requires_client=False,
+    )
+
+    config_edit = _add_parser(config_sub, "edit", help_text="Interactively add, edit, or remove remotes")
+    _add_output_format(config_edit)
+    _set_handler(
+        config_edit,
+        handle_config_edit,
+        "config.edit",
+        primary_path="config edit",
         requires_client=False,
     )
 
