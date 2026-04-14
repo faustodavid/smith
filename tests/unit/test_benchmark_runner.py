@@ -186,6 +186,7 @@ def test_aggregate_workspace_skips_missing_configs_for_single_config_run(tmp_pat
     )
 
     assert benchmark["metadata"]["configurations_run"] == ["smith_skill"]
+    assert benchmark["metadata"]["skill_path"].endswith("skills/smith/SKILL.md")
     assert "smith_skill" in benchmark["run_summary"]
     assert "github_mcp" not in benchmark["run_summary"]
     assert "delta" not in benchmark["run_summary"]

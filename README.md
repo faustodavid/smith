@@ -118,12 +118,12 @@ curl -sSL https://raw.githubusercontent.com/faustodavid/smith/main/scripts/insta
 make install-global
 ```
 
-The installer syncs Smith into `~/.agents/skills/smith`, keeps the canonical skill at `~/.agents/skills/smith/skills/smith`, and installs the `smith` CLI with `uv` so it stays aligned with the checked-out repo.
+The installer keeps a managed Smith repo checkout at `~/.local/share/smith`, mirrors `skills/smith` into `~/.agents/skills/smith`, and installs the `smith` CLI with `uv` from the managed repo checkout.
 
 ### Update
 
 ```bash
-cd ~/.agents/skills/smith && git pull
+bash ~/.local/share/smith/scripts/install.sh
 ```
 
 ### Verify
@@ -354,7 +354,7 @@ smith <remote> stories mine                     # list my assigned items
 Smith keeps three separate quality layers:
 
 - `scripts/validate_skill_quality.py`
-  - Validates the skill contract encoded in `SKILL.md`, `references/*`, and `tests/skills/smith/fixtures/*`.
+  - Validates the skill contract encoded in `skills/smith/SKILL.md`, `references/*`, and `tests/skills/smith/fixtures/*`.
 - `scripts/run_skill_benchmark.py`
   - Runs capability evals against representative investigation tasks defined in `benchmarks/evals/smith_skill_cases.json`.
 - `scripts/run_runtime_benchmark.py`

@@ -46,7 +46,7 @@ from smith.benchmark.smith_cli import InProcessSmithCliRunner, execute_smith_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EVALS_PATH = REPO_ROOT / "benchmarks" / "evals" / "smith_skill_cases.json"
-SKILL_PATH = REPO_ROOT / "SKILL.md"
+SKILL_PATH = REPO_ROOT / "skills" / "smith" / "SKILL.md"
 DEFAULT_WORKSPACE_ROOT = REPO_ROOT / "benchmarks" / "workspaces"
 CONFIG_ORDER = ("smith_skill", "github_mcp")
 
