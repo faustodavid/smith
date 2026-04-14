@@ -349,56 +349,43 @@ smith <remote> stories mine                     # list my assigned items
 
 ---
 
+## Quality Gates And Benchmarks
 
+Smith keeps three separate quality layers:
 
-## Development
-
-```bash
-uv sync --extra dev
-uv run ruff check .
-uv run mypy src
-uv run pytest -q
-```
-
-`pytest -q` runs the fast `unit` and `contract` tiers. Live integration tests are skipped by default.
-
-To run integration smoke tests (requires credentials and fixture IDs):
-
-```bash
-uv run pytest tests/integration -q --run-integration
-```
-
-### Environment variables for integration tests
-
-| Provider | Variables |
-|:---------|:---------|
-| **GitHub** | `GITHUB_ORG`, `GITHUB_TOKEN`, `SMITH_TEST_GITHUB_REPO`, `SMITH_TEST_GITHUB_PR_ID`, `SMITH_TEST_GITHUB_RUN_ID`, `SMITH_TEST_GITHUB_ISSUE_ID` |
-| **GitLab** | `GITLAB_GROUP`, `GITLAB_TOKEN`, `SMITH_TEST_GITLAB_REPO`, `SMITH_TEST_GITLAB_MR_ID`, `SMITH_TEST_GITLAB_PIPELINE_ID`, `SMITH_TEST_GITLAB_ISSUE_ID` |
-| **Azure DevOps** | `AZURE_DEVOPS_ORG`, `SMITH_TEST_AZDO_PROJECT`, `SMITH_TEST_AZDO_REPO`, `SMITH_TEST_AZDO_PR_ID`, `SMITH_TEST_AZDO_BUILD_ID`, `SMITH_TEST_AZDO_WORK_ITEM_ID` |
-
----
-
-## Benchmarks
-
-Smith includes an automated skill benchmark that evaluates how well AI agents use Smith on real investigation scenarios.
+- `scripts/validate_skill_quality.py`
+  - Validates the skill contract encoded in `SKILL.md`, `references/*`, and `tests/skills/smith/fixtures/*`.
+- `scripts/run_skill_benchmark.py`
+  - Runs capability evals against representative investigation tasks defined in `benchmarks/evals/smith_skill_cases.json`.
+- `scripts/run_runtime_benchmark.py`
+  - Measures CLI performance on fixed runtime scenarios defined in `benchmarks/runtime/scenarios.json`.
 
 ```bash
 uv sync --extra bench
 
-# Provide auth
+# Validate the skill contract/docs
+uv run python scripts/validate_skill_quality.py --mode all
+
+# Provide auth for capability benchmarks
 export GITHUB_TOKEN="ghp_..."          # optional if `gh auth login` is configured
 export OPENAI_API_KEY="sk-..."         # only for --executor openai
 codex login                            # only for --executor codex
 
-# Run with different executors
+# Run capability evals with different executors
 uv run python scripts/run_skill_benchmark.py --executor openai --model gpt-5 --runs 1
 uv run python scripts/run_skill_benchmark.py --executor copilot --model gpt-5.4 --runs 1
 uv run python scripts/run_skill_benchmark.py --executor codex --model gpt-5.4 --runs 1
-```
 
-Benchmark outputs land in `benchmarks/workspaces/<timestamp>/` and include `benchmark.json`, `benchmark.md`, per-run transcripts, timing data, grading artifacts, and auditable tool traces.
+# Run runtime/performance benchmarks
+uv run python scripts/run_runtime_benchmark.py --runs 3 --write-json benchmarks/runtime/baselines/local.json
 
-The Codex executor creates an isolated `CODEX_HOME` and copies your `auth.json` from `~/.codex` (or `CODEX_AUTH_HOME`) so it never modifies your real desktop configuration.
+Capability benchmark outputs land in `benchmarks/workspaces/<timestamp>/` and include `benchmark.json`, `benchmark.md`, per-run transcripts, timing data, grading artifacts, and auditable tool traces.
+
+Checked-in benchmark assets live under `benchmarks/evals/` and `benchmarks/runtime/`. Generated capability benchmark outputs stay under `benchmarks/workspaces/`, which is gitignored.
+
+The older `scripts/benchmark_smith_runtime.py` entrypoint remains as a thin compatibility wrapper over `scripts/run_runtime_benchmark.py`.
+
+The Codex capability benchmark executor creates an isolated `CODEX_HOME` and copies your `auth.json` from `~/.codex` (or `CODEX_AUTH_HOME`) so it never modifies your real desktop configuration.
 
 ---
 

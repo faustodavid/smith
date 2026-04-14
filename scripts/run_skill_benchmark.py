@@ -19,6 +19,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", required=True, help="Model identifier to use for both configurations.")
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3).")
     parser.add_argument(
+        "--evals-json",
+        help="Path to the skill benchmark eval dataset JSON. Defaults to benchmarks/evals/smith_skill_cases.json.",
+    )
+    parser.add_argument(
         "--eval-id",
         default="all",
         help="Eval id, comma-separated eval ids, or 'all' (default).",
@@ -43,11 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _main() -> int:
-    from smith.benchmark.runner import parse_eval_ids, run_benchmark
+    from smith.benchmark.runner import EVALS_PATH, parse_eval_ids, run_benchmark
 
     parser = build_parser()
     args = parser.parse_args()
 
+    evals_path = Path(args.evals_json).resolve() if args.evals_json else EVALS_PATH
     workspace = Path(args.workspace).resolve() if args.workspace else None
     selected_eval_ids = parse_eval_ids(args.eval_id)
     output_path = await run_benchmark(
@@ -57,6 +62,7 @@ async def _main() -> int:
         workspace=workspace,
         config=args.config,
         executor=args.executor,
+        evals_path=evals_path,
     )
     print(output_path)
     return 0
