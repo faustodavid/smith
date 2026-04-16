@@ -14,7 +14,7 @@ One tool/skill to search code, grep files, inspect PRs, read pipelines, and trac
 
 ---
 
-Smith is a read-only investigation CLI and AI tool. With a single command, it searches code, greps files, and inspects PRs or pipelines across GitHub, GitLab, Azure DevOps, and YouTrack in parallel. Smith prioritizes efficiency, returning only the smallest useful result.
+Smith is a read-only investigation CLI and AI tool. With a single command, it searches all your **remotes** code, greps files, and inspects PRs or pipelines across GitHub, GitLab, Azure DevOps, and YouTrack in parallel. Smith prioritizes efficiency, returning only the smallest useful result.
 <div align="center">
   <img src="assets/smith_diagram_overview.jpg" alt="Smith architecture overview" width="700" />
 </div>
