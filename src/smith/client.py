@@ -9,7 +9,13 @@ from typing import Any, Callable, Literal, cast
 
 import requests
 
-from smith.config import RemoteConfig, SmithConfig, load_config, parse_runtime_config
+from smith.config import (
+    RemoteConfig,
+    SmithConfig,
+    _default_config_path,
+    load_config,
+    parse_runtime_config,
+)
 from smith.discovery import DiscoveryQuery
 from smith.errors import SmithApiError, SmithAuthError, SmithError
 from smith.fanout import run_fanout
@@ -19,11 +25,6 @@ from smith.providers.base import BaseProvider
 from smith.providers.github import GITHUB_DEFAULT_API_URL, GITHUB_DEFAULT_API_VERSION, GitHubProvider
 from smith.providers.gitlab import GITLAB_DEFAULT_API_URL, GitLabProvider
 from smith.providers.youtrack import YouTrackProvider
-
-_NO_REMOTES_CONFIGURED_MESSAGE = (
-    "No remotes configured in ~/.config/smith/config.yaml. "
-    "Add at least one remote under `remotes:` or run `smith config init`."
-)
 
 
 class SmithClient:
@@ -49,7 +50,10 @@ class SmithClient:
         )
 
         if not self._config.remotes:
-            raise ValueError(_NO_REMOTES_CONFIGURED_MESSAGE)
+            raise ValueError(
+                f"No remotes configured in {_default_config_path()}. "
+                "Add at least one remote under `remotes:` or run `smith config init`."
+            )
 
         main_session = session or requests.Session()
         configure_http_session(
