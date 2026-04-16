@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-python -m pip install -e .[dev]
+python3 -m pip install -e .[dev]
 ```
 
 ## Quality Gates

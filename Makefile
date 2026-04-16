@@ -25,4 +25,4 @@ install:
 	python3 -m pip install -e ".[dev]"
 
 install-global:
-	bash scripts/install.sh
+	python3 scripts/install.py
