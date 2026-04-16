@@ -108,14 +108,22 @@ Register `skills/smith/SKILL.md` as a skill in your editor — Windsurf, GitHub 
 
 ### Install from GitHub
 
+**macOS / Linux**:
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/faustodavid/smith/main/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/faustodavid/smith/main/scripts/install.py | python3
+```
+
+**Windows (PowerShell)**:
+
+```powershell
+irm https://raw.githubusercontent.com/faustodavid/smith/main/scripts/install.py | python -
 ```
 
 ### Install from a local clone
 
 ```bash
-make install-global
+python3 scripts/install.py
 ```
 
 The installer keeps a managed Smith repo checkout at `~/.local/share/smith`, mirrors `skills/smith` into `~/.agents/skills/smith`, and installs the `smith` CLI with `uv` from the managed repo checkout.
@@ -123,7 +131,7 @@ The installer keeps a managed Smith repo checkout at `~/.local/share/smith`, mir
 ### Update
 
 ```bash
-bash ~/.local/share/smith/scripts/install.sh
+python3 ~/.local/share/smith/scripts/install.py
 ```
 
 ### Verify
@@ -132,11 +140,7 @@ bash ~/.local/share/smith/scripts/install.sh
 smith --help
 ```
 
-If your shell does not find `smith`, run:
-
-```bash
-uv tool update-shell
-```
+The installer runs `uv tool update-shell` for you, but you may need to **restart your shell** (or open a new terminal) for PATH changes to take effect — especially on Windows, where `uv` writes the update to the user PATH in the registry.
 
 ---
 
