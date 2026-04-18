@@ -396,6 +396,7 @@ class SmithClient:
         from_line: int | None,
         to_line: int | None,
         no_clone: bool,
+        reverse: bool = False,
     ) -> dict[str, Any]:
         target = self._require_single_target(remote_or_provider, command="code.grep")
         return self._fanout(
@@ -413,6 +414,7 @@ class SmithClient:
                     context_lines=context_lines,
                     from_line=from_line,
                     to_line=to_line,
+                    reverse=reverse,
                     no_clone=no_clone,
                 ),
                 "github": lambda r: self._github_provider(r).grep(
@@ -426,6 +428,7 @@ class SmithClient:
                     context_lines=context_lines,
                     from_line=from_line,
                     to_line=to_line,
+                    reverse=reverse,
                     no_clone=no_clone,
                 ),
                 "gitlab": lambda r: self._gitlab_provider(r).grep(
@@ -439,6 +442,7 @@ class SmithClient:
                     context_lines=context_lines,
                     from_line=from_line,
                     to_line=to_line,
+                    reverse=reverse,
                     no_clone=no_clone,
                 ),
             },
@@ -650,6 +654,7 @@ class SmithClient:
         context_lines: int | None,
         from_line: int | None,
         to_line: int | None,
+        reverse: bool = False,
     ) -> dict[str, Any]:
         target = self._require_single_target(remote_or_provider, command="pipelines.logs.grep")
         effective_repo = repo or project
@@ -666,6 +671,7 @@ class SmithClient:
                     context_lines=context_lines,
                     from_line=from_line,
                     to_line=to_line,
+                    reverse=reverse,
                 ),
                 "github": lambda r: self._github_provider(r).grep_build_log(
                     repo=str(effective_repo),
@@ -677,6 +683,7 @@ class SmithClient:
                     context_lines=context_lines,
                     from_line=from_line,
                     to_line=to_line,
+                    reverse=reverse,
                 ),
                 "gitlab": lambda r: self._gitlab_provider(r).grep_build_log(
                     repo=str(effective_repo),
@@ -688,6 +695,7 @@ class SmithClient:
                     context_lines=context_lines,
                     from_line=from_line,
                     to_line=to_line,
+                    reverse=reverse,
                 ),
             },
         )

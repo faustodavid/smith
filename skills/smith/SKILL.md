@@ -60,7 +60,7 @@ Use `--help` on any command for flags.
 2. **Go broad** with `smith code search "<stable noun>"` (all remotes) or `smith <remote> code search` when the remote is known. For YouTrack, start with `stories search`. If org, project, or repo scope is unknown, use discovery first.
 3. **Map the subtree** with `smith <remote> code grep <scope> ".*" --output-mode files_with_matches --path <dir>` before running wider regex.
 4. **Extract proof** with focused grep. Narrow in this order: repo → `--path` → `--glob` → regex → `--from-line`/`--to-line`. Use `--no-clone` for one-off scans across many repos; keep the default clone path when you expect multiple greps in the same repo so the checkout can be reused.
-5. **Corroborate only when needed**: `prs` for review context, `pipelines logs` for build evidence (list once, pick the relevant job by stage/name, then grep only that `--log-id`), `stories` for work-item context. When a story has images, download attachments to `/tmp` (macOS/Linux) or `%TEMP%` (Windows) and read them before drawing conclusions.
+5. **Corroborate only when needed**: `prs` for review context, `pipelines logs` for build evidence (list once, pick the relevant job by stage/name, then grep only that `--log-id`; for error log analysis prefer `--reverse` so the latest hits survive truncation), `stories` for work-item context. When a story has images, download attachments to `/tmp` (macOS/Linux) or `%TEMP%` (Windows) and read them before drawing conclusions.
 6. **Report** only what the retrieved evidence supports and cite `<scope>:<path>`.
 
 ## Stop Conditions

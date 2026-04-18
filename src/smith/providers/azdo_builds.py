@@ -79,6 +79,7 @@ class AzdoBuildMixin:
         context_lines: int | None = 3,
         from_line: int | None = None,
         to_line: int | None = None,
+        reverse: bool = False,
     ) -> dict[str, Any]:
         if log_id is not None:
             resolved_log_ids = [log_id]
@@ -90,14 +91,17 @@ class AzdoBuildMixin:
                 if isinstance(entry, dict) and entry.get("id") is not None
             ]
 
-        def _get_content(lid: int) -> str:
-            return self.get_build_log_content(
+        def _get_content(lid: int) -> str | tuple[str, int]:
+            content = self.get_build_log_content(
                 project=project,
                 build_id=build_id,
                 log_id=lid,
                 start_line=from_line,
                 end_line=to_line,
             )
+            if from_line is None and to_line is None:
+                return content
+            return content, ((from_line - 1) if from_line and from_line > 0 else 0)
 
         return grep_build_logs_core(
             log_ids=resolved_log_ids,
@@ -109,4 +113,5 @@ class AzdoBuildMixin:
             from_line=from_line,
             to_line=to_line,
             max_output_chars=self.max_output_chars,
+            reverse=reverse,
         )

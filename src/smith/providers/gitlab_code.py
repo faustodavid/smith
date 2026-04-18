@@ -1093,6 +1093,7 @@ class GitLabCodeMixin:
         filename_filter: re.Pattern[str],
         output_mode: Literal["content", "files_with_matches", "count"],
         context_lines: int,
+        reverse: bool = False,
     ) -> dict[str, Any] | None:
         if output_mode == "files_with_matches":
             matching = self._git_grep_local_fast(
@@ -1105,8 +1106,11 @@ class GitLabCodeMixin:
             )
             if matching is None:
                 return None
+            output_paths = [str(item.get("path", "")) for item in matching]
+            if reverse:
+                output_paths.reverse()
             return build_grep_result(
-                output_lines=[str(item.get("path", "")) for item in matching],
+                output_lines=output_paths,
                 matched_count=len(matching),
                 warnings=[],
                 max_output_chars=self.max_output_chars,
@@ -1169,6 +1173,8 @@ class GitLabCodeMixin:
                 files_matched += 1
             if files_matched > self._config.grep_max_files:
                 return grep_too_many_files_result(files_matched, self._config.grep_max_files)
+            if reverse:
+                count_output_lines.reverse()
             return build_grep_result(
                 output_lines=count_output_lines,
                 matched_count=files_matched,
@@ -1177,14 +1183,24 @@ class GitLabCodeMixin:
                 truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
             )
 
-        content_output_lines: list[str] = []
+        file_blocks: list[tuple[str, list[list[str]]]] = []
+        current_file: str | None = None
+        current_block: list[str] = []
         files_matched = 0
-        current_file_path: str | None = None
+
+        def _flush_block() -> None:
+            nonlocal current_block
+            if current_file is None:
+                current_block = []
+                return
+            if not current_block:
+                return
+            file_blocks[-1][1].append(current_block)
+            current_block = []
 
         for line in str(getattr(result, "stdout", "") or "").splitlines():
             if line == "--":
-                if current_file_path is not None and content_output_lines and content_output_lines[-1] != "--":
-                    content_output_lines.append("--")
+                _flush_block()
                 continue
 
             entry = self._local_git_grep_entry(
@@ -1194,25 +1210,41 @@ class GitLabCodeMixin:
                 filename_filter=filename_filter,
             )
             if entry is not None:
-                if content_output_lines and content_output_lines[-1] == "--":
-                    content_output_lines.pop()
-                current_file_path = str(entry.get("path") or "")
-                content_output_lines.append(current_file_path)
+                _flush_block()
+                current_file = str(entry.get("path") or "")
+                file_blocks.append((current_file, []))
                 files_matched += 1
                 continue
 
             if re.match(r"^\d+[:-]", line):
-                if current_file_path is None:
+                if current_file is None:
                     continue
-                content_output_lines.append(line)
+                current_block.append(line)
                 continue
 
-            current_file_path = None
+            _flush_block()
+            current_file = None
 
-        if content_output_lines and content_output_lines[-1] == "--":
-            content_output_lines.pop()
+        _flush_block()
+
         if files_matched > self._config.grep_max_files:
             return grep_too_many_files_result(files_matched, self._config.grep_max_files)
+
+        ordered_file_blocks: list[tuple[str, list[list[str]]]]
+        if reverse:
+            ordered_file_blocks = [
+                (file_path, list(reversed(blocks))) for file_path, blocks in reversed(file_blocks)
+            ]
+        else:
+            ordered_file_blocks = file_blocks
+
+        content_output_lines: list[str] = []
+        for file_path, blocks in ordered_file_blocks:
+            content_output_lines.append(file_path)
+            for block_index, block in enumerate(blocks):
+                if block_index > 0:
+                    content_output_lines.append("--")
+                content_output_lines.extend(block)
 
         return build_grep_result(
             output_lines=content_output_lines,
@@ -1232,6 +1264,7 @@ class GitLabCodeMixin:
         context_lines: int,
         matching: list[dict[str, Any]],
         search_pattern: re.Pattern[str],
+        reverse: bool = False,
     ) -> dict[str, Any] | None:
         local_paths_by_file: dict[str, str] = {}
         candidate_paths: list[str] = []
@@ -1273,6 +1306,9 @@ class GitLabCodeMixin:
                 seen_paths.add(file_path)
                 matched_paths.append(file_path)
 
+        if reverse:
+            matched_paths.reverse()
+
         if output_mode == "files_with_matches":
             return build_grep_result(
                 output_lines=matched_paths,
@@ -1294,12 +1330,17 @@ class GitLabCodeMixin:
                 warnings.append(f"failed to read {file_path}: {exc}")
                 continue
 
+            file_lines = content.splitlines()
+            line_offset = 0
+
             matched_lines, count = grep_match_lines(
-                lines=content.splitlines(),
+                lines=file_lines,
                 search_pattern=search_pattern,
                 file_label=file_path,
                 output_mode=output_mode,
                 context_lines=context_lines,
+                line_offset=line_offset,
+                reverse=reverse,
             )
             if count:
                 files_matched += count
@@ -1320,8 +1361,11 @@ class GitLabCodeMixin:
         case_insensitive: bool,
         from_line: int | None,
         to_line: int | None,
+        reverse: bool = False,
     ) -> bool:
         if not case_insensitive or from_line is not None or to_line is not None:
+            return False
+        if reverse:
             return False
         return bool(re.fullmatch(r"[A-Za-z0-9 _/\-]+", pattern))
 
@@ -1345,12 +1389,14 @@ class GitLabCodeMixin:
         case_insensitive: bool,
         from_line: int | None,
         to_line: int | None,
+        reverse: bool = False,
     ) -> list[dict[str, Any]] | None:
         if not self._supports_search_api_literal_grep(
             pattern,
             case_insensitive=case_insensitive,
             from_line=from_line,
             to_line=to_line,
+            reverse=reverse,
         ):
             return None
 
@@ -1415,6 +1461,7 @@ class GitLabCodeMixin:
         context_lines: int | None = 3,
         from_line: int | None = None,
         to_line: int | None = None,
+        reverse: bool = False,
         no_clone: bool = False,
     ) -> dict[str, Any]:
         folder_path = normalize_path(path)
@@ -1448,6 +1495,7 @@ class GitLabCodeMixin:
                 filename_filter=filename_filter,
                 output_mode=output_mode,
                 context_lines=context_lines or 0,
+                reverse=reverse,
             )
             if fast_result is not None:
                 return fast_result
@@ -1465,6 +1513,7 @@ class GitLabCodeMixin:
                 case_insensitive=case_insensitive,
                 from_line=from_line,
                 to_line=to_line,
+                reverse=reverse,
             )
 
         if matching is None:
@@ -1494,7 +1543,8 @@ class GitLabCodeMixin:
                 return grep_too_many_files_result(len(matching), self._config.grep_max_files)
 
         if output_mode == "files_with_matches" and is_match_all:
-            text = "\n".join(str(item.get("path", "")) for item in matching)
+            ordered_matching = list(reversed(matching)) if reverse else matching
+            text = "\n".join(str(item.get("path", "")) for item in ordered_matching)
             text = truncate_output(
                 text,
                 self.max_output_chars,
@@ -1502,7 +1552,7 @@ class GitLabCodeMixin:
             )
             return {
                 "text": text,
-                "files_matched": len(matching),
+                "files_matched": len(ordered_matching),
                 "warnings": [],
                 "partial": False,
             }
@@ -1524,6 +1574,7 @@ class GitLabCodeMixin:
                 context_lines=context_lines or 0,
                 matching=matching,
                 search_pattern=search_pattern,
+                reverse=reverse,
             )
             if git_grep_result is not None:
                 return git_grep_result
@@ -1560,11 +1611,13 @@ class GitLabCodeMixin:
             except Exception as exc:
                 return [], 0, f"failed to read {file_path}: {exc}"
 
+            all_lines = content.splitlines()
             lines = slice_lines(
-                content.splitlines(),
+                all_lines,
                 from_line=from_line,
                 to_line=to_line,
             )
+            line_offset = (from_line - 1) if from_line and from_line > 0 else 0
 
             matched_lines, count = grep_match_lines(
                 lines=lines,
@@ -1572,6 +1625,8 @@ class GitLabCodeMixin:
                 file_label=file_path,
                 output_mode=output_mode,
                 context_lines=context_lines or 0,
+                line_offset=line_offset,
+                reverse=reverse,
             )
             if not count:
                 return [], 0, None
@@ -1599,6 +1654,8 @@ class GitLabCodeMixin:
             for item in matching
             if str(item.get("path", "")) and not bool(item.get("is_binary"))
         ]
+        if reverse:
+            file_entries.reverse()
         effective_workers = min(grep_max_workers, len(file_entries) or 1)
         use_parallel = not checkout_dir and grep_parallel_enabled and effective_workers > 1 and len(file_entries) > 1
 

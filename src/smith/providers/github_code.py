@@ -484,6 +484,7 @@ class GitHubCodeMixin:
         context_lines: int,
         matching: list[dict[str, Any]],
         search_pattern: re.Pattern[str],
+        reverse: bool = False,
     ) -> dict[str, Any] | None:
         local_paths_by_file: dict[str, str] = {}
         candidate_paths: list[str] = []
@@ -525,6 +526,9 @@ class GitHubCodeMixin:
                 seen_paths.add(file_path)
                 matched_paths.append(file_path)
 
+        if reverse:
+            matched_paths.reverse()
+
         if output_mode == "files_with_matches":
             return build_grep_result(
                 output_lines=matched_paths,
@@ -546,12 +550,17 @@ class GitHubCodeMixin:
                 warnings.append(f"failed to read {file_path}: {exc}")
                 continue
 
+            file_lines = content.splitlines()
+            line_offset = 0
+
             matched_lines, count = grep_match_lines(
-                lines=content.splitlines(),
+                lines=file_lines,
                 search_pattern=search_pattern,
                 file_label=file_path,
                 output_mode=output_mode,
                 context_lines=context_lines,
+                line_offset=line_offset,
+                reverse=reverse,
             )
             if count:
                 files_matched += count
@@ -578,6 +587,7 @@ class GitHubCodeMixin:
         context_lines: int | None = 3,
         from_line: int | None = None,
         to_line: int | None = None,
+        reverse: bool = False,
         no_clone: bool = False,
     ) -> dict[str, Any]:
         regex_pattern = pattern or ".*"
@@ -606,7 +616,8 @@ class GitHubCodeMixin:
             return grep_too_many_files_result(len(matching), self._config.grep_max_files)
 
         if output_mode == "files_with_matches" and is_match_all:
-            text = "\n".join(str(item.get("path", "")) for item in matching)
+            ordered_matching = list(reversed(matching)) if reverse else matching
+            text = "\n".join(str(item.get("path", "")) for item in ordered_matching)
             text = truncate_output(
                 text,
                 self.max_output_chars,
@@ -614,7 +625,7 @@ class GitHubCodeMixin:
             )
             return {
                 "text": text,
-                "files_matched": len(matching),
+                "files_matched": len(ordered_matching),
                 "warnings": [],
                 "partial": False,
             }
@@ -646,6 +657,7 @@ class GitHubCodeMixin:
                 context_lines=context_lines or 0,
                 matching=matching,
                 search_pattern=search_pattern,
+                reverse=reverse,
             )
             if git_grep_result is not None:
                 return git_grep_result
@@ -686,11 +698,13 @@ class GitHubCodeMixin:
             except Exception as exc:
                 return [], 0, f"failed to read {file_path}: {exc}"
 
+            all_lines = content.splitlines()
             lines = slice_lines(
-                content.splitlines(),
+                all_lines,
                 from_line=from_line,
                 to_line=to_line,
             )
+            line_offset = (from_line - 1) if from_line and from_line > 0 else 0
 
             matched_lines, count = grep_match_lines(
                 lines=lines,
@@ -698,6 +712,8 @@ class GitHubCodeMixin:
                 file_label=file_path,
                 output_mode=output_mode,
                 context_lines=context_lines or 0,
+                line_offset=line_offset,
+                reverse=reverse,
             )
             if not count:
                 return [], 0, None
@@ -724,6 +740,8 @@ class GitHubCodeMixin:
             )
             for item in matching
         ]
+        if reverse:
+            file_entries.reverse()
         if checkout_dir:
             effective_workers = min(
                 grep_max_workers,

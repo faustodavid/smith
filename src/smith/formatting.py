@@ -79,12 +79,28 @@ def glob_to_regex(glob_pattern: str) -> str:
     return "".join(result) + "$"
 
 
+def _group_contiguous_lines(sorted_line_nums: list[int]) -> list[list[int]]:
+    blocks: list[list[int]] = []
+    current_block: list[int] = []
+    for line_num in sorted_line_nums:
+        if current_block and line_num > current_block[-1] + 1:
+            blocks.append(current_block)
+            current_block = []
+        current_block.append(line_num)
+    if current_block:
+        blocks.append(current_block)
+    return blocks
+
+
 def format_grep_matches(
     file_path: str,
     lines: list[str],
     match_line_nums: set[int],
     context_lines: int,
     include_line_numbers: bool = True,
+    *,
+    line_offset: int = 0,
+    reverse: bool = False,
 ) -> list[str]:
     if not match_line_nums:
         return []
@@ -96,20 +112,20 @@ def format_grep_matches(
         for i in range(start, end + 1):
             lines_to_show.add(i)
 
-    sorted_lines = sorted(lines_to_show)
+    blocks = _group_contiguous_lines(sorted(lines_to_show))
+    if reverse:
+        blocks.reverse()
+
     output: list[str] = [file_path]
-    prev_line = -2
-
-    for line_num in sorted_lines:
-        if prev_line >= 0 and line_num > prev_line + 1:
+    for block_index, block in enumerate(blocks):
+        if block_index > 0:
             output.append("--")
-
-        if include_line_numbers:
-            marker = ":" if line_num in match_line_nums else "-"
-            output.append(f"{line_num + 1}{marker}{lines[line_num]}")
-        else:
-            output.append(lines[line_num])
-        prev_line = line_num
+        for line_num in block:
+            if include_line_numbers:
+                marker = ":" if line_num in match_line_nums else "-"
+                output.append(f"{line_num + 1 + line_offset}{marker}{lines[line_num]}")
+            else:
+                output.append(lines[line_num])
 
     return output
 

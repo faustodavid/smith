@@ -405,6 +405,42 @@ def test_code_grep_parser_accepts_no_clone() -> None:
     assert args.no_clone is True
 
 
+def test_code_grep_parser_accepts_reverse() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["github", "code", "grep", "repo-a", "--reverse", "error"])
+
+    assert args.command_id == "code.grep"
+    assert args.pattern == "error"
+    assert args.reverse is True
+
+
+def test_code_grep_parser_defaults_reverse_to_false() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["github", "code", "grep", "repo-a", "error"])
+
+    assert args.reverse is False
+
+
+def test_pipelines_logs_grep_parser_accepts_reverse() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(
+        [
+            "github",
+            "pipelines",
+            "logs",
+            "grep",
+            "repo-a",
+            "42",
+            "--reverse",
+            "error",
+        ]
+    )
+
+    assert args.command_id == "pipelines.logs.grep"
+    assert args.id == 42
+    assert args.reverse is True
+
+
 def test_code_grep_gitlab_parser_uses_required_positional_pattern() -> None:
     parser = _build_test_parser()
     args = parser.parse_args(["gitlab", "code", "grep", "engineering-tools/repo-a", "--path", "/src", "error"])

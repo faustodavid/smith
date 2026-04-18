@@ -136,6 +136,11 @@ def _add_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--context-lines", type=int, default=3)
     parser.add_argument("--from-line", type=int)
     parser.add_argument("--to-line", type=int)
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Emit matches in reverse order so the most recent hits appear first.",
+    )
     parser.add_argument("--case-sensitive", action="store_true")
     parser.add_argument("--no-clone", action="store_true", help="Skip local clone and fetch files via provider APIs instead")
 
@@ -169,6 +174,11 @@ def _add_ci_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--context-lines", type=int, default=3)
     parser.add_argument("--from-line", type=int)
     parser.add_argument("--to-line", type=int)
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Emit matches in reverse order so the most recent hits appear first.",
+    )
     parser.add_argument("--case-sensitive", action="store_true")
 
 

@@ -70,6 +70,7 @@ class GitHubBuildMixin:
         context_lines: int | None = 3,
         from_line: int | None = None,
         to_line: int | None = None,
+        reverse: bool = False,
     ) -> dict[str, Any]:
         if log_id is not None:
             resolved_log_ids = [log_id]
@@ -94,4 +95,5 @@ class GitHubBuildMixin:
             from_line=from_line,
             to_line=to_line,
             max_output_chars=self.max_output_chars,
+            reverse=reverse,
         )

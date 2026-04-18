@@ -241,3 +241,123 @@ def test_grep_build_logs_core_requires_log_id_for_match_all_without_logs() -> No
         "partial": False,
     }
     get_content.assert_not_called()
+
+
+def test_grep_match_lines_applies_line_offset_and_reverse() -> None:
+    lines = ["foo", "bar", "foo", "baz"]
+    pattern = re.compile("foo")
+
+    output, matched = grep_match_lines(
+        lines=lines,
+        search_pattern=pattern,
+        file_label="file.txt",
+        output_mode="content",
+        context_lines=0,
+        line_offset=100,
+        reverse=True,
+    )
+
+    assert matched == 1
+    assert output == [
+        "file.txt",
+        "103:foo",
+        "--",
+        "101:foo",
+    ]
+
+
+def test_grep_build_logs_core_single_log_match_all_with_pre_sliced_content_returns_absolute_numbers() -> None:
+    get_content = Mock(return_value=("line four\nline five", 3))
+
+    result = grep_build_logs_core(
+        log_ids=[42],
+        get_content=get_content,
+        pattern=".*",
+        output_mode="content",
+        case_insensitive=False,
+        context_lines=None,
+        from_line=4,
+        to_line=5,
+        max_output_chars=1000,
+    )
+
+    assert result == {
+        "text": "4:line four\n5:line five",
+        "logs_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+
+
+def test_grep_build_logs_core_single_log_match_all_with_pre_sliced_content_and_reverse_flips_line_order() -> None:
+    get_content = Mock(return_value=("line three\nline four\nline five", 2))
+
+    result = grep_build_logs_core(
+        log_ids=[42],
+        get_content=get_content,
+        pattern=".*",
+        output_mode="content",
+        case_insensitive=False,
+        context_lines=None,
+        from_line=3,
+        to_line=5,
+        max_output_chars=1000,
+        reverse=True,
+    )
+
+    assert result["text"] == "5:line five\n4:line four\n3:line three"
+    assert result["logs_matched"] == 1
+
+
+def test_grep_build_logs_core_multi_log_with_from_line_restricts_each_log() -> None:
+    log_contents = {
+        1: "\n".join([f"log1-line-{i}" for i in range(1, 11)] + ["ERROR at end of log1"]),
+        2: "\n".join([f"log2-line-{i}" for i in range(1, 6)] + ["ERROR at end of log2"]),
+    }
+    get_content = Mock(side_effect=lambda log_id: log_contents[log_id])
+
+    result = grep_build_logs_core(
+        log_ids=[1, 2],
+        get_content=get_content,
+        pattern="ERROR",
+        output_mode="content",
+        case_insensitive=False,
+        context_lines=0,
+        from_line=5,
+        to_line=None,
+        max_output_chars=1000,
+    )
+
+    assert result["logs_matched"] == 2
+    assert "11:ERROR at end of log1" in result["text"]
+    assert "6:ERROR at end of log2" in result["text"]
+
+
+def test_grep_build_logs_core_multi_log_reverse_flips_log_order_and_blocks() -> None:
+    log_contents = {
+        1: "hit-a\nskip\nhit-b",
+        2: "start\nhit-c",
+    }
+    get_content = Mock(side_effect=lambda log_id: log_contents[log_id])
+
+    result = grep_build_logs_core(
+        log_ids=[1, 2],
+        get_content=get_content,
+        pattern="hit",
+        output_mode="content",
+        case_insensitive=False,
+        context_lines=0,
+        from_line=None,
+        to_line=None,
+        max_output_chars=1000,
+        reverse=True,
+    )
+
+    lines = result["text"].splitlines()
+    # Log 2 appears first; within log 1 matches are flipped bottom-up.
+    assert lines[0] == "Log 2"
+    assert "2:hit-c" in lines[1]
+    assert "Log 1" in lines
+    log1_index = lines.index("Log 1")
+    assert lines[log1_index + 1] == "3:hit-b"
+    assert lines[-1] == "1:hit-a"
