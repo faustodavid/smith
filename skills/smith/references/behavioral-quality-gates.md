@@ -1,42 +1,31 @@
 # Behavioral Quality Gates
 
-A `smith` investigation is acceptable only if all gates pass.
+Self-review checklist. An investigation is acceptable only if every gate passes.
 
-## Gate 1: Trigger
+## Gate 1 — Trigger
 
-- The request is read-only and GitHub, GitLab, or Azure DevOps backed.
-- Ambiguous requests start with discovery.
-- Out-of-scope requests are not handled with `smith`.
+- [ ] Request is read-only.
+- [ ] Source of truth is GitHub, GitLab, Azure DevOps, or YouTrack.
+- [ ] Ambiguous prompts start with discovery or `smith code search`.
 
-## Gate 2: Investigation
+## Gate 2 — Investigation
 
-- Unknown scope starts with `smith code search "<query>"`.
-- Unknown org or repo scope can use `smith <remote> orgs ...`, `smith <remote> repos ...`, and for GitLab `smith <gitlab-remote-name> groups ...`.
-- Unknown structure uses `smith <remote> code grep ... ".*" --output-mode files_with_matches`.
-- Final evidence comes from focused `smith <remote> code grep`.
-- `prs`, `pipelines logs`, and `stories` are used only when primary or corroborating evidence is needed.
-- Remote syntax is explicit:
-  - `smith <azdo-remote-name> code grep <project> <repo> "<regex>"`
-  - `smith <github-remote-name> code grep <repo> "<regex>"`
-  - `smith <gitlab-remote-name> code grep <group/project> "<regex>"`
-  - `smith <github-remote-name> pipelines logs list <repo> <id>`
-- GitHub repo arguments stay bare:
-  - Search results may look like `org/repo:path`
-  - Follow-up GitHub commands still take `<repo>`, not `org/repo`
-- GitLab repo arguments stay fully qualified:
-  - Search results may look like `group/repo:path`
-  - Follow-up GitLab commands take full `group/project` paths, not a short repo name
+- [ ] Unknown scope starts broad (`smith code search` or `smith <remote> code search`).
+- [ ] Unknown org/project scope uses `smith <remote> orgs`, `smith <remote> repos`, or GitLab `smith <gitlab-remote-name> groups`.
+- [ ] Unknown file structure uses `smith <remote> code grep ... ".*" --output-mode files_with_matches` before wider regex.
+- [ ] Final evidence comes from focused `smith <remote> code grep`.
+- [ ] `prs`, `pipelines logs`, `stories` are used only for corroboration.
+- [ ] GitHub follow-ups use bare `<repo>`. GitLab follow-ups use full `group/project`.
 
-## Gate 3: Answer Quality
+## Gate 3 — Answer Quality
 
-- The answer cites exact `project/repository:path`, `org/repository:path`, or `group/repository:path` evidence.
-- The answer ends with a `Sources` section.
-- Single-remote answers stay flat; multi-remote answers split by remote.
-- Unresolved answers include `not enough evidence` plus one next command.
-- If a caller explicitly requires `repo:path`, the `Sources` section follows that contract.
+- [ ] Every claim cites `project/repository:path`, `org/repository:path`, or `group/repository:path`.
+- [ ] Single-remote answers are flat; multi-remote answers split by remote.
+- [ ] Unresolved answers include `not enough evidence` and one next command.
+- [ ] Final line is a `Sources` section of absolute URLs.
 
-## Gate 4: Recovery
+## Gate 4 — Recovery
 
-- Auth or env blockers use `references/auth-troubleshooting.md`.
-- 401 or 403, 429, Truncation, Empty results, or Wrong repository cases use `references/failure-playbook.md`.
-- Do not stop while another narrowing command could resolve the request.
+- [ ] Auth blockers → `references/auth-troubleshooting.md`.
+- [ ] 401 or 403 / 429 / Truncation / Empty results / Wrong repository → `references/failure-playbook.md`.
+- [ ] Do not stop while another narrowing command could resolve the request.

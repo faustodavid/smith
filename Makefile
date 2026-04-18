@@ -1,4 +1,4 @@
-.PHONY: lint typecheck test-unit test-contract test-integration test check install install-global
+.PHONY: lint typecheck test-unit test-contract test-integration test skill-validate check install install-global
 
 lint:
 	ruff check .
@@ -19,7 +19,10 @@ test:
 	pytest tests/unit tests/contract --cov=src/smith --cov-report=term-missing -q
 	python3 scripts/check_targeted_coverage.py
 
-check: lint typecheck test
+skill-validate:
+	python3 scripts/validate_skill_quality.py --mode all
+
+check: lint typecheck test skill-validate
 
 install:
 	python3 -m pip install -e ".[dev]"
