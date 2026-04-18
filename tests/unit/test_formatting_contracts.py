@@ -456,3 +456,59 @@ def test_render_text_grouped_discovery_output_surfaces_warning_and_partial() -> 
 
 def test_render_text_falls_back_to_json_for_unknown_commands() -> None:
     assert render_text("custom.command", {"alpha": 1, "beta": 2}) == '{\n  "alpha": 1,\n  "beta": 2\n}'
+
+
+def test_render_text_config_list_renders_tabular_toon_with_normalized_fields() -> None:
+    rendered = render_text(
+        "config.list",
+        {
+            "remotes": [
+                {
+                    "name": "github",
+                    "provider": "github",
+                    "enabled": True,
+                    "org": "octo-org",
+                    "host": "github.com",
+                },
+                {
+                    "name": "gitlab-infra",
+                    "provider": "gitlab",
+                    "enabled": False,
+                    "host": "gitlab-infra.example.com",
+                },
+            ]
+        },
+    )
+
+    assert rendered == (
+        "remotes[2]{name,provider,enabled,org,host}:\n"
+        "  github,github,true,octo-org,github.com\n"
+        "  gitlab-infra,gitlab,false,null,gitlab-infra.example.com"
+    )
+
+
+def test_render_text_config_list_empty_state_uses_toon_zero_length_array() -> None:
+    assert render_text("config.list", {"remotes": []}) == "remotes[0]:"
+
+
+def test_render_text_config_show_renders_key_value_lines_and_omits_missing_fields() -> None:
+    rendered = render_text(
+        "config.show",
+        {
+            "name": "gitlab-infra",
+            "provider": "gitlab",
+            "enabled": False,
+            "host": "gitlab-infra.example.com",
+            "token_env": "GITLAB_INFRA_TOKEN",
+            "api_url": "https://gitlab-infra.example.com/api/v4",
+        },
+    )
+
+    assert rendered == (
+        "name: gitlab-infra\n"
+        "provider: gitlab\n"
+        "enabled: false\n"
+        "host: gitlab-infra.example.com\n"
+        "token_env: GITLAB_INFRA_TOKEN\n"
+        "api_url: https://gitlab-infra.example.com/api/v4"
+    )

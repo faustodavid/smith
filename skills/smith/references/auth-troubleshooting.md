@@ -1,58 +1,46 @@
 # Auth Troubleshooting
 
-Use this only when env or credentials block progress.
+Open only when env or credentials block progress.
 
-## Missing Remote Configuration
+## Missing remote
 
 ```bash
 smith config path
 smith config list
-smith config show <configured-remote-name>
+smith config show <remote-name>
 ```
 
-If the needed remote is missing, add it to the active Smith config or point `SMITH_CONFIG` at the correct config file.
+If the needed remote is missing, add it to the active config or point `SMITH_CONFIG` at the right file.
 
-## Missing Token Env Var
+## Missing token env var
 
 ```bash
 printenv GITHUB_TOKEN
 printenv GITLAB_TOKEN
 printenv AZURE_DEVOPS_PAT
+printenv YOUTRACK_TOKEN
 ```
 
-Use the token env var named by the remote's `token_env` field.
+Set the env var named by the remote's `token_env` field.
 
-## Azure Login Or Token Failure
+## Provider-specific login
 
 ```bash
+# Azure DevOps
 az login
 az account show
 az account set --subscription "<name-or-id>"
+
+# GitHub
+export GITHUB_TOKEN="<token>"   # or: gh auth login && gh auth status
+
+# GitLab
+export GITLAB_TOKEN="<token>"   # or: glab auth login && glab auth status
 ```
 
-Retry the command after selecting the right tenant or subscription.
+## 401 or 403 after login
 
-## GitHub Auth Failure
-
-```bash
-export GITHUB_TOKEN="<token>"
-# or
-gh auth login
-gh auth status
-```
-
-## GitLab Auth Failure
-
-```bash
-export GITLAB_TOKEN="<token>"
-# or
-glab auth login
-glab auth status
-```
-
-## 401 Or 403 After Login
-
-- Confirm your account can access the target org, project, or repo.
+- Confirm the account can access the org, project, or repo.
 - Validate the Azure DevOps org URL: `https://dev.azure.com/<org>`.
-- Validate the GitLab group path configured on the target remote.
-- Retry once.
+- Validate the GitLab `group` path configured on the remote.
+- Retry once; if it fails, fall back to `references/failure-playbook.md`.

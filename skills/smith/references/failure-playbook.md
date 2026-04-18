@@ -1,47 +1,38 @@
 # Failure Playbook
 
-Use this when a read command fails. Use `references/auth-troubleshooting.md` for env or credential setup.
+Match the failure symptom to a block, apply one step, then retry once. Use `references/auth-troubleshooting.md` for env or credential details.
 
 ## 401 or 403
 
-- Confirm the target remote exists in the active Smith config.
-- Confirm the token env var referenced by that remote is set.
-- Run `az login`.
-- For GitHub, use `export GITHUB_TOKEN="<token>"` or `gh auth login`.
-- For GitLab, use `export GITLAB_TOKEN="<token>"` or `glab auth login`.
-- Retry the same command once.
+- Confirm the target remote exists in the active config (`smith config show <remote>`).
+- Confirm the token env var declared on the remote is set.
+- Azure DevOps: `az login`. GitHub: `gh auth login` or `export GITHUB_TOKEN`. GitLab: `glab auth login` or `export GITLAB_TOKEN`.
 
 ## 429
 
 - Lower `--take`.
-- Narrow provider, repo, path, glob, or regex.
-- For GitHub grep, reduce `GITHUB_GREP_MAX_WORKERS` or disable parallel fetch.
+- Narrow with `--path`, `--glob`, or a tighter regex.
+- For GitHub grep, reduce `GITHUB_GREP_MAX_WORKERS` or unset `GITHUB_GREP_ENABLE_PARALLEL`.
 
 ## Truncation
 
 - Narrow `--path` and `--glob`.
-- Page with `--from-line` and `--to-line`.
+- Page with `--from-line` / `--to-line`.
 - Reduce `--context-lines`.
 
 ## Empty results
 
-- Broaden the `code search` query.
-- Remove strict filters.
+- Broaden the `code search` query (strip rare keywords, drop filters).
 - Re-run focused grep on the candidate repo or path.
+- For YouTrack, try `stories search --query` with a looser phrase.
 
 ## Wrong repository
 
-```bash
-smith code search "<broader query>"
-```
-
-Then remap the repo and path, and continue with focused grep.
-
-For GitHub commands, if you copied `org/repo` from search output and got a 404, rerun the command with the bare `<repo>` slug.
-
-For GitLab commands, if you used a short repo name and got a 404, rerun the command with the full `group/project` path, not a short repo name.
+- Rerun `smith code search "<broader>"` and take the top `repo:path` hit.
+- GitHub 404: you likely pasted `org/repo` — retry with the bare `<repo>` slug.
+- GitLab 404: you likely used a short name — retry with the full `group/project` path.
 
 ## Unsupported Provider Flow
 
-- Use the closest supported read command for that provider.
+- Use the closest supported read command on that provider.
 - State the fallback explicitly in the answer.

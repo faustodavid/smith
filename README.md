@@ -2,24 +2,39 @@
 
 # Smith
 
-**The investigation CLI built for AI agents.**
+**The read-only code investigation CLI for AI coding agents.**
 
-One tool/skill to search code, grep files, inspect PRs, read pipelines, and track issues across GitHub, GitLab, Azure DevOps, and YouTrack — token-efficient, read-only, and agent-ready.
+Cross-repository code search, regex grep, pull request inspection, CI/CD log analysis, and work-item lookup across **GitHub**, **GitLab**, **Azure DevOps**, and **YouTrack** — from a single command, with token-efficient output designed for **Claude Code**, **Cursor**, **Windsurf**, **GitHub Copilot**, **Codex**, and any LLM that can drive a shell.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org)
+[![CI](https://github.com/faustodavid/smith/actions/workflows/ci.yml/badge.svg)](https://github.com/faustodavid/smith/actions/workflows/ci.yml)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/faustodavid/smith)
+
+<img src="assets/smith_diagram_overview.jpg" alt="Smith — cross-provider read-only code investigation CLI for AI agents" width="700" />
 
 </div>
 
 ---
 
-Smith is a read-only investigation CLI and AI tool. With a single command, it searches all your **remotes** code, greps files, and inspects PRs or pipelines across GitHub, GitLab, Azure DevOps, and YouTrack in parallel. Smith prioritizes efficiency, returning only the smallest useful result.
-<div align="center">
-  <img src="assets/smith_diagram_overview.jpg" alt="Smith architecture overview" width="700" />
-</div>
+Smith turns every repo search, regex grep, PR review, pipeline log scan, and issue lookup into one CLI surface that AI agents can drive safely — every operation is read-only and every response is trimmed to the smallest useful slice, so your model stays on-task instead of drowning in context.
 
-## The Problem
+## Contents
+
+- [Why Smith](#why-smith)
+- [Example use cases](#example-use-cases)
+- [How Smith solves it](#how-smith-solves-it)
+- [What makes Smith different](#what-makes-smith-different)
+- [Supported providers](#supported-providers)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Use with your AI editor](#use-with-your-ai-editor)
+- [CLI reference](#cli-reference)
+- [Quality gates and benchmarks](#quality-gates-and-benchmarks)
+- [FAQ](#faq)
+- [License](#license)
+
+## Why Smith
 
 AI coding agents need to investigate code across repositories and multiple remotes. The existing approach — provider-specific MCPs like the GitHub MCP — wasn't designed for this.
 
@@ -29,10 +44,32 @@ AI coding agents need to investigate code across repositories and multiple remot
 
 **Cross-platform investigations don't exist.** If the answer spans a GitHub repo, a GitLab pipeline, and a YouTrack ticket, the agent needs three different tools with three different interfaces. Most MCPs only cover one provider.
 
-## How Smith Solves It
-### Crossed providers search
+## Example use cases
 
-You can start broad with a content search acrossed all your configured remotes. It will fans out and returns compact `repo:/path` pointers, so then the agent knows where to drill in.
+No cloning, no local checkouts — Smith queries every configured remote through provider APIs, so your agent can investigate across thousands of repos. Load the skill and ask questions like:
+
+**Find how something is configured across every remote**
+- Where do we set the CPU limit for the `grafana-agent`?
+- What's the default HTTP client timeout in `api-service`?
+- Implement this internal package: `<internal_package_link>`
+
+**Audit versions and dependencies across your fleet**
+- Which repos still pin `python==3.10`?
+- Which repos depend on `acme-telemetry-sdk` v1?
+
+**Investigate PRs, pipelines, and stories**
+- Create an implementation plan for `<story_link>`
+- Why is this pipeline failing: `<pipeline_link>`?
+- Has anyone fixed `PPQ-1055` yet? Link me to the PR
+- Implement the review suggestions from `<pr_link>`
+
+> **Want to try this in your editor?** Load the skill (see [Use with your AI editor](#use-with-your-ai-editor)), install Smith, and start asking questions :)
+
+## How Smith solves it
+
+### Cross-provider code search in one command
+
+Start broad with a content search across every configured remote. Smith fans out in parallel and returns compact `repo:/path` pointers, so the agent instantly knows where to drill in.
 
 ```bash
 $ smith code search "auth middleware"
@@ -61,9 +98,9 @@ Smith implements `code grep` across **every provider** — GitHub, GitLab, and A
 smith github-public code grep infra-helm "resources:" --path charts/ --glob "*.yaml" --context-lines 5
 ```
 
-Smith returns just the matching lines with surrounding context. The agent gets exactly what it needs in a fraction of the tokens.
+Smith returns only the matching lines with surrounding context. The agent gets exactly what it needs in a fraction of the tokens — without cloning, without shelling out to `rg`, and without flooding the context window with unrelated file content.
 
-### Grep pipeline logs too
+### Grep pipeline and build logs too
 
 The same grep workflow extends to CI/CD. Instead of downloading an entire build log, Smith lets agents search across all jobs or target a specific one:
 
@@ -72,23 +109,29 @@ smith github-public pipelines logs grep my-repo 12345 "error|fatal" --context-li
 smith azdo-main pipelines logs grep SRE 6789 "timeout" --log-id 42
 ```
 
+### Structured, agent-friendly output
 
+Every command takes `--format json` and emits a predictable envelope (`ok`, `command`, `meta`, `data`, `error`). Agents can parse results without scraping text, and the text renderer is already compact enough for direct prompting.
 
-## AI Skill
+```bash
+smith code search "auth middleware" --format json
+smith github-public code grep my-repo "TODO" --format json
+```
 
-Smith was built for AI agents from the ground up. The `skills/smith/SKILL.md` file is a structured prompt document that gives any LLM-powered editor the full playbook:
+## What makes Smith different
 
-- **Trigger decision** — when to reach for Smith vs. other tools
-- **Complete command vocabulary** — every valid CLI path with correct argument shapes per provider
-- **Investigation algorithm** — a deterministic broad-to-narrow workflow: discover scope → locate with search → extract proof with grep → corroborate with PRs/pipelines/stories → report with citations
-- **Failure recovery** — specific handlers for 401/403, 429, truncation, empty results, and wrong-repo misses
-- **Answer contract** — evidence-first format with exact path citations and a `Sources` section
-
-Register `skills/smith/SKILL.md` as a skill in your editor — Windsurf, GitHub Copilot, Codex, Claude Code — and the agent drives Smith commands autonomously.
+- **Built for AI, not humans.** Every command is designed around the token budget of an LLM — terse output, regex grep instead of full-file reads, JSON envelopes for parsing.
+- **One CLI, every provider.** GitHub, GitLab, Azure DevOps, and YouTrack share the same verbs (`code`, `prs`, `pipelines`, `stories`). No switching between three or four provider MCPs.
+- **Read-only by contract.** Smith has no `create`, `update`, `approve`, `comment`, or `post` surface. Agents cannot accidentally mutate production.
+- **Local credentials, no hosted service.** Tokens live in your OS keychain / env; nothing is proxied through a third-party server.
+- **Parallel cross-remote fan-out.** `smith code search` and `smith prs search` hit every enabled remote concurrently and merge results per remote.
+- **Pipeline log grep.** Search CI/CD logs with regex and context windows — a feature most provider MCPs don't ship at all.
+- **Deterministic skill.** `skills/smith/SKILL.md` is a structured prompt that tells any LLM exactly when to use Smith, which command shape to pick, and how to recover from 401/429/truncation.
+- **MIT-licensed, greenfield.** Alpha, honest about it, and open to breaking changes that improve the contract.
 
 ---
 
-## Supported Providers
+## Supported providers
 
 | Provider | Code Search | Code Grep | PRs / MRs | Pipelines | Issues / Stories | Discovery |
 |:---------|:-----------:|:---------:|:---------:|:---------:|:----------------:|:---------:|
@@ -144,18 +187,24 @@ The installer runs `uv tool update-shell` for you, but you may need to **restart
 
 ---
 
-## Quick Start
+## Quick start
 
 ### 1. Initialize configuration
 
 ```bash
-smith config init
+smith config init            # interactive wizard, or pick manual edit
 ```
 
-### 2. Edit the config file
+Prefer to tweak remotes later without hand-editing YAML? Use:
 
 ```bash
-smith config path          # prints the path (~/.config/smith/config.yaml)
+smith config edit            # interactive add / edit / remove
+```
+
+### 2. Inspect or edit the config file directly
+
+```bash
+smith config path            # prints the path (~/.config/smith/config.yaml)
 $EDITOR ~/.config/smith/config.yaml
 ```
 
@@ -191,7 +240,7 @@ remotes:
     enabled: true
 ```
 
-Override the config path with `SMITH_CONFIG=/path/to/config.yaml`.
+Override the config path with `SMITH_CONFIG=/path/to/config.yaml` (handy for per-workspace configs or CI).
 
 For GitHub Enterprise, self-hosted GitLab, or YouTrack on a custom domain, add `host`:
 
@@ -272,11 +321,28 @@ smith code search "grafana"                                # search across all r
 smith github-public code grep my-repo "TODO" --path src    # targeted grep
 smith gitlab-platform repos --grep "^platform/"            # discover repos
 smith youtrack-main stories search --query "patch rollout" # find issues
+smith code search "auth middleware" --format json          # machine-readable output
 ```
 
 ---
 
-## CLI Reference
+## Use with your AI editor
+
+Smith was built for AI agents from the ground up. `skills/smith/SKILL.md` is a structured prompt document that gives any LLM-powered editor the full playbook:
+
+- **Trigger decision** — when to reach for Smith vs. other tools.
+- **Complete command vocabulary** — every valid CLI path with the correct argument shape per provider.
+- **Investigation algorithm** — a deterministic broad-to-narrow workflow: discover scope → locate with search → extract proof with grep → corroborate with PRs / pipelines / stories → report with citations.
+- **Failure recovery** — specific handlers for 401 / 403, 429, truncation, empty results, and wrong-repo misses.
+- **Answer contract** — evidence-first format with exact path citations and a `Sources` section.
+
+The installer mirrors the canonical skill into `~/.agents/skills/smith` and keeps the managed repo checkout at `~/.local/share/smith`. 
+
+---
+
+## CLI reference
+
+Every command accepts `--format {text,json}` (default `text`). JSON responses follow the envelope `{ok, command, meta, data, error}`.
 
 ### Global commands
 
@@ -285,9 +351,11 @@ These work across all enabled remotes at once:
 ```bash
 smith code search "<query>"                     # search code across every enabled remote
 smith prs search "<query>"                      # search pull requests across every enabled remote
-smith config <init|path|list|show|enable|disable>
+smith config <init|edit|path|list|show|enable|disable>
 smith cache clean [--remote <name>|--remote all]
 ```
+
+Global `smith code search` and `smith prs search` hit every enabled remote in parallel and reject `--project` / `--repo` — use `smith <remote> ...` to narrow.
 
 ### Remote-scoped commands
 
@@ -297,11 +365,12 @@ Prefix any command with a configured remote name to target a single provider:
 
 ```bash
 smith <remote> repos                            # list repositories
+smith <remote> repos <project|group>            # scope by Azure DevOps project or GitLab group
 smith <remote> orgs                             # list orgs/projects (GitHub, Azure DevOps)
 smith <remote> groups                           # list groups (GitLab only)
 ```
 
-GitLab discovery supports `--grep`, `--skip`, and `--take` (default `50`, max `500`).
+GitLab `groups` and `repos` support `--grep <regex>`, `--skip`, and `--take` (default `50`, hard max `500`), and surface a truncation notice when there are more matches.
 
 #### Code
 
@@ -310,7 +379,7 @@ smith <remote> code search "<query>"            # search code in one remote
 smith <remote> code grep <repo> "<regex>"       # targeted grep in a repository
 ```
 
-`code grep` supports `--path`, `--glob`, `--branch`, `--output-mode`, `--context-lines`, `--from-line`, `--to-line`, `--case-sensitive`, and `--no-clone`.
+`code search` supports `--repo` (repeatable) and, for Azure DevOps, `--project`. `code grep` supports `--path`, `--glob`, `--branch`, `--output-mode {content,files_with_matches,count}`, `--context-lines`, `--from-line`, `--to-line`, `--case-sensitive`, and `--no-clone` (fetch through provider APIs instead of checking out locally).
 
 #### Pull Requests / Merge Requests
 
@@ -340,7 +409,7 @@ smith <remote> stories search --query "<text>"  # search issues
 smith <remote> stories mine                     # list my assigned items
 ```
 
-`stories search` supports `--area` (except YouTrack), `--type`, `--state`, `--assigned-to`, `--skip`, and `--take`.
+`stories search` supports `--area` (except YouTrack), `--type`, `--state`, `--assigned-to`, `--skip`, and `--take`. `stories mine` supports `--include-closed`, `--skip`, and `--take`.
 
 ### Provider-specific argument shapes
 
@@ -353,7 +422,7 @@ smith <remote> stories mine                     # list my assigned items
 
 ---
 
-## Quality Gates And Benchmarks
+## Quality gates and benchmarks
 
 Smith keeps three separate quality layers:
 
@@ -389,6 +458,26 @@ Capability benchmark outputs land in `benchmarks/workspaces/<timestamp>/` and in
 Checked-in benchmark assets live under `benchmarks/evals/` and `benchmarks/runtime/`. Generated capability benchmark outputs stay under `benchmarks/workspaces/`, which is gitignored.
 
 The Codex capability benchmark executor creates an isolated `CODEX_HOME` and copies your `auth.json` from `~/.codex` (or `CODEX_AUTH_HOME`) so it never modifies your real desktop configuration.
+
+---
+
+## FAQ
+
+### How is Smith different from the GitHub MCP, GitLab MCP, or Azure DevOps MCP?
+
+Provider MCPs expose a `get_file_contents`-style surface that downloads entire files. For an agent trying to answer *"where is the CPU limit set?"*, that means loading thousands of tokens of YAML, scanning, throwing it away, and repeating. Smith ships **server-side regex grep with context lines** across every provider, so the agent gets only the matching window. Smith also fans out across GitHub, GitLab, Azure DevOps, and YouTrack from a single command — a single provider MCP cannot.
+
+### How is Smith different from `ripgrep`, Sourcegraph, or `grep.app`?
+
+`ripgrep` is local-only and requires you to clone every repo first. Sourcegraph is powerful but is a hosted service with its own indexing pipeline and licensing. `grep.app` is read-only public search, not authenticated enterprise search. Smith hits your authenticated GitHub / GitLab / Azure DevOps APIs directly, runs on your machine with your credentials, and is purpose-built for LLM agents.
+
+### Does Smith work with Claude Code, Cursor, Windsurf, GitHub Copilot, and Codex?
+
+Yes. Smith ships a structured skill document (`skills/smith/SKILL.md`) that any LLM-powered editor can load as a rule / instruction / skill. The installer mirrors the canonical skill into `~/.agents/skills/smith`. See [Use with your AI editor](#use-with-your-ai-editor) for per-editor hints.
+
+### Is Smith read-only? Can an agent accidentally push or comment?
+
+Smith is read-only by contract. There are no `create`, `update`, `approve`, `comment`, or `post` commands in the CLI surface. If you want write operations, use `gh`, `glab`, `az`, or `jira` directly — Smith deliberately does not ship them.
 
 ---
 

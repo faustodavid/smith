@@ -5,6 +5,8 @@ import json
 import re
 from typing import Any
 
+from toon_format import encode as toon_encode
+
 
 def make_envelope(
     *,
@@ -547,6 +549,52 @@ def _render_story_table(data: Any) -> str:
     return "\n".join(lines)
 
 
+_CONFIG_REMOTE_EXTRA_FIELDS = ("org", "host", "token_env", "api_url")
+_CONFIG_LIST_FIELD_ORDER = ("name", "provider", "enabled", "org", "host")
+
+
+def _render_config_list(data: Any) -> str:
+    remotes = data.get("remotes", []) if isinstance(data, dict) else []
+    if not isinstance(remotes, list):
+        remotes = []
+
+    normalized: list[dict[str, Any]] = []
+    for entry in remotes:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {}
+        for field in _CONFIG_LIST_FIELD_ORDER:
+            value = entry.get(field)
+            if field == "enabled":
+                row[field] = bool(value)
+            elif field in ("name", "provider"):
+                row[field] = str(value or "")
+            else:
+                row[field] = value if value else None
+        normalized.append(row)
+
+    return toon_encode({"remotes": normalized})
+
+
+def _render_config_show(data: Any) -> str:
+    if not isinstance(data, dict):
+        return ""
+    ordered_keys = ("name", "provider", "enabled", *_CONFIG_REMOTE_EXTRA_FIELDS)
+    lines: list[str] = []
+    for key in ordered_keys:
+        if key not in data:
+            continue
+        value = data[key]
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        else:
+            rendered = str(value)
+        if rendered == "":
+            continue
+        lines.append(f"{key}: {rendered}")
+    return "\n".join(lines)
+
+
 _RENDER_DISPATCH: dict[str, Any] = {
     "orgs": _render_name_list,
     "groups": _render_name_list,
@@ -564,6 +612,8 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "stories.get": _render_story_ticket,
     "stories.search": _render_story_table,
     "stories.mine": _render_story_table,
+    "config.list": _render_config_list,
+    "config.show": _render_config_show,
 }
 
 

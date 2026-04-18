@@ -362,16 +362,15 @@ def test_handle_config_list_returns_all_remotes_as_json(monkeypatch: Any, capsys
             {
                 "name": "github",
                 "provider": "github",
+                "enabled": True,
                 "org": "octo-org",
                 "host": "github.com",
-                "enabled": True,
             },
             {
                 "name": "gitlab-infra",
                 "provider": "gitlab",
-                "org": "",
-                "host": "gitlab-infra.example.com",
                 "enabled": False,
+                "host": "gitlab-infra.example.com",
             },
         ]
     }
@@ -399,10 +398,9 @@ def test_handle_config_show_returns_remote_details_as_json(monkeypatch: Any, cap
     assert payload["data"] == {
         "name": "gitlab-infra",
         "provider": "gitlab",
-        "org": "",
+        "enabled": True,
         "host": "gitlab-infra.example.com",
         "token_env": "GITLAB_INFRA_TOKEN",
-        "enabled": True,
         "api_url": "https://gitlab-infra.example.com/api/v4",
     }
 

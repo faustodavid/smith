@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 from smith.client import SmithClient
-from smith.config import SmithConfig, _default_config_path, load_config, save_config
+from smith.config import RemoteConfig, SmithConfig, _default_config_path, load_config, save_config
 from smith.formatting import dumps_json, make_envelope, render_text
 
 EXIT_OK = 0
@@ -192,19 +192,23 @@ def _client_from_args(args: argparse.Namespace) -> SmithClient:
     return SmithClient()
 
 
+def _remote_summary(remote: RemoteConfig) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "name": remote.name,
+        "provider": remote.provider,
+        "enabled": remote.enabled,
+    }
+    if remote.org:
+        summary["org"] = remote.org
+    if remote.host:
+        summary["host"] = remote.host
+    return summary
+
+
 def handle_config_list(client: SmithClient | None, args: argparse.Namespace) -> int:
     del client
     config = load_config()
-    remotes_list = [
-        {
-            "name": remote.name,
-            "provider": remote.provider,
-            "org": remote.org,
-            "host": remote.host,
-            "enabled": remote.enabled,
-        }
-        for remote in config.remotes.values()
-    ]
+    remotes_list = [_remote_summary(remote) for remote in config.remotes.values()]
     return _emit_success(
         args=args,
         command=args.command_id,
@@ -226,15 +230,19 @@ def handle_config_show(client: SmithClient | None, args: argparse.Namespace) -> 
             message=f"Remote '{remote_name}' not found",
             exit_code=EXIT_INVALID_ARGS,
         )
-    data = {
+    data: dict[str, Any] = {
         "name": remote.name,
         "provider": remote.provider,
-        "org": remote.org,
-        "host": remote.host,
-        "token_env": remote.token_env,
         "enabled": remote.enabled,
-        "api_url": remote.api_url,
     }
+    if remote.org:
+        data["org"] = remote.org
+    if remote.host:
+        data["host"] = remote.host
+    if remote.token_env:
+        data["token_env"] = remote.token_env
+    if remote.api_url:
+        data["api_url"] = remote.api_url
     return _emit_success(
         args=args,
         command=args.command_id,
