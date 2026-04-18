@@ -42,6 +42,63 @@ def test_format_grep_matches_includes_context_and_gap_markers() -> None:
     ]
 
 
+def test_format_grep_matches_applies_line_offset_for_absolute_numbers() -> None:
+    rendered = format_grep_matches(
+        "/repo/log.txt",
+        ["first", "match", "third"],
+        {1},
+        context_lines=0,
+        include_line_numbers=True,
+        line_offset=99,
+    )
+
+    assert rendered == [
+        "/repo/log.txt",
+        "101:match",
+    ]
+
+
+def test_format_grep_matches_reverse_flips_block_order_preserving_ascending_within_block() -> None:
+    rendered = format_grep_matches(
+        "/repo/file.py",
+        ["zero", "one", "two", "three", "four", "five", "six"],
+        {1, 5},
+        context_lines=1,
+        include_line_numbers=True,
+        reverse=True,
+    )
+
+    assert rendered == [
+        "/repo/file.py",
+        "5-four",
+        "6:five",
+        "7-six",
+        "--",
+        "1-zero",
+        "2:one",
+        "3-two",
+    ]
+
+
+def test_format_grep_matches_reverse_combined_with_line_offset() -> None:
+    rendered = format_grep_matches(
+        "/repo/log.txt",
+        ["nine-hundred", "nine-oh-one", "nine-oh-two"],
+        {0, 2},
+        context_lines=0,
+        include_line_numbers=True,
+        line_offset=899,
+        reverse=True,
+    )
+
+    assert rendered == [
+        "/repo/log.txt",
+        "902:nine-oh-two",
+        "--",
+        "900:nine-hundred",
+    ]
+
+
 def test_truncate_output_reports_character_and_line_counts() -> None:
     text = "alpha\nbeta\ngamma\ndelta"
 

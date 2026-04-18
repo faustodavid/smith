@@ -379,7 +379,7 @@ smith <remote> code search "<query>"            # search code in one remote
 smith <remote> code grep <repo> "<regex>"       # targeted grep in a repository
 ```
 
-`code search` supports `--repo` (repeatable) and, for Azure DevOps, `--project`. `code grep` supports `--path`, `--glob`, `--branch`, `--output-mode {content,files_with_matches,count}`, `--context-lines`, `--from-line`, `--to-line`, `--case-sensitive`, and `--no-clone` (fetch through provider APIs instead of checking out locally).
+`code search` supports `--repo` (repeatable) and, for Azure DevOps, `--project`. `code grep` supports `--path`, `--glob`, `--branch`, `--output-mode {content,files_with_matches,count}`, `--context-lines`, `--from-line`, `--to-line`, `--reverse` , `--case-sensitive`, and `--no-clone` (fetch through provider APIs instead of checking out locally).
 
 #### Pull Requests / Merge Requests
 
@@ -399,7 +399,7 @@ smith <remote> pipelines logs list <repo> <id>  # list logs for a pipeline run
 smith <remote> pipelines logs grep <repo> <id> "<regex>"  # grep pipeline logs
 ```
 
-`logs grep` supports `--log-id`, `--output-mode`, `--context-lines`, `--from-line`, `--to-line`, and `--case-sensitive`.
+`logs grep` supports `--log-id`, `--output-mode`, `--context-lines`, `--from-line`, `--to-line`, `--reverse`, and `--case-sensitive`.
 
 #### Stories & Issues
 

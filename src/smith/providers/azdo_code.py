@@ -174,8 +174,10 @@ class AzdoCodeMixin:
         context_lines: int | None = 3,
         from_line: int | None = None,
         to_line: int | None = None,
+        reverse: bool = False,
         no_clone: bool = False,
     ) -> dict[str, Any]:
+        del no_clone  # AzDO has no local-clone fast path yet.
         folder_path = normalize_path(path)
         normalized_branch = normalize_branch_name(branch)
         regex_pattern = pattern or ".*"
@@ -206,7 +208,8 @@ class AzdoCodeMixin:
             return grep_too_many_files_result(len(matching), self._config.grep_max_files)
 
         if output_mode == "files_with_matches" and is_match_all:
-            text = "\n".join(item["path"] for item in matching)
+            ordered_matching = list(reversed(matching)) if reverse else matching
+            text = "\n".join(item["path"] for item in ordered_matching)
             text = truncate_output(
                 text,
                 self.max_output_chars,
@@ -214,7 +217,7 @@ class AzdoCodeMixin:
             )
             return {
                 "text": text,
-                "files_matched": len(matching),
+                "files_matched": len(ordered_matching),
                 "warnings": [],
                 "partial": False,
             }
@@ -230,7 +233,9 @@ class AzdoCodeMixin:
         warnings: list[str] = []
         files_matched = 0
 
-        for file_item in matching:
+        iter_files = list(reversed(matching)) if reverse else matching
+
+        for file_item in iter_files:
             file_path = file_item["path"]
             if file_item["is_binary"]:
                 continue
@@ -246,11 +251,13 @@ class AzdoCodeMixin:
                 warnings.append(f"failed to read {file_path}: {exc}")
                 continue
 
+            all_lines = content.splitlines()
             lines = slice_lines(
-                content.splitlines(),
+                all_lines,
                 from_line=from_line,
                 to_line=to_line,
             )
+            line_offset = (from_line - 1) if from_line and from_line > 0 else 0
 
             matched_lines, count = grep_match_lines(
                 lines=lines,
@@ -258,6 +265,8 @@ class AzdoCodeMixin:
                 file_label=file_path,
                 output_mode=output_mode,
                 context_lines=context_lines or 0,
+                line_offset=line_offset,
+                reverse=reverse,
             )
             if count:
                 files_matched += count

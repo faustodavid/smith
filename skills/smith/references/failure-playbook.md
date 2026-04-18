@@ -16,8 +16,8 @@ Match the failure symptom to a block, apply one step, then retry once. Use `refe
 
 ## Truncation
 
+- For pipeline logs, try `--reverse` so truncation drops older hits before the latest failures, or page with `--from-line` / `--to-line` if you know the area you need.
 - Narrow `--path` and `--glob`.
-- Page with `--from-line` / `--to-line`.
 - Reduce `--context-lines`.
 
 ## Empty results

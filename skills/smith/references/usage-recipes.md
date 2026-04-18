@@ -50,7 +50,7 @@ smith <github-remote-name> code grep <repo> "<regex>" --path <path> --glob "<glo
 smith <gitlab-remote-name> code grep <group/project> "<regex>" --path <path> --glob "<glob>" --context-lines 2
 ```
 
-All grep variants also accept `--branch`, `--from-line`/`--to-line`, `--case-sensitive`, and `--no-clone` (skip local clone and fetch via provider APIs — good for one-off scans across many repos). `--output-mode` is one of `content` (default), `files_with_matches`, or `count`.
+All grep variants also accept `--branch`, `--from-line`/`--to-line`, `--reverse`, `--case-sensitive`, and `--no-clone` (skip local clone and fetch via provider APIs — good for one-off scans across many repos). `--output-mode` is one of `content` (default), `files_with_matches`, or `count`.
 
 ## Pull Requests / Merge Requests
 
@@ -86,6 +86,9 @@ smith <azdo-remote-name> pipelines logs grep <project> <id> "ERROR|Exception" --
 smith <github-remote-name> pipelines logs grep <repo> <id> "ERROR|Exception"
 smith <gitlab-remote-name> pipelines logs grep <group/project> <id> "ERROR|Exception"
 smith <azdo-remote-name> pipelines logs grep <project> <id> ".*" --log-id <log_id> --from-line <n>
+
+# Error analysis: show the newest hits first so truncation drops older ones.
+smith <github-remote-name> pipelines logs grep <repo> <id> "error|Exception|Traceback" --reverse
 ```
 
 `<id>` is the pipeline, run, or build ID — not a job or log ID. To drill into one job, find the pipeline ID first, then use `--log-id <job-or-log-id>` on `pipelines logs grep`.

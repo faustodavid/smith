@@ -45,6 +45,7 @@ def _make_args(**overrides: Any) -> Namespace:
         "context_lines": 2,
         "from_line": 10,
         "to_line": 20,
+        "reverse": False,
         "no_clone": False,
         "cache_remote": "all",
         "id": 42,
@@ -254,6 +255,42 @@ def test_selected_remote_provider_returns_empty_when_config_lookup_cannot_resolv
     assert handlers._selected_remote_provider(args) == ""
 
 
+def test_handle_code_grep_forwards_reverse(monkeypatch: Any, capsys: Any) -> None:
+    client = _RecordingClient(payload={"marker": "code-grep"})
+    args = _make_args(
+        command_id="code.grep",
+        from_line=None,
+        to_line=None,
+        reverse=True,
+    )
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
+
+    exit_code = handlers.handle_code_grep(client, args)
+    _ = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert client.calls[0][1]["reverse"] is True
+    assert client.calls[0][1]["from_line"] is None
+    assert client.calls[0][1]["to_line"] is None
+
+
+def test_handle_ci_grep_forwards_reverse(monkeypatch: Any, capsys: Any) -> None:
+    client = _RecordingClient(payload={"marker": "ci-grep"})
+    args = _make_args(
+        command_id="pipelines.logs.grep",
+        from_line=None,
+        to_line=None,
+        reverse=True,
+    )
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
+
+    exit_code = handlers.handle_ci_grep(client, args)
+    _ = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert client.calls[0][1]["reverse"] is True
+
+
 def test_handle_code_grep_uses_named_remote(monkeypatch: Any, capsys: Any) -> None:
     client = _RecordingClient(payload={"marker": "code-grep"})
     args = _make_args(command_id="code.grep", remote="gitlab-infra", remote_provider="gitlab", project=None)
@@ -278,6 +315,7 @@ def test_handle_code_grep_uses_named_remote(monkeypatch: Any, capsys: Any) -> No
                 "context_lines": 2,
                 "from_line": 10,
                 "to_line": 20,
+                "reverse": False,
                 "no_clone": False,
             },
         )
@@ -618,6 +656,7 @@ def test_handle_config_toggle_persists_updated_remote_state(
                 "context_lines": 2,
                 "from_line": 10,
                 "to_line": 20,
+                "reverse": False,
                 "no_clone": True,
             },
         ),
@@ -655,6 +694,7 @@ def test_handle_config_toggle_persists_updated_remote_state(
                 "context_lines": 2,
                 "from_line": 10,
                 "to_line": 20,
+                "reverse": False,
             },
         ),
         (
