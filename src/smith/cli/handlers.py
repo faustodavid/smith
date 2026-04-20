@@ -610,21 +610,6 @@ def handle_ci_list(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
-def handle_ci_logs(client: SmithClient, args: argparse.Namespace) -> int:
-    data = client.execute_ci_logs(
-        remote_or_provider=_selected_target(args),
-        project=getattr(args, "project", None),
-        repo=getattr(args, "repo", None),
-        build_id=args.id,
-    )
-    return _emit_success(
-        args=args,
-        command=args.command_id,
-        data=data,
-        partial=_is_partial_result(data),
-    )
-
-
 def handle_ci_grep(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_ci_grep(
         remote_or_provider=_selected_target(args),

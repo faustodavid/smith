@@ -333,29 +333,6 @@ def _render_pr_threads(data: Any) -> str:
     return "\n".join(lines)
 
 
-def _render_build_logs(data: Any) -> str:
-    metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
-    logs = data.get("logs", []) if isinstance(data, dict) else []
-    lines = [
-        f"build_id: {metadata.get('build_id')}",
-        f"status: {metadata.get('status')}",
-        f"result: {metadata.get('result')}",
-        f"definition: {metadata.get('definition_name')}",
-        "logs:",
-    ]
-    lines.extend(
-        _fmt_table_line([
-            str(log.get("id", "")),
-            str(log.get("line_count", "")),
-            str(log.get("stage_name", "")),
-            str(log.get("job_name", "")),
-            str(log.get("step_name", "")),
-        ])
-        for log in logs
-    )
-    return "\n".join(lines)
-
-
 def _render_board_ticket(data: Any) -> str:
     fields = (data.get("fields") or {}) if isinstance(data, dict) else {}
     return "\n".join([
@@ -780,12 +757,11 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "code.grep": _render_grep,
     "cache.clean": _render_cache_clean,
     "pipelines.list": _render_pipelines_list,
-    "pipelines.logs.grep": _render_grep,
+    "pipelines.grep": _render_grep,
     "prs.search": _render_pr_list,
     "prs.list": _render_pr_list,
     "prs.get": _render_pr_get,
     "prs.threads": _render_pr_threads,
-    "pipelines.logs.list": _render_build_logs,
     "stories.get": _render_story_ticket,
     "stories.search": _render_story_table,
     "stories.mine": _render_story_table,
@@ -829,7 +805,7 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
             lines.append(rendered)
 
         warnings = _visible_remote_warnings(command, remote_data, entry.get("warnings") or [])
-        if command not in {"code.grep", "pipelines.logs.grep"}:
+        if command not in {"code.grep", "pipelines.grep"}:
             for warning in warnings:
                 lines.append(f"warning: {warning}")
         return "\n".join(lines).rstrip()
@@ -875,7 +851,7 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
                 output_lines.append(rendered)
 
         warnings = _visible_remote_warnings(command, remote_data, entry.get("warnings") or [])
-        if command not in {"code.grep", "pipelines.logs.grep"}:
+        if command not in {"code.grep", "pipelines.grep"}:
             for warning in warnings:
                 output_lines.append(f"warning: {warning}")
         output_lines.append("")

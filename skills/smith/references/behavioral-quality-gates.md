@@ -14,7 +14,7 @@ Self-review checklist. An investigation is acceptable only if every gate passes.
 - [ ] Unknown org/project scope uses `smith <remote> orgs`, `smith <remote> repos`, or GitLab `smith <gitlab-remote-name> groups`.
 - [ ] Unknown file structure uses `smith <remote> code grep ... ".*" --output-mode files_with_matches` before wider regex.
 - [ ] Final evidence comes from focused `smith <remote> code grep`.
-- [ ] `prs`, `pipelines logs`, `stories` are used only for corroboration.
+- [ ] `prs`, `pipelines`, `stories` are used only for corroboration.
 - [ ] GitHub follow-ups use bare `<repo>`. GitLab follow-ups use full `group/project`.
 
 ## Gate 3 — Answer Quality

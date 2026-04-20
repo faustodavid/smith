@@ -160,13 +160,6 @@ def test_render_text_renders_prs_pipeline_and_story_views() -> None:
             ],
         },
     )
-    ci_logs = render_text(
-        "pipelines.logs.list",
-        {
-            "metadata": {"build_id": 101, "status": "completed", "result": "failed", "definition_name": "CI"},
-            "logs": [{"id": 1, "line_count": 50, "stage_name": "Build", "job_name": "linux", "step_name": "pytest"}],
-        },
-    )
     work_get = render_text(
         "stories.get",
         {"id": 9, "fields": {"System.WorkItemType": "Bug", "System.State": "Active", "System.Title": "Fix login"}},
@@ -207,14 +200,6 @@ def test_render_text_renders_prs_pipeline_and_story_views() -> None:
         "total_comments: 2\n"
         "thread 5 status=active comments=2 file=/src/app.py:18\n"
         "  - alice: Looks good"
-    )
-    assert ci_logs == (
-        "build_id: 101\n"
-        "status: completed\n"
-        "result: failed\n"
-        "definition: CI\n"
-        "logs:\n"
-        "1 | 50 | Build | linux | pytest"
     )
     assert work_get == "id: 9\ntype: Bug\nstate: Active\ntitle: Fix login"
     assert work_search == "id | type | state | title\n9 | Bug | Active | Fix login\nreturned_count: 1\nhas_more: False"
@@ -446,7 +431,7 @@ def test_render_text_flattens_single_remote_and_omits_duplicate_grep_warnings() 
         "summary": {"queried": ["github"]},
     }
 
-    assert render_text("pipelines.logs.grep", payload) == "line one\nwarning: inner warning"
+    assert render_text("pipelines.grep", payload) == "line one\nwarning: inner warning"
 
 
 def test_render_text_returns_remote_error_for_single_remote_failures() -> None:

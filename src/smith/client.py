@@ -665,25 +665,6 @@ class SmithClient:
             },
         )
 
-    def execute_ci_logs(
-        self,
-        *,
-        remote_or_provider: str,
-        project: str | None,
-        repo: str | None,
-        build_id: int,
-    ) -> dict[str, Any]:
-        target = self._require_single_target(remote_or_provider, command="pipelines.logs.list")
-        effective_repo = repo or project
-        return self._fanout(
-            remote_or_provider=target,
-            operations={
-                "azdo": lambda r: self._azdo_provider(r).get_build_log(project=str(project), build_id=build_id),
-                "github": lambda r: self._github_provider(r).get_build_log(repo=str(effective_repo), build_id=build_id),
-                "gitlab": lambda r: self._gitlab_provider(r).get_build_log(repo=str(effective_repo), build_id=build_id),
-            },
-        )
-
     def execute_ci_grep(
         self,
         *,
@@ -700,7 +681,7 @@ class SmithClient:
         to_line: int | None,
         reverse: bool = False,
     ) -> dict[str, Any]:
-        target = self._require_single_target(remote_or_provider, command="pipelines.logs.grep")
+        target = self._require_single_target(remote_or_provider, command="pipelines.grep")
         effective_repo = repo or project
         return self._fanout(
             remote_or_provider=target,

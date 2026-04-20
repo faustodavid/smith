@@ -277,7 +277,7 @@ def test_handle_code_grep_forwards_reverse(monkeypatch: Any, capsys: Any) -> Non
 def test_handle_ci_grep_forwards_reverse(monkeypatch: Any, capsys: Any) -> None:
     client = _RecordingClient(payload={"marker": "ci-grep"})
     args = _make_args(
-        command_id="pipelines.logs.grep",
+        command_id="pipelines.grep",
         from_line=None,
         to_line=None,
         reverse=True,
@@ -697,14 +697,8 @@ def test_handle_config_toggle_persists_updated_remote_state(
             },
         ),
         (
-            "handle_ci_logs",
-            _make_args(command_id="pipelines.logs.list"),
-            "execute_ci_logs",
-            {"remote_or_provider": "azdo", "project": "proj-a", "repo": "repo-a", "build_id": 42},
-        ),
-        (
             "handle_ci_grep",
-            _make_args(command_id="pipelines.logs.grep"),
+            _make_args(command_id="pipelines.grep"),
             "execute_ci_grep",
             {
                 "remote_or_provider": "azdo",

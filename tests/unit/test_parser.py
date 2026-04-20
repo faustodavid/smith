@@ -369,17 +369,6 @@ def test_prs_threads_parser_uses_canonical_command_id() -> None:
     assert args.id == 42
 
 
-def test_pipelines_logs_list_parser_uses_canonical_command_id() -> None:
-    parser = _build_test_parser()
-    args = parser.parse_args(["azdo", "pipelines", "logs", "list", "SRE", "42"])
-
-    assert args.command_id == "pipelines.logs.list"
-    assert args.remote == "azdo"
-    assert args.remote_provider == "azdo"
-    assert args.project == "SRE"
-    assert args.id == 42
-
-
 def test_pipelines_list_parser_defaults_for_gitlab() -> None:
     parser = _build_test_parser()
     args = parser.parse_args(["gitlab", "pipelines", "list", "group/project", "101"])
@@ -525,13 +514,12 @@ def test_code_grep_parser_defaults_reverse_to_false() -> None:
     assert args.reverse is False
 
 
-def test_pipelines_logs_grep_parser_accepts_reverse() -> None:
+def test_pipelines_grep_parser_accepts_reverse() -> None:
     parser = _build_test_parser()
     args = parser.parse_args(
         [
             "github",
             "pipelines",
-            "logs",
             "grep",
             "repo-a",
             "42",
@@ -540,7 +528,7 @@ def test_pipelines_logs_grep_parser_accepts_reverse() -> None:
         ]
     )
 
-    assert args.command_id == "pipelines.logs.grep"
+    assert args.command_id == "pipelines.grep"
     assert args.id == 42
     assert args.reverse is True
 
@@ -570,11 +558,11 @@ def test_code_grep_parser_accepts_named_remote() -> None:
     assert args.pattern == "error"
 
 
-def test_pipelines_logs_grep_parser_uses_canonical_command_id() -> None:
+def test_pipelines_grep_parser_uses_canonical_command_id() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(["github", "pipelines", "logs", "grep", "repo-a", "42", "error"])
+    args = parser.parse_args(["github", "pipelines", "grep", "repo-a", "42", "error"])
 
-    assert args.command_id == "pipelines.logs.grep"
+    assert args.command_id == "pipelines.grep"
     assert args.remote == "github"
     assert args.remote_provider == "github"
     assert args.repo == "repo-a"
@@ -582,11 +570,11 @@ def test_pipelines_logs_grep_parser_uses_canonical_command_id() -> None:
     assert args.pattern == "error"
 
 
-def test_pipelines_logs_grep_gitlab_parser_uses_canonical_command_id() -> None:
+def test_pipelines_grep_gitlab_parser_uses_canonical_command_id() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(["gitlab", "pipelines", "logs", "grep", "engineering-tools/repo-a", "42", "error"])
+    args = parser.parse_args(["gitlab", "pipelines", "grep", "engineering-tools/repo-a", "42", "error"])
 
-    assert args.command_id == "pipelines.logs.grep"
+    assert args.command_id == "pipelines.grep"
     assert args.remote == "gitlab"
     assert args.remote_provider == "gitlab"
     assert args.repo == "engineering-tools/repo-a"
@@ -594,11 +582,11 @@ def test_pipelines_logs_grep_gitlab_parser_uses_canonical_command_id() -> None:
     assert args.pattern == "error"
 
 
-def test_pipelines_logs_grep_parser_accepts_log_id_before_pattern() -> None:
+def test_pipelines_grep_parser_accepts_log_id_before_pattern() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(["azdo", "pipelines", "logs", "grep", "SRE", "42", "--log-id", "18", "error"])
+    args = parser.parse_args(["azdo", "pipelines", "grep", "SRE", "42", "--log-id", "18", "error"])
 
-    assert args.command_id == "pipelines.logs.grep"
+    assert args.command_id == "pipelines.grep"
     assert args.remote == "azdo"
     assert args.remote_provider == "azdo"
     assert args.project == "SRE"
@@ -725,7 +713,7 @@ def test_youtrack_remote_help_lists_only_stories(capsys: pytest.CaptureFixture[s
     assert "orgs" not in output
 
 
-def test_pipelines_help_lists_list_and_logs(capsys: pytest.CaptureFixture[str]) -> None:
+def test_pipelines_help_lists_list_and_grep(capsys: pytest.CaptureFixture[str]) -> None:
     parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
@@ -733,24 +721,12 @@ def test_pipelines_help_lists_list_and_logs(capsys: pytest.CaptureFixture[str]) 
 
     output = capsys.readouterr().out
     assert "list" in output
-    assert "logs" in output
-    assert "Inspect pipeline logs" in output
-    assert "List a pipeline and its downstream pipelines" in output
-    assert "{list,logs}" in output
-    assert "\n    grep" not in output
-
-
-def test_pipelines_logs_help_lists_list_and_grep(capsys: pytest.CaptureFixture[str]) -> None:
-    parser = _build_test_parser()
-
-    with pytest.raises(SystemExit):
-        parser.parse_args(["gitlab", "pipelines", "logs", "--help"])
-
-    output = capsys.readouterr().out
-    assert "list" in output
     assert "grep" in output
-    assert "List logs for a pipeline run" in output
+    assert "List a pipeline and its downstream pipelines" in output
     assert "Search or read pipeline logs" in output
+    assert "{list,grep}" in output
+    assert "{list,logs}" not in output
+    assert "Inspect pipeline logs" not in output
 
 
 def test_stories_query_path_fails_to_parse() -> None:

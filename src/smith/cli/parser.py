@@ -9,7 +9,6 @@ from smith.cli.handlers import (
     handle_cache_clean,
     handle_ci_grep,
     handle_ci_list,
-    handle_ci_logs,
     handle_code_grep,
     handle_code_search,
     handle_config_disable,
@@ -166,7 +165,7 @@ def _add_ci_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--log-id", type=int)
     parser.add_argument(
         "pattern",
-        help='Regex pattern. Use ".*" to match all. Form: smith <remote> pipelines logs grep <scope> <id> "<regex>"',
+        help='Regex pattern. Use ".*" to match all. Form: smith <remote> pipelines grep <scope> <id> "<regex>"',
     )
     parser.add_argument(
         "--output-mode",
@@ -544,19 +543,11 @@ def _add_remote_pipelines_group(remote_subparsers: Any, *, remote: RemoteConfig)
     _add_output_format(pipelines_list)
     _set_handler(pipelines_list, handle_ci_list, "pipelines.list", primary_path="pipelines list")
 
-    logs = _add_parser(pipelines_sub, "logs", help_text="Inspect pipeline logs")
-    logs_sub = logs.add_subparsers(dest="log_action", required=True)
-
-    logs_list = _add_parser(logs_sub, "list", help_text="List logs for a pipeline run")
-    _add_pipeline_positional_args(logs_list, remote=remote, id_label=id_label)
-    _add_output_format(logs_list)
-    _set_handler(logs_list, handle_ci_logs, "pipelines.logs.list", primary_path="pipelines logs list")
-
-    logs_grep = _add_parser(logs_sub, "grep", help_text="Search or read pipeline logs")
-    _add_pipeline_positional_args(logs_grep, remote=remote, id_label=id_label)
-    _add_ci_grep_options(logs_grep)
-    _add_output_format(logs_grep)
-    _set_handler(logs_grep, handle_ci_grep, "pipelines.logs.grep", primary_path="pipelines logs grep")
+    pipelines_grep = _add_parser(pipelines_sub, "grep", help_text="Search or read pipeline logs")
+    _add_pipeline_positional_args(pipelines_grep, remote=remote, id_label=id_label)
+    _add_ci_grep_options(pipelines_grep)
+    _add_output_format(pipelines_grep)
+    _set_handler(pipelines_grep, handle_ci_grep, "pipelines.grep", primary_path="pipelines grep")
 
 
 def _add_remote_stories_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:

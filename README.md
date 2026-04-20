@@ -105,8 +105,8 @@ Smith returns only the matching lines with surrounding context. The agent gets e
 The same grep workflow extends to CI/CD. Instead of downloading an entire build log, Smith lets agents search across all jobs or target a specific one:
 
 ```bash
-smith github-public pipelines logs grep my-repo 12345 "error|fatal" --context-lines 3
-smith azdo-main pipelines logs grep SRE 6789 "timeout" --log-id 42
+smith github-public pipelines grep my-repo 12345 "error|fatal" --context-lines 3
+smith azdo-main pipelines grep SRE 6789 "timeout" --log-id 42
 ```
 
 ### Structured, agent-friendly output
@@ -396,13 +396,12 @@ smith <remote> prs threads <repo> <id>          # get review comments
 
 ```bash
 smith <remote> pipelines list <repo> <id>       # list a pipeline + downstream pipelines (GitLab recurses)
-smith <remote> pipelines logs list <repo> <id>  # list logs for a pipeline run
-smith <remote> pipelines logs grep <repo> <id> "<regex>"  # grep pipeline logs
+smith <remote> pipelines grep <repo> <id> "<regex>"  # grep pipeline logs
 ```
 
 `pipelines list` supports `--grep`, `--status` (CSV), `--skip`, and `--take`. GitLab additionally supports `--max-depth` (0 = unlimited) and traverses downstream children via the `/bridges` API; GitHub and Azure DevOps return only the root run/build.
 
-`logs grep` supports `--log-id`, `--output-mode`, `--context-lines`, `--from-line`, `--to-line`, `--reverse`, and `--case-sensitive`.
+`pipelines grep` supports `--log-id`, `--output-mode`, `--context-lines`, `--from-line`, `--to-line`, `--reverse`, and `--case-sensitive`.
 
 #### Stories & Issues
 

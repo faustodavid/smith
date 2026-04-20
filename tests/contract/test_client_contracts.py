@@ -473,20 +473,6 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
             },
         ),
         (
-            "execute_ci_logs",
-            {"remote_or_provider": "github", "project": "proj-a", "repo": None, "build_id": 19},
-            "github",
-            "get_build_log",
-            {"repo": "proj-a", "build_id": 19},
-        ),
-        (
-            "execute_ci_logs",
-            {"remote_or_provider": "gitlab", "project": "proj-a", "repo": None, "build_id": 19},
-            "gitlab",
-            "get_build_log",
-            {"repo": "proj-a", "build_id": 19},
-        ),
-        (
             "execute_ci_grep",
             {
                 "remote_or_provider": "github",
@@ -897,9 +883,7 @@ def test_canonical_methods_cover_removed_wrapper_behavior(monkeypatch: Any) -> N
     client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
 
     discover_projects = client.execute_discover_projects(remote_or_provider="gitlab")
-    ci_logs = client.execute_ci_logs(remote_or_provider="gitlab", project=None, repo="repo-a", build_id=1)
     work_get = client.execute_work_get(remote_or_provider="gitlab", project=None, repo="repo-a", work_item_id=2)
 
     assert discover_projects["remotes"]["gitlab"]["data"]["method"] == "list_projects"
-    assert ci_logs["remotes"]["gitlab"]["data"]["method"] == "get_build_log"
     assert work_get["remotes"]["gitlab"]["data"]["method"] == "get_ticket_by_id"

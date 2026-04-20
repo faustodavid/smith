@@ -102,20 +102,16 @@ Output is a token-optimised DAG: one `@` line per pipeline, then `#stage` header
 ## Pipeline Logs
 
 ```bash
-smith <azdo-remote-name> pipelines logs list <project> <id>
-smith <github-remote-name> pipelines logs list <repo> <id>
-smith <gitlab-remote-name> pipelines logs list <group/project> <id>
-
-smith <azdo-remote-name> pipelines logs grep <project> <id> "ERROR|Exception" --output-mode logs_with_matches
-smith <github-remote-name> pipelines logs grep <repo> <id> "ERROR|Exception"
-smith <gitlab-remote-name> pipelines logs grep <group/project> <id> "ERROR|Exception"
-smith <azdo-remote-name> pipelines logs grep <project> <id> ".*" --log-id <log_id> --from-line <n>
+smith <azdo-remote-name> pipelines grep <project> <id> "ERROR|Exception" --output-mode logs_with_matches
+smith <github-remote-name> pipelines grep <repo> <id> "ERROR|Exception"
+smith <gitlab-remote-name> pipelines grep <group/project> <id> "ERROR|Exception"
+smith <azdo-remote-name> pipelines grep <project> <id> ".*" --log-id <log_id> --from-line <n>
 
 # Error analysis: show the newest hits first so truncation drops older ones.
-smith <github-remote-name> pipelines logs grep <repo> <id> "error|Exception|Traceback" --reverse
+smith <github-remote-name> pipelines grep <repo> <id> "error|Exception|Traceback" --reverse
 ```
 
-`<id>` is the pipeline, run, or build ID — not a job or log ID. To drill into one job, find the pipeline ID first, then use `--log-id <job-or-log-id>` on `pipelines logs grep`.
+`<id>` is the pipeline, run, or build ID — not a job or log ID. To drill into one job, call `pipelines list` to find the pipeline ID first, then use `--log-id <job-or-log-id>` on `pipelines grep`.
 
 ## Stories / Issues
 
