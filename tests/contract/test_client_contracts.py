@@ -8,6 +8,7 @@ from tests.support import make_runtime_config
 from smith import client as client_module
 from smith.client import SmithClient
 from smith.config import RemoteConfig, SmithConfig
+from smith.pipeline_listing import PipelineListQuery
 
 
 class _FakeProvider:
@@ -394,6 +395,81 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
                 "take": 5,
                 "exclude_drafts": True,
                 "include_labels": True,
+            },
+        ),
+        (
+            "execute_ci_list",
+            {
+                "remote_or_provider": "azdo",
+                "project": "proj-a",
+                "repo": None,
+                "pipeline_id": 19,
+                "grep": "^check",
+                "statuses": ["failed"],
+                "skip": 1,
+                "take": 15,
+                "max_depth": 0,
+            },
+            "azdo",
+            "list_pipelines",
+            {
+                "project": "proj-a",
+                "pipeline_id": 19,
+                "query": PipelineListQuery.create(
+                    grep="^check",
+                    statuses=["failed"],
+                    skip=1,
+                    take=15,
+                    max_depth=0,
+                ),
+            },
+        ),
+        (
+            "execute_ci_list",
+            {
+                "remote_or_provider": "github",
+                "project": None,
+                "repo": "repo-a",
+                "pipeline_id": 19,
+                "grep": None,
+                "statuses": None,
+                "skip": 0,
+                "take": 20,
+                "max_depth": 0,
+            },
+            "github",
+            "list_pipelines",
+            {
+                "repo": "repo-a",
+                "pipeline_id": 19,
+                "query": PipelineListQuery.create(skip=0, take=20, max_depth=0),
+            },
+        ),
+        (
+            "execute_ci_list",
+            {
+                "remote_or_provider": "gitlab",
+                "project": None,
+                "repo": "group/project",
+                "pipeline_id": 19,
+                "grep": "^check",
+                "statuses": ["running", "failed"],
+                "skip": 0,
+                "take": 20,
+                "max_depth": 2,
+            },
+            "gitlab",
+            "list_pipelines",
+            {
+                "repo": "group/project",
+                "pipeline_id": 19,
+                "query": PipelineListQuery.create(
+                    grep="^check",
+                    statuses=["running", "failed"],
+                    skip=0,
+                    take=20,
+                    max_depth=2,
+                ),
             },
         ),
         (

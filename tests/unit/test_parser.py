@@ -380,6 +380,110 @@ def test_pipelines_logs_list_parser_uses_canonical_command_id() -> None:
     assert args.id == 42
 
 
+def test_pipelines_list_parser_defaults_for_gitlab() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["gitlab", "pipelines", "list", "group/project", "101"])
+
+    assert args.command_id == "pipelines.list"
+    assert args.remote == "gitlab"
+    assert args.remote_provider == "gitlab"
+    assert args.repo == "group/project"
+    assert args.id == 101
+    assert args.grep is None
+    assert args.status is None
+    assert args.skip == 0
+    assert args.take == 20
+    assert args.max_depth == 0
+
+
+def test_pipelines_list_parser_accepts_all_flags() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(
+        [
+            "gitlab",
+            "pipelines",
+            "list",
+            "group/project",
+            "101",
+            "--grep",
+            "^checkout",
+            "--status",
+            "failed,running",
+            "--skip",
+            "3",
+            "--take",
+            "15",
+            "--max-depth",
+            "2",
+        ]
+    )
+
+    assert args.command_id == "pipelines.list"
+    assert args.grep == "^checkout"
+    assert args.status == ["failed", "running"]
+    assert args.skip == 3
+    assert args.take == 15
+    assert args.max_depth == 2
+
+
+@pytest.mark.parametrize(
+    ("argv", "provider", "project", "repo"),
+    [
+        (["azdo", "pipelines", "list", "SRE", "42"], "azdo", "SRE", None),
+        (["github", "pipelines", "list", "repo-a", "42"], "github", None, "repo-a"),
+    ],
+)
+def test_pipelines_list_parser_positional_args_per_provider(
+    argv: list[str],
+    provider: str,
+    project: str | None,
+    repo: str | None,
+) -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(argv)
+
+    assert args.command_id == "pipelines.list"
+    assert args.remote == provider
+    assert args.project == project
+    assert args.repo == repo
+    assert args.id == 42
+    assert args.max_depth == 0
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["azdo", "pipelines", "list", "SRE", "42", "--max-depth", "1"],
+        ["github", "pipelines", "list", "repo-a", "42", "--max-depth", "1"],
+    ],
+)
+def test_pipelines_list_parser_rejects_max_depth_on_non_gitlab_remotes(argv: list[str]) -> None:
+    parser = _build_test_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(argv)
+
+
+def test_pipelines_list_help_shows_max_depth_only_on_gitlab(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["gitlab", "pipelines", "list", "--help"])
+    gitlab_help = capsys.readouterr().out
+    assert "--max-depth" in gitlab_help
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["github", "pipelines", "list", "--help"])
+    github_help = capsys.readouterr().out
+    assert "--max-depth" not in github_help
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["azdo", "pipelines", "list", "--help"])
+    azdo_help = capsys.readouterr().out
+    assert "--max-depth" not in azdo_help
+
+
 def test_code_grep_parser_uses_required_positional_pattern() -> None:
     parser = _build_test_parser()
     args = parser.parse_args(["github", "code", "grep", "repo-a", "--path", "/src", "error"])
@@ -621,16 +725,18 @@ def test_youtrack_remote_help_lists_only_stories(capsys: pytest.CaptureFixture[s
     assert "orgs" not in output
 
 
-def test_pipelines_help_lists_only_logs(capsys: pytest.CaptureFixture[str]) -> None:
+def test_pipelines_help_lists_list_and_logs(capsys: pytest.CaptureFixture[str]) -> None:
     parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(["gitlab", "pipelines", "--help"])
 
     output = capsys.readouterr().out
+    assert "list" in output
     assert "logs" in output
     assert "Inspect pipeline logs" in output
-    assert "{logs}" in output
+    assert "List a pipeline and its downstream pipelines" in output
+    assert "{list,logs}" in output
     assert "\n    grep" not in output
 
 

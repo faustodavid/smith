@@ -11,6 +11,7 @@ from tests.support import make_runtime_config
 
 from smith.discovery import DiscoveryQuery
 from smith.errors import SmithApiError
+from smith.pipeline_listing import PipelineListQuery
 from smith.providers.gitlab import GitLabProvider
 
 _FULL_REPO = "gitlab-org/repo-a"
@@ -1963,3 +1964,838 @@ def test_gitlab_issue_search_matches_count_uses_full_query_total(monkeypatch: An
             "limit": None,
         },
     ]
+
+
+_ROOT_PROJECT_TOKEN = "gitlab-org%2Frepo-a"
+_CHECKOUT_PROJECT_TOKEN = "gitlab-org%2Fcheckout-service"
+_INTEGRATION_PROJECT_TOKEN = "gitlab-org%2Fintegration-tests"
+
+
+def test_gitlab_list_pipelines_traverses_bridges_and_normalizes_downstream(monkeypatch: Any) -> None:
+    provider = _provider()
+    provider._cache_project(project_id="101", full_path=_FULL_REPO)
+    provider._cache_project(project_id="202", full_path="gitlab-org/checkout-service")
+    provider._cache_project(project_id="303", full_path="gitlab-org/integration-tests")
+
+    pipeline_details = {
+        (_ROOT_PROJECT_TOKEN, 77): {
+            "id": 77,
+            "project_id": 101,
+            "iid": 12,
+            "name": "Main CI",
+            "status": "running",
+            "ref": "main",
+            "sha": "a1b2c3dEEEEEEE",
+            "source": "push",
+            "created_at": "2025-01-01T00:00:00Z",
+            "duration": 1842,
+            "web_url": "https://gitlab.com/gitlab-org/repo-a/-/pipelines/77",
+        },
+        (_CHECKOUT_PROJECT_TOKEN, 88): {
+            "id": 88,
+            "project_id": 202,
+            "iid": 5,
+            "name": "Checkout build",
+            "status": "success",
+            "ref": "main",
+            "sha": "9f8e7d6EEEEEEE",
+            "source": "pipeline",
+            "created_at": "2025-01-01T00:05:00Z",
+            "duration": 420,
+            "web_url": "https://gitlab.com/gitlab-org/checkout-service/-/pipelines/88",
+        },
+        (_INTEGRATION_PROJECT_TOKEN, 99): {
+            "id": 99,
+            "project_id": 303,
+            "iid": 2,
+            "name": "Integration tests",
+            "status": "failed",
+            "ref": "main",
+            "sha": "9f8e7d6EEEEEEE",
+            "source": "parent_pipeline",
+            "created_at": "2025-01-01T00:10:00Z",
+            "duration": 98,
+            "web_url": "https://gitlab.com/gitlab-org/integration-tests/-/pipelines/99",
+        },
+    }
+
+    def _fake_request_json(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        assert method == "GET"
+        for (project_token, pipeline_id), detail in pipeline_details.items():
+            if path == f"/projects/{project_token}/pipelines/{pipeline_id}":
+                return detail
+        raise AssertionError(f"unexpected request: {path}")
+
+    def _fake_get_paginated_list(path: str, **kwargs: Any) -> list[dict[str, Any]]:
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77/bridges":
+            return [
+                {
+                    "id": 501,
+                    "name": "trigger:checkout",
+                    "downstream_pipeline": {"id": 88, "project_id": 202},
+                }
+            ]
+        if path == f"/projects/{_CHECKOUT_PROJECT_TOKEN}/pipelines/88/bridges":
+            return [
+                {
+                    "id": 502,
+                    "name": "trigger:integration",
+                    "downstream_pipeline": {"id": 99, "project_id": 303},
+                }
+            ]
+        if path == f"/projects/{_INTEGRATION_PROJECT_TOKEN}/pipelines/99/bridges":
+            return []
+        raise AssertionError(f"unexpected bridges path: {path}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+    monkeypatch.setattr(provider, "_get_paginated_list", _fake_get_paginated_list)
+
+    query = PipelineListQuery.create()
+    result = provider.list_pipelines(repo=_FULL_REPO, pipeline_id=77, query=query)
+
+    assert [row["id"] for row in result["pipelines"]] == [77, 88, 99]
+    assert [row["depth"] for row in result["pipelines"]] == [0, 1, 2]
+    assert [row["project"] for row in result["pipelines"]] == [
+        _FULL_REPO,
+        "gitlab-org/checkout-service",
+        "gitlab-org/integration-tests",
+    ]
+    assert [row["trigger_job"] for row in result["pipelines"]] == [
+        None,
+        "trigger:checkout",
+        "trigger:integration",
+    ]
+    assert [row["parent_id"] for row in result["pipelines"]] == [None, 77, 88]
+    assert result["pipelines"][0]["name"] == "Main CI"
+    assert result["pipelines"][0]["duration_s"] == 1842
+    assert result["returned_count"] == 3
+    assert result["total_count"] == 3
+    # GraphQL path fails because the test only stubs REST GETs; we exercise
+    # the REST fallback which adds a partial flag + warning.
+    assert result["partial"] is True
+    assert any(
+        "GraphQL unavailable" in warning for warning in result["warnings"]
+    )
+
+
+def test_gitlab_list_pipelines_applies_grep_status_and_max_depth(monkeypatch: Any) -> None:
+    provider = _provider()
+    provider._cache_project(project_id="101", full_path=_FULL_REPO)
+    provider._cache_project(project_id="202", full_path="gitlab-org/checkout-service")
+
+    root_detail = {
+        "id": 77,
+        "project_id": 101,
+        "name": "Main CI",
+        "status": "running",
+        "ref": "main",
+        "sha": "abc1234",
+        "source": "push",
+        "duration": 100,
+    }
+    downstream_detail = {
+        "id": 88,
+        "project_id": 202,
+        "name": "Checkout build",
+        "status": "failed",
+        "ref": "main",
+        "sha": "def5678",
+        "source": "pipeline",
+        "duration": 50,
+    }
+
+    bridges_calls: list[str] = []
+
+    def _fake_request_json(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77":
+            return root_detail
+        if path == f"/projects/{_CHECKOUT_PROJECT_TOKEN}/pipelines/88":
+            return downstream_detail
+        raise AssertionError(f"unexpected request: {path}")
+
+    def _fake_get_paginated_list(path: str, **kwargs: Any) -> list[dict[str, Any]]:
+        bridges_calls.append(path)
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77/bridges":
+            return [
+                {
+                    "id": 501,
+                    "name": "trigger:checkout",
+                    "downstream_pipeline": {"id": 88, "project_id": 202},
+                }
+            ]
+        raise AssertionError(f"unexpected bridges path: {path}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+    monkeypatch.setattr(provider, "_get_paginated_list", _fake_get_paginated_list)
+
+    query = PipelineListQuery.create(
+        grep="checkout",
+        statuses=["failed"],
+        max_depth=1,
+    )
+    result = provider.list_pipelines(repo=_FULL_REPO, pipeline_id=77, query=query)
+
+    assert [row["id"] for row in result["pipelines"]] == [88]
+    assert result["pipelines"][0]["trigger_job"] == "trigger:checkout"
+    assert result["total_count"] == 1
+    # Only one bridge level fetched because max_depth=1.
+    assert bridges_calls == [f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77/bridges"]
+
+
+def test_gitlab_resolve_downstream_rows_reuses_project_lookup_for_siblings(
+    monkeypatch: Any,
+) -> None:
+    provider = _provider()
+    project_id_calls: list[str] = []
+
+    def _fake_project_path_from_id(project_id: str | int | None) -> str | None:
+        project_id_calls.append(str(project_id))
+        return "gitlab-org/checkout-service"
+
+    def _fake_request_json(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        assert method == "GET"
+        if path == f"/projects/{_CHECKOUT_PROJECT_TOKEN}/pipelines/88":
+            return {
+                "id": 88,
+                "project_id": 202,
+                "name": "Checkout build",
+                "status": "success",
+                "ref": "main",
+                "sha": "9f8e7d6EEEEEEE",
+                "source": "pipeline",
+            }
+        if path == f"/projects/{_CHECKOUT_PROJECT_TOKEN}/pipelines/89":
+            return {
+                "id": 89,
+                "project_id": 202,
+                "name": "Checkout build (retry)",
+                "status": "failed",
+                "ref": "main",
+                "sha": "8e7d6c5EEEEEEE",
+                "source": "pipeline",
+            }
+        raise AssertionError(f"unexpected request: {path}")
+
+    monkeypatch.setattr(provider, "_project_path_from_id", _fake_project_path_from_id)
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    rows = provider._resolve_downstream_rows(
+        lookups=[
+            ({"id": 77}, {"id": 88, "project_id": 202}, "trigger:checkout", "deploy"),
+            ({"id": 77}, {"id": 89, "project_id": 202}, "trigger:checkout-retry", "deploy"),
+        ],
+        depth=1,
+    )
+
+    assert project_id_calls == ["202"]
+    assert [row["id"] for row in rows] == [88, 89]
+    assert [row["project"] for row in rows] == [
+        "gitlab-org/checkout-service",
+        "gitlab-org/checkout-service",
+    ]
+
+
+def test_gitlab_list_pipelines_warns_when_max_depth_stops_traversal(monkeypatch: Any) -> None:
+    provider = _provider()
+    provider._cache_project(project_id="101", full_path=_FULL_REPO)
+    provider._cache_project(project_id="202", full_path="gitlab-org/checkout-service")
+
+    detail_101_77 = {
+        "id": 77,
+        "project_id": 101,
+        "name": "Main CI",
+        "status": "running",
+        "ref": "main",
+        "sha": "abc1234",
+        "source": "push",
+    }
+    detail_202_88 = {
+        "id": 88,
+        "project_id": 202,
+        "name": "Checkout build",
+        "status": "running",
+        "ref": "main",
+        "sha": "def5678",
+        "source": "pipeline",
+    }
+
+    def _fake_request_json(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77":
+            return detail_101_77
+        if path == f"/projects/{_CHECKOUT_PROJECT_TOKEN}/pipelines/88":
+            return detail_202_88
+        raise AssertionError(f"unexpected request: {path}")
+
+    def _fake_get_paginated_list(path: str, **kwargs: Any) -> list[dict[str, Any]]:
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77/bridges":
+            return [
+                {
+                    "name": "trigger:checkout",
+                    "downstream_pipeline": {"id": 88, "project_id": 202},
+                }
+            ]
+        raise AssertionError(f"unexpected bridges path: {path}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+    monkeypatch.setattr(provider, "_get_paginated_list", _fake_get_paginated_list)
+
+    query = PipelineListQuery.create(max_depth=1)
+    result = provider.list_pipelines(repo=_FULL_REPO, pipeline_id=77, query=query)
+
+    assert [row["id"] for row in result["pipelines"]] == [77, 88]
+    assert any("max depth 1 reached" in warning for warning in result["warnings"])
+    assert result["partial"] is True
+
+
+def _graphql_stage_node(
+    name: str,
+    jobs: list[dict[str, Any]],
+    *,
+    group_name: str | None = None,
+) -> dict[str, Any]:
+    """Build a GitLab GraphQL stage node. Wraps jobs in a single group to match the real schema:
+    ``stages.nodes[].groups.nodes[].jobs.nodes[]``.
+    """
+    return {
+        "name": name,
+        "groups": {
+            "nodes": [
+                {
+                    "name": group_name or name,
+                    "jobs": {"nodes": jobs},
+                }
+            ]
+        },
+    }
+
+
+def _graphql_pipeline_node(
+    *,
+    pipeline_id: int,
+    iid: int,
+    project_id: int,
+    project_path: str,
+    name: str | None = None,
+    commit_title: str | None = None,
+    ref: str,
+    status: str,
+    duration: int | None,
+    stages: list[dict[str, Any]],
+    downstream: list[dict[str, Any]] | None = None,
+    web_url: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": f"gid://gitlab/Ci::Pipeline/{pipeline_id}",
+        "iid": str(iid),
+        "name": name,
+        "ref": ref,
+        "status": status,
+        "sha": "deadbeef",
+        "commit": {"title": commit_title} if commit_title is not None else None,
+        "duration": duration,
+        "createdAt": "2025-04-01T00:00:00Z",
+        "webUrl": web_url or f"https://gitlab.example/{project_path}/-/pipelines/{pipeline_id}",
+        "project": {
+            "id": f"gid://gitlab/Project/{project_id}",
+            "fullPath": project_path,
+        },
+        "stages": {"nodes": stages},
+        "downstream": {"nodes": downstream or []},
+    }
+
+
+def _graphql_job_node(
+    *,
+    job_id: int,
+    name: str,
+    status: str,
+    duration: int | None = None,
+    allow_failure: bool = False,
+    manual: bool = False,
+    environment: str | None = None,
+    needs: list[str] | None = None,
+    downstream: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": f"gid://gitlab/Ci::Build/{job_id}",
+        "name": name,
+        "status": status,
+        "duration": duration,
+        "allowFailure": allow_failure,
+        "manualJob": manual,
+        "webPath": f"/project/-/jobs/{job_id}",
+        "environment": {"name": environment} if environment else None,
+        "previousStageJobsOrNeeds": {
+            "nodes": [{"name": need} for need in (needs or [])]
+        },
+        "downstreamPipeline": downstream,
+    }
+
+
+def test_gitlab_list_pipelines_graphql_populates_stages_jobs_and_downstream(
+    monkeypatch: Any,
+) -> None:
+    provider = _provider()
+
+    root_node = _graphql_pipeline_node(
+        pipeline_id=998877,
+        iid=12,
+        project_id=882,
+        project_path="acme/api",
+        name="Main CI",
+        ref="feat/api",
+        status="RUNNING",
+        duration=None,
+        stages=[
+            _graphql_stage_node(
+                "build",
+                [
+                    _graphql_job_node(
+                        job_id=10,
+                        name="compile",
+                        status="SUCCESS",
+                        duration=200,
+                    )
+                ],
+            ),
+            _graphql_stage_node(
+                "test",
+                [
+                    _graphql_job_node(
+                        job_id=21,
+                        name="unit 1/2",
+                        status="SUCCESS",
+                        duration=60,
+                        needs=["compile"],
+                    ),
+                    _graphql_job_node(
+                        job_id=22,
+                        name="unit 2/2",
+                        status="SUCCESS",
+                        duration=65,
+                        needs=["compile"],
+                    ),
+                    _graphql_job_node(
+                        job_id=23,
+                        name="lint",
+                        status="FAILED",
+                        duration=40,
+                        allow_failure=True,
+                        needs=["compile"],
+                    ),
+                ],
+            ),
+            _graphql_stage_node(
+                "deploy",
+                [
+                    _graphql_job_node(
+                        job_id=30,
+                        name="staging_up",
+                        status="SUCCESS",
+                        duration=300,
+                        environment="staging",
+                        needs=["unit"],
+                    ),
+                    _graphql_job_node(
+                        job_id=31,
+                        name="prod_up",
+                        status="MANUAL",
+                        duration=0,
+                        manual=True,
+                        environment="prod",
+                        needs=["staging_up"],
+                        downstream={
+                            "id": "gid://gitlab/Ci::Pipeline/1122",
+                            "iid": "1",
+                            "status": "CREATED",
+                            "project": {
+                                "id": "gid://gitlab/Project/900",
+                                "fullPath": "ops/infra",
+                            },
+                        },
+                    ),
+                ],
+            ),
+        ],
+    )
+    downstream_node = _graphql_pipeline_node(
+        pipeline_id=1122,
+        iid=1,
+        project_id=900,
+        project_path="ops/infra",
+        ref="main",
+        status="CREATED",
+        duration=None,
+        stages=[],
+    )
+
+    calls: list[str] = []
+
+    def _fake_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        lookup = str(variables.get("id") or f"iid:{variables.get('iid')}")
+        calls.append(lookup)
+        if variables.get("id") == "gid://gitlab/Ci::Pipeline/998877":
+            return {"ciPipeline": root_node}
+        if variables.get("iid") == "1":
+            return {"ciPipeline": downstream_node}
+        raise AssertionError(f"unexpected GraphQL vars: {variables}")
+
+    monkeypatch.setattr(provider, "_graphql", _fake_graphql)
+
+    result = provider.list_pipelines(
+        repo="acme/api",
+        pipeline_id=998877,
+        query=PipelineListQuery.create(),
+    )
+
+    assert calls == [
+        "gid://gitlab/Ci::Pipeline/998877",
+        "iid:1",
+    ]
+    assert [row["id"] for row in result["pipelines"]] == [998877, 1122]
+    assert [row["project"] for row in result["pipelines"]] == ["acme/api", "ops/infra"]
+    assert [row["project_id"] for row in result["pipelines"]] == [882, 900]
+    assert result["pipelines"][0]["name"] == "Main CI"
+    assert [row["depth"] for row in result["pipelines"]] == [0, 1]
+    assert [row["parent_id"] for row in result["pipelines"]] == [None, 998877]
+    assert result["pipelines"][1]["trigger_job"] == "prod_up"
+    assert result["partial"] is False
+
+    root_jobs = result["pipelines"][0]["jobs"]
+    assert [job["id"] for job in root_jobs] == [10, 21, 22, 23, 30, 31]
+    assert [job["stage"] for job in root_jobs] == [
+        "build",
+        "test",
+        "test",
+        "test",
+        "deploy",
+        "deploy",
+    ]
+    unit_1 = next(j for j in root_jobs if j["id"] == 21)
+    assert unit_1["matrix"] == [1, 2]
+    assert unit_1["name"] == "unit"
+    assert unit_1["needs"] == ["compile"]
+    assert unit_1["status"] == "success"
+
+    lint_job = next(j for j in root_jobs if j["id"] == 23)
+    assert lint_job["allow_failure"] is True
+    assert lint_job["status"] == "failed"
+
+    prod_job = next(j for j in root_jobs if j["id"] == 31)
+    assert prod_job["manual"] is True
+    assert prod_job["environment"] == "prod"
+    assert prod_job["status"] == "manual"
+    assert prod_job["downstream"] == {
+        "project": "ops/infra",
+        "pipeline_id": 1122,
+        "status": "created",
+    }
+
+    # Downstream pipeline rendered as its own node in the flat list.
+    assert result["pipelines"][1]["jobs"] == []
+
+
+def test_gitlab_list_pipelines_graphql_respects_max_depth(monkeypatch: Any) -> None:
+    provider = _provider()
+
+    root_node = _graphql_pipeline_node(
+        pipeline_id=77,
+        iid=1,
+        project_id=101,
+        project_path=_FULL_REPO,
+        ref="main",
+        status="RUNNING",
+        duration=100,
+        stages=[
+            _graphql_stage_node(
+                "trigger",
+                [
+                    _graphql_job_node(
+                        job_id=500,
+                        name="trigger:checkout",
+                        status="SUCCESS",
+                        duration=5,
+                        downstream={
+                            "id": "gid://gitlab/Ci::Pipeline/88",
+                            "iid": "2",
+                            "status": "RUNNING",
+                            "project": {
+                                "id": "gid://gitlab/Project/202",
+                                "fullPath": "gitlab-org/checkout-service",
+                            },
+                        },
+                    )
+                ],
+            )
+        ],
+    )
+
+    def _fake_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        if variables.get("id") == "gid://gitlab/Ci::Pipeline/77":
+            return {"ciPipeline": root_node}
+        raise AssertionError(f"should not traverse beyond root: {variables}")
+
+    monkeypatch.setattr(provider, "_graphql", _fake_graphql)
+
+    query = PipelineListQuery.create(max_depth=1)
+    result = provider.list_pipelines(repo=_FULL_REPO, pipeline_id=77, query=query)
+
+    assert [row["id"] for row in result["pipelines"]] == [77]
+    assert any("max depth 1 reached" in warning for warning in result["warnings"])
+    assert result["partial"] is True
+
+
+def test_gitlab_graphql_url_derives_from_api_v4_base() -> None:
+    provider = _provider()
+
+    assert provider._graphql_url() == "https://gitlab.com/api/graphql"
+
+
+def test_gitlab_list_pipelines_graphql_traverses_groups_per_stage(
+    monkeypatch: Any,
+) -> None:
+    """Regression: GitLab's GraphQL schema nests jobs under ``stages[].groups[].jobs[]``.
+
+    A prior implementation queried ``stages[].jobs[]`` directly which returned an
+    empty list on real GitLab even when the pipeline had jobs. This test locks in
+    the group-level traversal so a stage with multiple job base-names still renders
+    every job.
+    """
+    provider = _provider()
+
+    root_node = {
+        "id": "gid://gitlab/Ci::Pipeline/500",
+        "iid": "3",
+        "ref": "main",
+        "status": "FAILED",
+        "sha": "cafe",
+        "duration": 120,
+        "createdAt": "2025-05-01T00:00:00Z",
+        "webUrl": "https://gitlab.example/repo/-/pipelines/500",
+        "project": {"id": "gid://gitlab/Project/44", "fullPath": "g/repo"},
+        "stages": {
+            "nodes": [
+                {
+                    "name": "test",
+                    "groups": {
+                        "nodes": [
+                            {
+                                "name": "unit",
+                                "jobs": {
+                                    "nodes": [
+                                        _graphql_job_node(
+                                            job_id=201,
+                                            name="unit 1/2",
+                                            status="SUCCESS",
+                                            duration=30,
+                                        ),
+                                        _graphql_job_node(
+                                            job_id=202,
+                                            name="unit 2/2",
+                                            status="SUCCESS",
+                                            duration=31,
+                                        ),
+                                    ]
+                                },
+                            },
+                            {
+                                "name": "lint",
+                                "jobs": {
+                                    "nodes": [
+                                        _graphql_job_node(
+                                            job_id=203,
+                                            name="lint",
+                                            status="FAILED",
+                                            duration=12,
+                                        )
+                                    ]
+                                },
+                            },
+                        ]
+                    },
+                }
+            ]
+        },
+        "downstream": {"nodes": []},
+    }
+
+    monkeypatch.setattr(
+        provider,
+        "_graphql",
+        lambda query, variables: {"ciPipeline": root_node},
+    )
+
+    result = provider.list_pipelines(
+        repo="g/repo",
+        pipeline_id=500,
+        query=PipelineListQuery.create(),
+    )
+
+    jobs = result["pipelines"][0]["jobs"]
+    assert [job["id"] for job in jobs] == [201, 202, 203]
+    assert [job["stage"] for job in jobs] == ["test", "test", "test"]
+    assert [job["name"] for job in jobs] == ["unit", "unit", "lint"]
+    assert [job["matrix"] for job in jobs] == [[1, 2], [2, 2], None]
+
+
+def test_gitlab_list_pipelines_graphql_caches_compat_query_after_schema_mismatch(
+    monkeypatch: Any,
+) -> None:
+    provider = _provider()
+
+    root_node = _graphql_pipeline_node(
+        pipeline_id=998877,
+        iid=12,
+        project_id=882,
+        project_path="acme/api",
+        ref="feat/api",
+        status="RUNNING",
+        duration=305,
+        stages=[
+            _graphql_stage_node(
+                "trigger",
+                [
+                    _graphql_job_node(
+                        job_id=31,
+                        name="prod_up",
+                        status="MANUAL",
+                        duration=0,
+                        manual=True,
+                        needs=["compile"],
+                        downstream={
+                            "id": "gid://gitlab/Ci::Pipeline/1122",
+                            "iid": "1",
+                            "status": "CREATED",
+                            "project": {
+                                "id": "gid://gitlab/Project/900",
+                                "fullPath": "ops/infra",
+                            },
+                        },
+                    )
+                ],
+            )
+        ],
+    )
+    downstream_node = _graphql_pipeline_node(
+        pipeline_id=1122,
+        iid=1,
+        project_id=900,
+        project_path="ops/infra",
+        ref="main",
+        status="CREATED",
+        duration=None,
+        stages=[],
+    )
+
+    compat_root = dict(root_node)
+    compat_root.pop("webUrl", None)
+    compat_root["path"] = "/acme/api/-/pipelines/998877"
+    compat_downstream = dict(downstream_node)
+    compat_downstream.pop("webUrl", None)
+    compat_downstream["path"] = "/ops/infra/-/pipelines/1122"
+
+    calls: list[dict[str, Any]] = []
+
+    def _fake_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        calls.append({"query": query, "variables": dict(variables)})
+        if "environment { name }" in query:
+            raise SmithApiError("GitLab GraphQL error: Field 'environment' doesn't exist on type 'CiJob'")
+        if variables.get("id") == "gid://gitlab/Ci::Pipeline/998877":
+            return {"project": {"pipeline": compat_root}}
+        if variables.get("iid") == "1":
+            return {"project": {"pipeline": compat_downstream}}
+        raise AssertionError(f"unexpected GraphQL vars: {variables}")
+
+    monkeypatch.setattr(provider, "_graphql", _fake_graphql)
+
+    result = provider.list_pipelines(
+        repo="acme/api",
+        pipeline_id=998877,
+        query=PipelineListQuery.create(),
+    )
+
+    assert [row["id"] for row in result["pipelines"]] == [998877, 1122]
+    assert [row["project"] for row in result["pipelines"]] == ["acme/api", "ops/infra"]
+    assert result["pipelines"][0]["url"] == "https://gitlab.com/acme/api/-/pipelines/998877"
+    assert result["pipelines"][1]["trigger_job"] == "prod_up"
+    assert result["pipelines"][0]["jobs"][0]["stage"] == "trigger"
+    assert result["pipelines"][0]["jobs"][0]["needs"] == ["compile"]
+    assert result["pipelines"][0]["jobs"][0]["environment"] is None
+    assert result["partial"] is False
+
+    assert [call["variables"]["fullPath"] for call in calls] == [
+        "acme/api",
+        "acme/api",
+        "ops/infra",
+    ]
+    assert calls[0]["variables"]["id"] == "gid://gitlab/Ci::Pipeline/998877"
+    assert calls[1]["variables"]["id"] == "gid://gitlab/Ci::Pipeline/998877"
+    assert calls[2]["variables"]["iid"] == "1"
+    assert "environment { name }" in calls[0]["query"]
+    assert all("environment { name }" not in call["query"] for call in calls[1:])
+    assert provider._gitlab_pipeline_graphql_variant == "compat"
+
+
+def test_gitlab_list_pipelines_graphql_uses_commit_title_and_downstream_source_job(
+    monkeypatch: Any,
+) -> None:
+    provider = _provider()
+
+    root_node = _graphql_pipeline_node(
+        pipeline_id=500,
+        iid=3,
+        project_id=44,
+        project_path="g/repo",
+        commit_title="Release train",
+        ref="main",
+        status="FAILED",
+        duration=120,
+        stages=[],
+        downstream=[
+            {
+                "id": "gid://gitlab/Ci::Pipeline/501",
+                "iid": "4",
+                "status": "FAILED",
+                "project": {
+                    "id": "gid://gitlab/Project/44",
+                    "fullPath": "g/repo",
+                },
+                "sourceJob": {
+                    "name": "release-pipeline",
+                    "stage": {"name": "deploy"},
+                },
+            }
+        ],
+    )
+    child_node = _graphql_pipeline_node(
+        pipeline_id=501,
+        iid=4,
+        project_id=44,
+        project_path="g/repo",
+        commit_title="Release train",
+        ref="main",
+        status="FAILED",
+        duration=30,
+        stages=[],
+    )
+
+    def _fake_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        if variables.get("id") == "gid://gitlab/Ci::Pipeline/500":
+            return {"ciPipeline": root_node}
+        if variables.get("iid") == "4":
+            return {"ciPipeline": child_node}
+        raise AssertionError(f"unexpected GraphQL vars: {variables}")
+
+    monkeypatch.setattr(provider, "_graphql", _fake_graphql)
+
+    result = provider.list_pipelines(
+        repo="g/repo",
+        pipeline_id=500,
+        query=PipelineListQuery.create(),
+    )
+
+    assert [row["id"] for row in result["pipelines"]] == [500, 501]
+    assert result["pipelines"][0]["name"] == "Release train"
+    assert result["pipelines"][1]["name"] == "Release train"
+    assert result["pipelines"][1]["trigger_job"] == "release-pipeline"
+    assert result["pipelines"][1]["trigger_stage"] == "deploy"

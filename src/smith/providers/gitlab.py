@@ -123,6 +123,36 @@ class GitLabProvider(
             return path
         return f"{self.gitlab_api_url}{path}"
 
+    def _graphql_url(self) -> str:
+        base = self.gitlab_api_url.rstrip("/")
+        if base.endswith("/api/v4"):
+            base = base[: -len("/api/v4")]
+        elif "/api/" in base:
+            base = base.split("/api/", 1)[0]
+        return f"{base}/api/graphql"
+
+    def _graphql(
+        self,
+        query: str,
+        variables: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = {"query": query, "variables": variables or {}}
+        response = self._request_json(
+            "POST",
+            self._graphql_url(),
+            json_body=payload,
+        )
+        errors = response.get("errors") if isinstance(response, dict) else None
+        if errors:
+            message = "; ".join(
+                str((err or {}).get("message") or "") for err in errors if err
+            ).strip() or "unknown GraphQL error"
+            raise SmithApiError(f"GitLab GraphQL error: {message}")
+        data = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(data, dict):
+            raise SmithApiError("GitLab GraphQL response missing `data`")
+        return data
+
     def _configured_gitlab_group(self) -> str | None:
         return self.gitlab_org or None
 

@@ -4,7 +4,7 @@
 
 **The read-only code investigation CLI for AI coding agents.**
 
-Cross-repository code search, regex grep, pull request inspection, CI/CD log analysis, and work-item lookup across **GitHub**, **GitLab**, **Azure DevOps**, and **YouTrack** — from a single command, with token-efficient output designed for **Claude Code**, **Cursor**, **Windsurf**, **GitHub Copilot**, **Codex**, and any LLM that can drive a shell.
+Cross-repository code search, regex grep, pull request inspection, CI/CD log analysis, and work-item lookup across **GitHub**, **GitLab**, **Azure DevOps**, and **YouTrack** — from a single command, with token-efficient output designed for AI Agents.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org)
@@ -395,9 +395,12 @@ smith <remote> prs threads <repo> <id>          # get review comments
 #### Pipelines
 
 ```bash
+smith <remote> pipelines list <repo> <id>       # list a pipeline + downstream pipelines (GitLab recurses)
 smith <remote> pipelines logs list <repo> <id>  # list logs for a pipeline run
 smith <remote> pipelines logs grep <repo> <id> "<regex>"  # grep pipeline logs
 ```
+
+`pipelines list` supports `--grep`, `--status` (CSV), `--skip`, and `--take`. GitLab additionally supports `--max-depth` (0 = unlimited) and traverses downstream children via the `/bridges` API; GitHub and Azure DevOps return only the root run/build.
 
 `logs grep` supports `--log-id`, `--output-mode`, `--context-lines`, `--from-line`, `--to-line`, `--reverse`, and `--case-sensitive`.
 

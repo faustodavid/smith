@@ -590,6 +590,26 @@ def handle_pr_threads(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
+def handle_ci_list(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_ci_list(
+        remote_or_provider=_selected_target(args),
+        project=getattr(args, "project", None),
+        repo=getattr(args, "repo", None),
+        pipeline_id=args.id,
+        grep=getattr(args, "grep", None),
+        statuses=getattr(args, "status", None),
+        skip=getattr(args, "skip", 0),
+        take=getattr(args, "take", None),
+        max_depth=getattr(args, "max_depth", 0),
+    )
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=data,
+        partial=_is_partial_result(data),
+    )
+
+
 def handle_ci_logs(client: SmithClient, args: argparse.Namespace) -> int:
     data = client.execute_ci_logs(
         remote_or_provider=_selected_target(args),
