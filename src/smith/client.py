@@ -20,6 +20,7 @@ from smith.discovery import DiscoveryQuery
 from smith.errors import SmithApiError, SmithAuthError, SmithError
 from smith.fanout import run_fanout
 from smith.http import configure_http_session
+from smith.pipeline_listing import PipelineListQuery
 from smith.providers.azdo import AzdoProvider
 from smith.providers.base import BaseProvider
 from smith.providers.github import GITHUB_DEFAULT_API_URL, GITHUB_DEFAULT_API_VERSION, GitHubProvider
@@ -617,6 +618,49 @@ class SmithClient:
                 "gitlab": lambda r: self._gitlab_provider(r).get_pull_request_threads(
                     repo=repo,
                     pull_request_id=pull_request_id,
+                ),
+            },
+        )
+
+    def execute_ci_list(
+        self,
+        *,
+        remote_or_provider: str,
+        project: str | None,
+        repo: str | None,
+        pipeline_id: int,
+        grep: str | None = None,
+        statuses: list[str] | None = None,
+        skip: int = 0,
+        take: int | None = None,
+        max_depth: int = 0,
+    ) -> dict[str, Any]:
+        target = self._require_single_target(remote_or_provider, command="pipelines.list")
+        effective_repo = repo or project
+        query = PipelineListQuery.create(
+            grep=grep,
+            statuses=statuses,
+            skip=skip,
+            take=take,
+            max_depth=max_depth,
+        )
+        return self._fanout(
+            remote_or_provider=target,
+            operations={
+                "azdo": lambda r: self._azdo_provider(r).list_pipelines(
+                    project=str(project),
+                    pipeline_id=pipeline_id,
+                    query=query,
+                ),
+                "github": lambda r: self._github_provider(r).list_pipelines(
+                    repo=str(effective_repo),
+                    pipeline_id=pipeline_id,
+                    query=query,
+                ),
+                "gitlab": lambda r: self._gitlab_provider(r).list_pipelines(
+                    repo=str(effective_repo),
+                    pipeline_id=pipeline_id,
+                    query=query,
                 ),
             },
         )

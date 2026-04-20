@@ -8,6 +8,7 @@ from smith.cli.handlers import (
     _csv_list,
     handle_cache_clean,
     handle_ci_grep,
+    handle_ci_list,
     handle_ci_logs,
     handle_code_grep,
     handle_code_search,
@@ -31,6 +32,7 @@ from smith.cli.handlers import (
 )
 from smith.config import RemoteConfig, SmithConfig, load_config
 from smith.discovery import DEFAULT_DISCOVERY_TAKE
+from smith.pipeline_listing import DEFAULT_PIPELINE_LIST_TAKE
 
 _NO_REMOTES_CONFIGURED_HINT = "No remotes configured. Run `smith config init` and add entries under `remotes:`."
 _CURRENT_REMOTE_HINT: str | None = None
@@ -477,42 +479,81 @@ def _add_remote_prs_group(remote_subparsers: Any, *, remote: RemoteConfig) -> No
     _set_handler(pr_threads, handle_pr_threads, "prs.threads", primary_path="prs threads")
 
 
+_PIPELINE_ID_LABELS: dict[str, str] = {
+    "azdo": "Build ID",
+    "github": "Run ID",
+    "gitlab": "Pipeline ID",
+}
+
+
+def _add_pipeline_positional_args(parser: argparse.ArgumentParser, *, remote: RemoteConfig, id_label: str) -> None:
+    if remote.provider == "azdo":
+        parser.add_argument("project")
+        parser.add_argument("id", type=int, help=id_label)
+        parser.set_defaults(repo=None)
+    elif remote.provider == "github":
+        parser.add_argument("repo", help="Repository name")
+        parser.add_argument("id", type=int, help=id_label)
+        parser.set_defaults(project=None)
+    else:
+        parser.add_argument("repo", help="Full repository path (e.g. group/project)")
+        parser.add_argument("id", type=int, help=id_label)
+        parser.set_defaults(project=None)
+
+
 def _add_remote_pipelines_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
-    pipelines = _add_parser(remote_subparsers, "pipelines", help_text="Read and grep pipeline logs")
+    pipelines = _add_parser(
+        remote_subparsers, "pipelines", help_text="List, read, and grep pipelines"
+    )
     pipelines_sub = pipelines.add_subparsers(dest="pipelines_action", required=True)
+
+    id_label = _PIPELINE_ID_LABELS.get(remote.provider, "Pipeline ID")
+
+    pipelines_list = _add_parser(
+        pipelines_sub,
+        "list",
+        help_text="List a pipeline and its downstream pipelines",
+    )
+    _add_pipeline_positional_args(pipelines_list, remote=remote, id_label=id_label)
+    pipelines_list.add_argument(
+        "--grep",
+        help="Regex filter over combined project, name, ref, status, and source text",
+    )
+    pipelines_list.add_argument(
+        "--status",
+        type=_csv_list,
+        help="Comma-separated status filter (e.g. running,failed,success)",
+    )
+    pipelines_list.add_argument("--skip", type=int, default=0, help=_RESULTS_OFFSET_HELP)
+    pipelines_list.add_argument(
+        "--take",
+        type=int,
+        default=DEFAULT_PIPELINE_LIST_TAKE,
+        help=_RESULTS_COUNT_HELP,
+    )
+    if remote.provider == "gitlab":
+        pipelines_list.add_argument(
+            "--max-depth",
+            dest="max_depth",
+            type=int,
+            default=0,
+            help="Maximum downstream depth to traverse (0 means unlimited)",
+        )
+    else:
+        pipelines_list.set_defaults(max_depth=0)
+    _add_output_format(pipelines_list)
+    _set_handler(pipelines_list, handle_ci_list, "pipelines.list", primary_path="pipelines list")
 
     logs = _add_parser(pipelines_sub, "logs", help_text="Inspect pipeline logs")
     logs_sub = logs.add_subparsers(dest="log_action", required=True)
 
     logs_list = _add_parser(logs_sub, "list", help_text="List logs for a pipeline run")
-    if remote.provider == "azdo":
-        logs_list.add_argument("project")
-        logs_list.add_argument("id", type=int, help="Build ID")
-        logs_list.set_defaults(repo=None)
-    elif remote.provider == "github":
-        logs_list.add_argument("repo", help="Repository name")
-        logs_list.add_argument("id", type=int, help="Run ID")
-        logs_list.set_defaults(project=None)
-    else:
-        logs_list.add_argument("repo", help="Full repository path (e.g. group/project)")
-        logs_list.add_argument("id", type=int, help="Pipeline ID")
-        logs_list.set_defaults(project=None)
+    _add_pipeline_positional_args(logs_list, remote=remote, id_label=id_label)
     _add_output_format(logs_list)
     _set_handler(logs_list, handle_ci_logs, "pipelines.logs.list", primary_path="pipelines logs list")
 
     logs_grep = _add_parser(logs_sub, "grep", help_text="Search or read pipeline logs")
-    if remote.provider == "azdo":
-        logs_grep.add_argument("project")
-        logs_grep.add_argument("id", type=int, help="Build ID")
-        logs_grep.set_defaults(repo=None)
-    elif remote.provider == "github":
-        logs_grep.add_argument("repo", help="Repository name")
-        logs_grep.add_argument("id", type=int, help="Run ID")
-        logs_grep.set_defaults(project=None)
-    else:
-        logs_grep.add_argument("repo", help="Full repository path (e.g. group/project)")
-        logs_grep.add_argument("id", type=int, help="Pipeline ID")
-        logs_grep.set_defaults(project=None)
+    _add_pipeline_positional_args(logs_grep, remote=remote, id_label=id_label)
     _add_ci_grep_options(logs_grep)
     _add_output_format(logs_grep)
     _set_handler(logs_grep, handle_ci_grep, "pipelines.logs.grep", primary_path="pipelines logs grep")

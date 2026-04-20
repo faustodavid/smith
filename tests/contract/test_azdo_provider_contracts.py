@@ -6,6 +6,7 @@ import pytest
 import requests
 from tests.support import make_runtime_config
 
+from smith.pipeline_listing import PipelineListQuery
 from smith.providers.azdo import AzdoProvider
 
 
@@ -601,3 +602,168 @@ def test_azdo_work_item_views_and_cross_project_mine_aggregation(monkeypatch: An
         "results": [{"id": 7}],
         "warnings": ["proj-b: API unavailable"],
     }
+
+
+def test_azdo_list_pipelines_normalizes_build_status_and_duration(monkeypatch: Any) -> None:
+    provider = _provider()
+
+    def _fake_request_json(method: str, url: str, **kwargs: Any) -> Any:
+        if url.endswith("/proj-a/_apis/build/builds/55"):
+            return {
+                "id": 55,
+                "buildNumber": "2025.01.01.1",
+                "status": "completed",
+                "result": "failed",
+                "reason": "manual",
+                "sourceBranch": "refs/heads/main",
+                "sourceVersion": "abc1234",
+                "startTime": "2025-01-01T00:00:00Z",
+                "finishTime": "2025-01-01T00:05:00Z",
+                "queueTime": "2025-01-01T00:00:00Z",
+                "definition": {"name": "CI"},
+                "_links": {"web": {"href": "https://dev.azure.com/acme/proj-a/_build/results?buildId=55"}},
+            }
+        if url.endswith("/proj-a/_apis/build/builds/55/timeline"):
+            return {"records": []}
+        raise AssertionError(f"unexpected request: {url}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.list_pipelines(
+        project="proj-a",
+        pipeline_id=55,
+        query=PipelineListQuery.create(),
+    )
+
+    assert result["pipelines"] == [
+        {
+            "id": 55,
+            "iid": None,
+            "project": "proj-a",
+            "project_id": None,
+            "status": "failed",
+            "ref": "main",
+            "sha": "abc1234",
+            "name": "CI",
+            "source": "manual",
+            "trigger_job": None,
+            "parent_id": None,
+            "depth": 0,
+            "created_at": "2025-01-01T00:00:00Z",
+            "duration_s": 300,
+            "url": "https://dev.azure.com/acme/proj-a/_build/results?buildId=55",
+            "jobs": [],
+        }
+    ]
+    assert result["returned_count"] == 1
+    assert result["total_count"] == 1
+    assert result["partial"] is False
+
+
+def test_azdo_list_pipelines_groups_jobs_by_stage_from_timeline(monkeypatch: Any) -> None:
+    provider = _provider()
+
+    timeline_records = [
+        {
+            "id": "stage-build",
+            "parentId": None,
+            "type": "Stage",
+            "name": "Build",
+            "order": 1,
+        },
+        {
+            "id": "stage-test",
+            "parentId": None,
+            "type": "Stage",
+            "name": "Test",
+            "order": 2,
+        },
+        {
+            "id": "phase-build",
+            "parentId": "stage-build",
+            "type": "Phase",
+            "name": "BuildPhase",
+            "order": 1,
+        },
+        {
+            "id": "phase-test",
+            "parentId": "stage-test",
+            "type": "Phase",
+            "name": "TestPhase",
+            "order": 1,
+        },
+        {
+            "id": "job-compile",
+            "parentId": "phase-build",
+            "type": "Job",
+            "name": "compile",
+            "order": 1,
+            "state": "completed",
+            "result": "succeeded",
+            "startTime": "2025-03-01T00:00:00Z",
+            "finishTime": "2025-03-01T00:02:30Z",
+        },
+        {
+            "id": "job-unit-a",
+            "parentId": "phase-test",
+            "type": "Job",
+            "name": "unit 1/2",
+            "order": 1,
+            "state": "completed",
+            "result": "succeeded",
+            "startTime": "2025-03-01T00:03:00Z",
+            "finishTime": "2025-03-01T00:04:00Z",
+        },
+        {
+            "id": "job-unit-b",
+            "parentId": "phase-test",
+            "type": "Job",
+            "name": "unit 2/2",
+            "order": 2,
+            "state": "completed",
+            "result": "succeededWithIssues",
+            "startTime": "2025-03-01T00:03:00Z",
+            "finishTime": "2025-03-01T00:04:30Z",
+        },
+        {
+            "id": "task-publish",
+            "parentId": "job-compile",
+            "type": "Task",
+            "name": "Publish artifacts",
+            "order": 1,
+        },
+    ]
+
+    def _fake_request_json(method: str, url: str, **kwargs: Any) -> Any:
+        if url.endswith("/proj-a/_apis/build/builds/77"):
+            return {
+                "id": 77,
+                "status": "completed",
+                "result": "succeeded",
+                "sourceBranch": "refs/heads/main",
+                "sourceVersion": "cafebabe",
+                "startTime": "2025-03-01T00:00:00Z",
+                "finishTime": "2025-03-01T00:05:00Z",
+                "definition": {"name": "CI"},
+            }
+        if url.endswith("/proj-a/_apis/build/builds/77/timeline"):
+            return {"records": timeline_records}
+        raise AssertionError(f"unexpected request: {url}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.list_pipelines(
+        project="proj-a",
+        pipeline_id=77,
+        query=PipelineListQuery.create(),
+    )
+
+    jobs = result["pipelines"][0]["jobs"]
+    assert [job["id"] for job in jobs] == ["job-compile", "job-unit-a", "job-unit-b"]
+    assert [job["stage"] for job in jobs] == ["Build", "Test", "Test"]
+    assert [job["name"] for job in jobs] == ["compile", "unit", "unit"]
+    assert [job["matrix"] for job in jobs] == [None, [1, 2], [2, 2]]
+    assert jobs[0]["duration_s"] == 150
+    assert jobs[1]["status"] == "success"
+    assert jobs[2]["status"] == "success"
+    assert jobs[2]["allow_failure"] is True

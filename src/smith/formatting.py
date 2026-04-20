@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections import OrderedDict
 from typing import Any
 
 from toon_format import encode as toon_encode
+
+from smith.pipeline_listing import short_status
 
 
 def make_envelope(
@@ -611,6 +614,163 @@ def _render_config_show(data: Any) -> str:
     return "\n".join(lines)
 
 
+def _render_pipelines_list(data: Any) -> str:
+    pipelines = data.get("pipelines", []) if isinstance(data, dict) else []
+    lines: list[str] = []
+    for row in pipelines:
+        if not isinstance(row, dict):
+            continue
+        lines.extend(_format_pipeline_node(row))
+    if isinstance(data, dict):
+        if "returned_count" in data:
+            lines.append(f"returned_count: {data['returned_count']}")
+        if "total_count" in data:
+            lines.append(f"total_count: {data['total_count']}")
+    return "\n".join(lines)
+
+
+def _format_pipeline_node(pipeline: dict[str, Any]) -> list[str]:
+    lines: list[str] = [_format_pipeline_header(pipeline)]
+
+    raw_jobs = pipeline.get("jobs")
+    if not isinstance(raw_jobs, list) or not raw_jobs:
+        return lines
+
+    jobs = [job for job in raw_jobs if isinstance(job, dict)]
+    name_to_id = _build_job_name_index(jobs)
+
+    grouped: OrderedDict[str | None, list[dict[str, Any]]] = OrderedDict()
+    for job in jobs:
+        stage_raw = job.get("stage")
+        stage_key = str(stage_raw).strip() if stage_raw not in (None, "") else None
+        grouped.setdefault(stage_key, []).append(job)
+
+    for stage_name, stage_jobs in grouped.items():
+        if stage_name:
+            lines.append(f"#{stage_name}")
+        for job in stage_jobs:
+            lines.append(_format_job_line(job, name_to_id=name_to_id))
+    return lines
+
+
+def _format_pipeline_header(pipeline: dict[str, Any]) -> str:
+    pipeline_id = pipeline.get("id")
+    id_text = str(pipeline_id).strip() if pipeline_id is not None else ""
+    parts = [f"p:{id_text or '-'}"]
+
+    project_id = pipeline.get("project_id")
+    project_path = str(pipeline.get("project") or "").strip()
+    if project_id not in (None, ""):
+        parts.append(f"prj:{project_id}")
+    elif project_path:
+        parts.append(f"prj:{project_path}")
+
+    ref = str(pipeline.get("ref") or "").strip()
+    if ref:
+        parts.append(f"ref:{ref}")
+
+    parts.append(f"st:{short_status(pipeline.get('status'))}")
+
+    name = _escape_compact_value(pipeline.get("name"))
+    if name:
+        parts.append(f"nm:{name}")
+
+    trigger_stage = _escape_compact_value(pipeline.get("trigger_stage"))
+    trigger_job = _escape_compact_value(pipeline.get("trigger_job"))
+    if trigger_stage and trigger_job:
+        parts.append(f"via:{trigger_stage}/{trigger_job}")
+    elif trigger_job:
+        parts.append(f"via:{trigger_job}")
+    elif trigger_stage:
+        parts.append(f"via:{trigger_stage}")
+    return "@" + "|".join(parts)
+
+
+def _escape_compact_value(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.replace("\\", "\\\\").replace("|", "\\|")
+    return text.replace("\n", " ").replace("\r", " ")
+
+
+def _build_job_name_index(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    first_id: dict[str, Any] = {}
+    for job in jobs:
+        name = str(job.get("name") or "").strip()
+        if not name:
+            continue
+        counts[name] = counts.get(name, 0) + 1
+        if name not in first_id:
+            first_id[name] = job.get("id")
+    return {name: first_id[name] for name, count in counts.items() if count == 1}
+
+
+def _format_job_line(job: dict[str, Any], *, name_to_id: dict[str, Any]) -> str:
+    job_id = job.get("id")
+    id_text = str(job_id).strip() if job_id is not None else "-"
+    name = str(job.get("name") or "").strip()
+
+    matrix = job.get("matrix")
+    if isinstance(matrix, (list, tuple)) and len(matrix) == 2:
+        try:
+            name_text = f"{name}[{int(matrix[0])}/{int(matrix[1])}]"
+        except (TypeError, ValueError):
+            name_text = name
+    else:
+        name_text = name
+
+    status_text = short_status(job.get("status"))
+    duration = job.get("duration_s")
+    dur_text = f"{int(duration)}s" if isinstance(duration, (int, float)) else "-"
+
+    attrs = ""
+    if job.get("allow_failure") and status_text in {"err", "can"}:
+        attrs += "!"
+    if job.get("manual"):
+        attrs += "?"
+
+    env = str(job.get("environment") or "").strip()
+    env_text = f"^{env}" if env else ""
+
+    base = f"*j{id_text}:{name_text}|{status_text}|{dur_text}{attrs}{env_text}"
+
+    needs = job.get("needs") or []
+    rendered_needs = _render_needs(needs, name_to_id=name_to_id)
+    if rendered_needs:
+        base += f" <{rendered_needs}"
+
+    downstream = job.get("downstream")
+    if isinstance(downstream, dict):
+        proj = str(downstream.get("project") or "").strip()
+        d_id = downstream.get("pipeline_id")
+        d_id_text = str(d_id).strip() if d_id is not None else "-"
+        d_status = short_status(downstream.get("status"))
+        base += f" >> {proj}:{d_id_text}[{d_status}]"
+
+    return base
+
+
+def _render_needs(needs: Any, *, name_to_id: dict[str, Any]) -> str:
+    if not isinstance(needs, (list, tuple)):
+        return ""
+    parts: list[str] = []
+    for item in needs:
+        if isinstance(item, int):
+            parts.append(f"j{item}")
+            continue
+        text = str(item or "").strip()
+        if not text:
+            continue
+        resolved = name_to_id.get(text)
+        if resolved is not None:
+            parts.append(f"j{resolved}")
+        else:
+            parts.append(text)
+    return ",".join(parts)
+
+
 _RENDER_DISPATCH: dict[str, Any] = {
     "orgs": _render_name_list,
     "groups": _render_name_list,
@@ -619,6 +779,7 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "code.search": _render_code_search,
     "code.grep": _render_grep,
     "cache.clean": _render_cache_clean,
+    "pipelines.list": _render_pipelines_list,
     "pipelines.logs.grep": _render_grep,
     "prs.search": _render_pr_list,
     "prs.list": _render_pr_list,

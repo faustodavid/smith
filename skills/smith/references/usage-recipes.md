@@ -75,6 +75,30 @@ smith <gitlab-remote-name> prs threads <group/project> <id>
 
 `prs search`/`prs list` accept `--status active|completed|abandoned`, `--creator`, `--date-from`, `--date-to`, `--skip`, `--take`, `--exclude-drafts`, and `--include-labels`.
 
+## Pipelines
+
+```bash
+# List the pipeline plus any downstream pipelines.
+# GitLab traverses child pipelines via /bridges; GitHub and Azure DevOps return only the root.
+smith <azdo-remote-name> pipelines list <project> <id>
+smith <github-remote-name> pipelines list <repo> <id>
+smith <gitlab-remote-name> pipelines list <group/project> <id>
+
+# Filter downstream pipelines.
+smith <gitlab-remote-name> pipelines list <group/project> <id> --status failed,running
+smith <gitlab-remote-name> pipelines list <group/project> <id> --grep "^checkout" --max-depth 2
+smith <gitlab-remote-name> pipelines list <group/project> <id> --skip 20 --take 50
+```
+
+`pipelines list` accepts:
+
+- `--grep <regex>` — case-insensitive regex matched against the combined `project`, `name`, `ref`, `status`, and `source` fields.
+- `--status <csv>` — comma-separated list of `created, waiting_for_resource, preparing, pending, running, success, failed, canceled, skipped, manual, scheduled`.
+- `--skip`, `--take` — pagination. Default take is 20, capped at 500.
+- `--max-depth` (gitlab only, default 0 = unlimited)
+
+Output is a token-optimised DAG: one `@` line per pipeline, then `#stage` headers and `*job` lines with inline `<needs` and `>> downstream` markers. Full grammar lives in `references/pipelines-format.md`. The payload closes with `returned_count` / `total_count`; truncation is signalled via `partial: true` + a warning line and `EXIT_PARTIAL`. `has_more` is intentionally omitted.
+
 ## Pipeline Logs
 
 ```bash

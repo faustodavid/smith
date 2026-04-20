@@ -7,6 +7,7 @@ from typing import Any
 import requests
 from tests.support import make_runtime_config
 
+from smith.pipeline_listing import PipelineListQuery
 from smith.providers.github import GitHubProvider
 
 
@@ -1124,3 +1125,179 @@ def test_github_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
         "results": [{"id": 10}],
         "warnings": [],
     }
+
+
+def test_github_list_pipelines_single_entry_normalizes_status(monkeypatch: Any) -> None:
+    provider = _provider()
+    run_path = f"{provider._repo_prefix('repo-a')}/actions/runs/55"
+    jobs_path = f"{run_path}/jobs"
+    responses = {
+        run_path: {
+            "id": 55,
+            "run_number": 12,
+            "status": "completed",
+            "conclusion": "failure",
+            "name": "CI",
+            "head_branch": "main",
+            "head_sha": "abc1234def5678",
+            "event": "push",
+            "html_url": "https://github.com/octo-org/repo-a/actions/runs/55",
+            "created_at": "2025-01-01T00:00:00Z",
+        },
+        jobs_path: {
+            "total_count": 2,
+            "jobs": [
+                {
+                    "id": 901,
+                    "name": "build",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "started_at": "2025-01-01T00:00:00Z",
+                    "completed_at": "2025-01-01T00:01:30Z",
+                },
+                {
+                    "id": 902,
+                    "name": "test (ubuntu-latest, 3.11)",
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "started_at": "2025-01-01T00:01:00Z",
+                    "completed_at": "2025-01-01T00:03:00Z",
+                },
+            ],
+        },
+    }
+    monkeypatch.setattr(provider, "_request_json", lambda method, path, **kwargs: responses[path])
+
+    result = provider.list_pipelines(
+        repo="repo-a",
+        pipeline_id=55,
+        query=PipelineListQuery.create(),
+    )
+
+    assert result["pipelines"] == [
+        {
+            "id": 55,
+            "iid": 12,
+            "project": "repo-a",
+            "project_id": None,
+            "status": "failed",
+            "ref": "main",
+            "sha": "abc1234def5678",
+            "name": "CI",
+            "source": "push",
+            "trigger_job": None,
+            "parent_id": None,
+            "depth": 0,
+            "created_at": "2025-01-01T00:00:00Z",
+            "duration_s": None,
+            "url": "https://github.com/octo-org/repo-a/actions/runs/55",
+            "jobs": [
+                {
+                    "id": 901,
+                    "name": "build",
+                    "status": "success",
+                    "stage": None,
+                    "duration_s": 90,
+                    "matrix": None,
+                    "allow_failure": False,
+                    "manual": False,
+                    "environment": None,
+                    "needs": [],
+                    "downstream": None,
+                },
+                {
+                    "id": 902,
+                    "name": "test (ubuntu-latest, 3.11)",
+                    "status": "failed",
+                    "stage": None,
+                    "duration_s": 120,
+                    "matrix": None,
+                    "allow_failure": False,
+                    "manual": False,
+                    "environment": None,
+                    "needs": [],
+                    "downstream": None,
+                },
+            ],
+        }
+    ]
+    assert result["returned_count"] == 1
+    assert result["total_count"] == 1
+    assert result["partial"] is False
+
+
+def test_github_list_pipelines_paginates_jobs_and_parses_matrix_names(
+    monkeypatch: Any,
+) -> None:
+    provider = _provider()
+    run_path = f"{provider._repo_prefix('repo-a')}/actions/runs/99"
+    jobs_path = f"{run_path}/jobs"
+
+    matrix_jobs = [
+        {
+            "id": 1000 + idx,
+            "name": f"unit {idx + 1}/3",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2025-02-01T00:00:00Z",
+            "completed_at": f"2025-02-01T00:{idx + 1:02d}:00Z",
+        }
+        for idx in range(3)
+    ]
+
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_json(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        if path == run_path:
+            return {
+                "id": 99,
+                "run_number": 7,
+                "status": "completed",
+                "conclusion": "success",
+                "head_branch": "main",
+                "head_sha": "beefcafe",
+            }
+        if path == jobs_path:
+            calls.append(dict(kwargs.get("params") or {}))
+            return {"total_count": len(matrix_jobs), "jobs": matrix_jobs}
+        raise AssertionError(f"unexpected path: {path}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.list_pipelines(
+        repo="repo-a",
+        pipeline_id=99,
+        query=PipelineListQuery.create(),
+    )
+
+    assert calls == [{"per_page": 100, "page": 1}]
+    row = result["pipelines"][0]
+    assert [job["id"] for job in row["jobs"]] == [1000, 1001, 1002]
+    assert [job["name"] for job in row["jobs"]] == ["unit", "unit", "unit"]
+    assert [job["matrix"] for job in row["jobs"]] == [[1, 3], [2, 3], [3, 3]]
+    assert [job["duration_s"] for job in row["jobs"]] == [60, 120, 180]
+
+
+def test_github_list_pipelines_status_filter_can_drop_root(monkeypatch: Any) -> None:
+    provider = _provider()
+    monkeypatch.setattr(
+        provider,
+        "_request_json",
+        lambda method, path, **kwargs: {
+            "id": 55,
+            "status": "completed",
+            "conclusion": "success",
+            "head_branch": "main",
+            "head_sha": "abc",
+        },
+    )
+
+    result = provider.list_pipelines(
+        repo="repo-a",
+        pipeline_id=55,
+        query=PipelineListQuery.create(statuses=["failed"]),
+    )
+
+    assert result["pipelines"] == []
+    assert result["returned_count"] == 0
+    assert result["total_count"] == 0

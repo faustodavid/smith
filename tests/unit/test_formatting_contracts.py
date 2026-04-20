@@ -569,3 +569,198 @@ def test_render_text_config_show_renders_key_value_lines_and_omits_missing_field
         "token_env: GITLAB_INFRA_TOKEN\n"
         "api_url: https://gitlab-infra.example.com/api/v4"
     )
+
+
+def test_render_text_pipelines_list_emits_token_optimized_tree() -> None:
+    rendered = render_text(
+        "pipelines.list",
+        {
+            "pipelines": [
+                {
+                    "id": 998877,
+                    "project_id": 882,
+                    "project": "acme/api",
+                    "status": "running",
+                    "ref": "feat/api",
+                    "jobs": [
+                        {
+                            "id": 10,
+                            "name": "compile",
+                            "stage": "build",
+                            "status": "success",
+                            "duration_s": 200,
+                        },
+                        {
+                            "id": 21,
+                            "name": "unit",
+                            "stage": "test",
+                            "status": "success",
+                            "duration_s": 60,
+                            "matrix": [1, 2],
+                            "needs": ["compile"],
+                        },
+                        {
+                            "id": 22,
+                            "name": "unit",
+                            "stage": "test",
+                            "status": "success",
+                            "duration_s": 65,
+                            "matrix": [2, 2],
+                            "needs": ["compile"],
+                        },
+                        {
+                            "id": 23,
+                            "name": "lint",
+                            "stage": "test",
+                            "status": "failed",
+                            "duration_s": 40,
+                            "allow_failure": True,
+                            "needs": ["compile"],
+                        },
+                        {
+                            "id": 30,
+                            "name": "staging_up",
+                            "stage": "deploy",
+                            "status": "success",
+                            "duration_s": 300,
+                            "environment": "staging",
+                            "needs": ["unit"],
+                        },
+                        {
+                            "id": 31,
+                            "name": "prod_up",
+                            "stage": "deploy",
+                            "status": "manual",
+                            "duration_s": 0,
+                            "manual": True,
+                            "environment": "prod",
+                            "needs": ["staging_up"],
+                            "downstream": {
+                                "project": "ops/infra",
+                                "pipeline_id": 1122,
+                                "status": "created",
+                            },
+                        },
+                    ],
+                },
+            ],
+            "returned_count": 1,
+            "total_count": 1,
+            "warnings": [],
+            "partial": False,
+        },
+    )
+
+    assert rendered == (
+        "@p:998877|prj:882|ref:feat/api|st:run\n"
+        "#build\n"
+        "*j10:compile|ok|200s\n"
+        "#test\n"
+        "*j21:unit[1/2]|ok|60s <j10\n"
+        "*j22:unit[2/2]|ok|65s <j10\n"
+        "*j23:lint|err|40s! <j10\n"
+        "#deploy\n"
+        "*j30:staging_up|ok|300s^staging <unit\n"
+        "*j31:prod_up|man|0s?^prod <j30 >> ops/infra:1122[cre]\n"
+        "returned_count: 1\n"
+        "total_count: 1"
+    )
+
+
+def test_render_text_pipelines_list_header_falls_back_to_project_path() -> None:
+    rendered = render_text(
+        "pipelines.list",
+        {
+            "pipelines": [
+                {
+                    "id": 55,
+                    "project": "repo-a",
+                    "status": "success",
+                    "ref": "main",
+                },
+            ],
+            "returned_count": 1,
+            "total_count": 1,
+            "warnings": [],
+            "partial": False,
+        },
+    )
+
+    assert rendered.splitlines()[0] == "@p:55|prj:repo-a|ref:main|st:ok"
+
+
+def test_render_text_pipelines_list_header_includes_pipeline_name() -> None:
+    rendered = render_text(
+        "pipelines.list",
+        {
+            "pipelines": [
+                {
+                    "id": 55,
+                    "project": "repo-a",
+                    "status": "success",
+                    "ref": "main",
+                    "name": "Main release pipeline",
+                },
+            ],
+            "returned_count": 1,
+            "total_count": 1,
+        },
+    )
+
+    assert rendered.splitlines()[0] == "@p:55|prj:repo-a|ref:main|st:ok|nm:Main release pipeline"
+
+
+def test_render_text_pipelines_list_header_includes_via_stage_and_job() -> None:
+    rendered = render_text(
+        "pipelines.list",
+        {
+            "pipelines": [
+                {
+                    "id": 55,
+                    "project": "repo-a",
+                    "status": "failed",
+                    "ref": "main",
+                    "name": "Main release pipeline",
+                    "trigger_stage": "deploy",
+                    "trigger_job": "release-pipeline",
+                },
+            ],
+            "returned_count": 1,
+            "total_count": 1,
+        },
+    )
+
+    assert (
+        rendered.splitlines()[0]
+        == "@p:55|prj:repo-a|ref:main|st:err|nm:Main release pipeline|via:deploy/release-pipeline"
+    )
+
+
+def test_render_text_pipelines_list_renders_stage_less_jobs_without_stage_header() -> None:
+    rendered = render_text(
+        "pipelines.list",
+        {
+            "pipelines": [
+                {
+                    "id": 900,
+                    "project_id": 7,
+                    "status": "running",
+                    "ref": "main",
+                    "jobs": [
+                        {"id": 1, "name": "build", "status": "success", "duration_s": 30},
+                        {"id": 2, "name": "test", "status": "running", "duration_s": None},
+                    ],
+                },
+            ],
+            "returned_count": 1,
+            "total_count": 1,
+        },
+    )
+
+    assert rendered == (
+        "@p:900|prj:7|ref:main|st:run\n"
+        "*j1:build|ok|30s\n"
+        "*j2:test|run|-\n"
+        "returned_count: 1\n"
+        "total_count: 1"
+    )
