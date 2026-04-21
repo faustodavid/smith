@@ -127,6 +127,148 @@ def test_azdo_ls_remote_precheck_skips_fetch_when_head_matches(
     assert mark_calls == [checkout_dir]
 
 
+def test_azdo_remote_head_sha_uses_token_auth_when_available(monkeypatch: Any) -> None:
+    provider = _provider()
+    checkout_dir = os.path.join("tmp", "checkout")
+    git_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(provider, "_get_token", lambda force_refresh=False: "ado-token")
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        git_calls.append({"args": args, "env": kwargs.get("env")})
+        return SimpleNamespace(stdout="abc123\trefs/heads/main\n", stderr="", returncode=0)
+
+    monkeypatch.setattr("smith.providers.azdo_code.subprocess.run", _fake_run)
+
+    assert provider._remote_head_sha(checkout_dir, "main") == "abc123"
+    assert git_calls == [
+        {
+            "args": [
+                "git",
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "-c",
+                "credential.interactive=never",
+                "-c",
+                "http.extraHeader=Authorization: Bearer ado-token",
+                "-C",
+                checkout_dir,
+                "ls-remote",
+                "origin",
+                "main",
+            ],
+            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        }
+    ]
+
+
+def test_azdo_apply_sparse_patterns_uses_token_auth_when_available(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    checkout_dir = tmp_path / "checkout"
+    (checkout_dir / ".git").mkdir(parents=True)
+    git_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(provider, "_get_token", lambda force_refresh=False: "ado-token")
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        git_calls.append({"args": args, "env": kwargs.get("env")})
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr("smith.providers.azdo_code.subprocess.run", _fake_run)
+
+    provider._apply_sparse_patterns(str(checkout_dir), ["/*", "**/*.yml"])
+
+    assert git_calls == [
+        {
+            "args": [
+                "git",
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "-c",
+                "credential.interactive=never",
+                "-c",
+                "http.extraHeader=Authorization: Bearer ado-token",
+                "-C",
+                str(checkout_dir),
+                "sparse-checkout",
+                "set",
+                "--no-cone",
+                "/*",
+                "**/*.yml",
+            ],
+            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        }
+    ]
+
+
+def test_azdo_checkout_and_reset_use_token_auth_when_available(monkeypatch: Any) -> None:
+    provider = _provider()
+    checkout_dir = os.path.join("tmp", "checkout")
+    git_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(provider, "_get_token", lambda force_refresh=False: "ado-token")
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        git_calls.append({"args": args, "env": kwargs.get("env")})
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr("smith.providers.azdo_code.subprocess.run", _fake_run)
+
+    provider._checkout_local_ref(checkout_dir, "FETCH_HEAD")
+    provider._reset_local_checkout(checkout_dir)
+
+    assert git_calls == [
+        {
+            "args": [
+                "git",
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "-c",
+                "credential.interactive=never",
+                "-c",
+                "http.extraHeader=Authorization: Bearer ado-token",
+                "-C",
+                checkout_dir,
+                "checkout",
+                "--force",
+                "--detach",
+                "FETCH_HEAD",
+            ],
+            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        },
+        {
+            "args": [
+                "git",
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "-c",
+                "credential.interactive=never",
+                "-c",
+                "http.extraHeader=Authorization: Bearer ado-token",
+                "-C",
+                checkout_dir,
+                "reset",
+                "--hard",
+                "HEAD",
+            ],
+            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        },
+        {
+            "args": [
+                "git",
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "-c",
+                "credential.interactive=never",
+                "-c",
+                "http.extraHeader=Authorization: Bearer ado-token",
+                "-C",
+                checkout_dir,
+                "clean",
+                "-fd",
+            ],
+            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        },
+    ]
+
+
 def test_azdo_ripgrep_files_with_matches_uses_subprocess(
     monkeypatch: Any, tmp_path: Any
 ) -> None:

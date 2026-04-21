@@ -709,6 +709,18 @@ class GitLabCodeMixin:
             env=self._git_noninteractive_env() if extra_configs else None,
         )
 
+    def _git_auth_subprocess_output(self: Any, args: list[str], *, cwd: str | None = None) -> str:
+        extra_configs = self._git_http_auth_extra_configs()
+        result = subprocess.run(
+            self._prepare_git_command(args, extra_configs=extra_configs),
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=self._git_noninteractive_env() if extra_configs else None,
+        )
+        return result.stdout
+
     def _git_subprocess_result(
         self: Any,
         args: list[str],
@@ -784,11 +796,11 @@ class GitLabCodeMixin:
         return os.path.join(checkout_dir, ".git", "smith-last-fetch")
 
     def _reset_local_checkout(self: Any, checkout_dir: str) -> None:
-        self._git_subprocess(["git", "-C", checkout_dir, "reset", "--hard", "HEAD"])
-        self._git_subprocess(["git", "-C", checkout_dir, "clean", "-fd"])
+        self._git_auth_subprocess(["git", "-C", checkout_dir, "reset", "--hard", "HEAD"])
+        self._git_auth_subprocess(["git", "-C", checkout_dir, "clean", "-fd"])
 
     def _checkout_local_ref(self: Any, checkout_dir: str, ref: str) -> None:
-        self._git_subprocess(["git", "-C", checkout_dir, "checkout", "--force", "--detach", ref])
+        self._git_auth_subprocess(["git", "-C", checkout_dir, "checkout", "--force", "--detach", ref])
 
     def _local_checkout_has_expected_origin(self: Any, checkout_dir: str, remote_url: str) -> bool:
         try:
@@ -806,10 +818,10 @@ class GitLabCodeMixin:
         checkout_dir: str,
         patterns: list[str] | None,
     ) -> None:
-        _local_checkout.apply_sparse_patterns(self._git_subprocess, checkout_dir, patterns)
+        _local_checkout.apply_sparse_patterns(self._git_auth_subprocess, checkout_dir, patterns)
 
     def _remote_head_sha(self: Any, checkout_dir: str, branch: str) -> str | None:
-        return _local_checkout.remote_head_sha(self._git_subprocess_output, checkout_dir, branch)
+        return _local_checkout.remote_head_sha(self._git_auth_subprocess_output, checkout_dir, branch)
 
     def _local_head_sha(self: Any, checkout_dir: str) -> str | None:
         return _local_checkout.local_head_sha(self._git_subprocess_output, checkout_dir)
