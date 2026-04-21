@@ -17,6 +17,7 @@ import requests
 
 from smith.config import parse_bool_env, parse_int_env
 from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
+from smith.providers import local_checkout as _local_checkout
 from smith.providers.helpers import (
     build_grep_result,
     grep_compile_error_result,
@@ -367,11 +368,39 @@ class GitHubCodeMixin:
         marker = os.path.join(checkout_dir, ".smith_last_fetch")
         Path(marker).touch()
 
+    @staticmethod
+    def _compute_sparse_patterns(path: str | None, glob: str | None) -> list[str] | None:
+        return _local_checkout.compute_sparse_patterns(path, glob)
+
+    def _apply_sparse_patterns(
+        self: Any,
+        checkout_dir: str,
+        patterns: list[str] | None,
+    ) -> None:
+        _local_checkout.apply_sparse_patterns(self._git_subprocess, checkout_dir, patterns)
+
+    def _git_subprocess_output(self: Any, args: list[str], *, cwd: str | None = None) -> str:
+        result = subprocess.run(
+            args,
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout
+
+    def _remote_head_sha(self: Any, checkout_dir: str, branch: str) -> str | None:
+        return _local_checkout.remote_head_sha(self._git_subprocess_output, checkout_dir, branch)
+
+    def _local_head_sha(self: Any, checkout_dir: str) -> str | None:
+        return _local_checkout.local_head_sha(self._git_subprocess_output, checkout_dir)
+
     def _ensure_local_checkout(
         self: Any,
         *,
         repo: str,
         branch: str,
+        sparse_patterns: list[str] | None = None,
     ) -> str | None:
         if not parse_bool_env("GITHUB_GREP_USE_LOCAL_CACHE", default=True):
             return None
@@ -388,20 +417,77 @@ class GitHubCodeMixin:
                     if os.path.exists(checkout_dir):
                         shutil.rmtree(checkout_dir)
                     os.makedirs(os.path.dirname(checkout_dir), exist_ok=True)
-                    self._git_subprocess(
-                        ["git", "clone", "--depth", "1", "--branch", branch, remote_url, checkout_dir]
+
+                    clone_args: list[str] = ["git", "clone", "--filter=blob:none"]
+                    if sparse_patterns is not None:
+                        clone_args.append("--sparse")
+                    clone_args.extend(
+                        ["--depth", "1", "--branch", branch, remote_url, checkout_dir]
                     )
+
+                    self._git_subprocess(clone_args)
+                    self._apply_sparse_patterns(checkout_dir, sparse_patterns)
                     self._mark_local_checkout_refreshed(checkout_dir)
                     return checkout_dir
 
                 if self._local_checkout_needs_refresh(checkout_dir):
-                    self._git_subprocess(["git", "-C", checkout_dir, "fetch", "--depth", "1", "origin", branch])
+                    remote_sha = self._remote_head_sha(checkout_dir, branch)
+                    local_sha = self._local_head_sha(checkout_dir)
+                    if remote_sha and local_sha and remote_sha == local_sha:
+                        self._apply_sparse_patterns(checkout_dir, sparse_patterns)
+                        self._mark_local_checkout_refreshed(checkout_dir)
+                        return checkout_dir
+
+                    fetch_args: list[str] = [
+                        "git",
+                        "-C",
+                        checkout_dir,
+                        "fetch",
+                        "--filter=blob:none",
+                        "--depth",
+                        "1",
+                        "origin",
+                        branch,
+                    ]
+                    self._git_subprocess(fetch_args)
                     self._git_subprocess(["git", "-C", checkout_dir, "checkout", "--force", "FETCH_HEAD"])
+                    self._apply_sparse_patterns(checkout_dir, sparse_patterns)
                     self._mark_local_checkout_refreshed(checkout_dir)
+                    return checkout_dir
+
+                self._apply_sparse_patterns(checkout_dir, sparse_patterns)
                 return checkout_dir
             except Exception as exc:
                 logger.debug("Local checkout unavailable for %s@%s, using API fallback: %s", repo, branch, exc)
                 return None
+
+    def _ripgrep_local_result(
+        self: Any,
+        *,
+        checkout_dir: str,
+        pattern: str,
+        case_insensitive: bool,
+        path: str | None,
+        glob: str | None,
+        filename_filter: re.Pattern[str],
+        output_mode: Literal["content", "files_with_matches", "count"],
+        context_lines: int,
+        reverse: bool = False,
+    ) -> dict[str, Any]:
+        return _local_checkout.ripgrep_local_result(
+            checkout_dir=checkout_dir,
+            pattern=pattern,
+            case_insensitive=case_insensitive,
+            path=path,
+            glob=glob,
+            filename_filter=filename_filter,
+            output_mode=output_mode,
+            context_lines=context_lines,
+            reverse=reverse,
+            max_output_chars=self.max_output_chars,
+            grep_max_files=self._config.grep_max_files,
+            truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
+        )
 
     def _get_local_repository_files(
         self: Any,
@@ -445,135 +531,6 @@ class GitHubCodeMixin:
         with open(local_path, "rb") as file_handle:
             return file_handle.read().decode("utf-8", errors="replace")
 
-    @staticmethod
-    def _local_git_grep_mode(pattern: str) -> str:
-        return "-F" if re.search(r"[.^$*+?{}\[\]\\|()]", pattern) is None else "-P"
-
-    @staticmethod
-    def _local_git_grep_batches(
-        candidate_paths: list[str],
-        *,
-        max_paths: int = 256,
-        max_chars: int = 32_768,
-    ) -> list[list[str]]:
-        batches: list[list[str]] = []
-        batch: list[str] = []
-        batch_chars = 0
-
-        for candidate_path in candidate_paths:
-            candidate_len = len(candidate_path) + 1
-            if batch and (len(batch) >= max_paths or batch_chars + candidate_len > max_chars):
-                batches.append(batch)
-                batch = []
-                batch_chars = 0
-            batch.append(candidate_path)
-            batch_chars += candidate_len
-
-        if batch:
-            batches.append(batch)
-
-        return batches
-
-    def _git_grep_local(
-        self: Any,
-        *,
-        checkout_dir: str,
-        pattern: str,
-        case_insensitive: bool,
-        output_mode: Literal["content", "files_with_matches", "count"],
-        context_lines: int,
-        matching: list[dict[str, Any]],
-        search_pattern: re.Pattern[str],
-        reverse: bool = False,
-    ) -> dict[str, Any] | None:
-        local_paths_by_file: dict[str, str] = {}
-        candidate_paths: list[str] = []
-
-        for item in matching:
-            file_path = normalize_path(str(item.get("path") or ""))
-            local_path = str(item.get("local_path") or "") or None
-            if not file_path or local_path is None:
-                continue
-            local_paths_by_file[file_path] = local_path
-            candidate_paths.append(file_path.lstrip("/"))
-
-        if not candidate_paths:
-            return None
-
-        matched_paths: list[str] = []
-        seen_paths: set[str] = set()
-        grep_mode = self._local_git_grep_mode(pattern)
-
-        for batch in self._local_git_grep_batches(candidate_paths):
-            args = ["git", "-C", checkout_dir, "grep", grep_mode, "--full-name", "-l"]
-            if case_insensitive:
-                args.append("-i")
-            args.extend(["-e", pattern, "--", *batch])
-            result = self._git_subprocess_result(args, check=False)
-            return_code = int(getattr(result, "returncode", 1))
-            if return_code not in (0, 1):
-                stderr = str(getattr(result, "stderr", "") or "").strip()
-                logger.debug(
-                    "git grep unavailable for %s: %s",
-                    checkout_dir,
-                    stderr or return_code,
-                )
-                return None
-            for line in str(getattr(result, "stdout", "") or "").splitlines():
-                file_path = normalize_path(line.strip())
-                if not file_path or file_path not in local_paths_by_file or file_path in seen_paths:
-                    continue
-                seen_paths.add(file_path)
-                matched_paths.append(file_path)
-
-        if reverse:
-            matched_paths.reverse()
-
-        if output_mode == "files_with_matches":
-            return build_grep_result(
-                output_lines=matched_paths,
-                matched_count=len(matched_paths),
-                warnings=[],
-                max_output_chars=self.max_output_chars,
-                truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
-            )
-
-        output_lines: list[str] = []
-        warnings: list[str] = []
-        files_matched = 0
-
-        for file_path in matched_paths:
-            local_path = local_paths_by_file[file_path]
-            try:
-                content = self._read_local_file_text(local_path)
-            except Exception as exc:
-                warnings.append(f"failed to read {file_path}: {exc}")
-                continue
-
-            file_lines = content.splitlines()
-            line_offset = 0
-
-            matched_lines, count = grep_match_lines(
-                lines=file_lines,
-                search_pattern=search_pattern,
-                file_label=file_path,
-                output_mode=output_mode,
-                context_lines=context_lines,
-                line_offset=line_offset,
-                reverse=reverse,
-            )
-            if count:
-                files_matched += count
-                output_lines.extend(matched_lines)
-
-        return build_grep_result(
-            output_lines=output_lines,
-            matched_count=files_matched,
-            warnings=warnings,
-            max_output_chars=self.max_output_chars,
-            truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
-        )
-
     def grep(
         self: Any,
         *,
@@ -600,9 +557,34 @@ class GitHubCodeMixin:
             default=True,
         )
         use_local_cache = grep_local_cache_enabled and not no_clone
+        sparse_patterns = self._compute_sparse_patterns(path, glob) if use_local_cache else None
         checkout_dir: str | None = None
         if use_local_cache:
-            checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
+            checkout_dir = self._ensure_local_checkout(
+                repo=repo,
+                branch=resolved_branch,
+                sparse_patterns=sparse_patterns,
+            )
+
+        if checkout_dir and not is_match_all and from_line is None and to_line is None:
+            search_pattern, compile_error = compile_search_pattern(
+                regex_pattern,
+                case_insensitive=case_insensitive,
+            )
+            if compile_error or search_pattern is None:
+                return grep_compile_error_result(compile_error or "Invalid pattern")
+            return self._ripgrep_local_result(
+                checkout_dir=checkout_dir,
+                pattern=regex_pattern,
+                case_insensitive=case_insensitive,
+                path=path,
+                glob=glob,
+                filename_filter=filename_filter,
+                output_mode=output_mode,
+                context_lines=context_lines or 0,
+                reverse=reverse,
+            )
+
         if checkout_dir:
             files = self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
         else:
@@ -629,17 +611,6 @@ class GitHubCodeMixin:
                 "warnings": [],
                 "partial": False,
             }
-        if output_mode != "files_with_matches" and not checkout_dir and use_local_cache and matching:
-            checkout_dir = self._ensure_local_checkout(repo=repo, branch=resolved_branch)
-            if checkout_dir:
-                local_paths_by_file = {
-                    str(item.get("path", "")): str(item.get("local_path") or "") or None
-                    for item in self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
-                }
-                matching = [
-                    {**item, "local_path": local_paths_by_file.get(str(item.get("path", "")))}
-                    for item in matching
-                ]
 
         search_pattern, compile_error = compile_search_pattern(
             regex_pattern,
@@ -647,20 +618,6 @@ class GitHubCodeMixin:
         )
         if compile_error or search_pattern is None:
             return grep_compile_error_result(compile_error or "Invalid pattern")
-
-        if checkout_dir and not is_match_all and from_line is None and to_line is None:
-            git_grep_result = self._git_grep_local(
-                checkout_dir=checkout_dir,
-                pattern=regex_pattern,
-                case_insensitive=case_insensitive,
-                output_mode=output_mode,
-                context_lines=context_lines or 0,
-                matching=matching,
-                search_pattern=search_pattern,
-                reverse=reverse,
-            )
-            if git_grep_result is not None:
-                return git_grep_result
 
         output_lines: list[str] = []
         warnings: list[str] = []

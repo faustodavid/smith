@@ -1152,35 +1152,6 @@ def test_gitlab_grep_local_checkout_rejects_internal_metadata_paths(monkeypatch:
     }
 
 
-def test_gitlab_grep_local_checkout_ignores_untracked_files(monkeypatch: Any, tmp_path: Any) -> None:
-    provider = _provider()
-    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
-    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
-    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
-    monkeypatch.setattr(provider, "_git_subprocess", lambda *args, **kwargs: None)
-    monkeypatch.setattr(provider, "_git_subprocess_output", _cache_git_output(provider, tracked_paths=["src/app.py"]))
-
-    checkout_dir = provider._local_checkout_path(repo=_FULL_REPO, branch="main")
-    os.makedirs(checkout_dir, exist_ok=True)
-    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
-    os.makedirs(os.path.join(checkout_dir, "src"), exist_ok=True)
-    with open(os.path.join(checkout_dir, ".git", "smith-last-fetch"), "w", encoding="utf-8"):
-        pass
-    with open(os.path.join(checkout_dir, "src", "app.py"), "w", encoding="utf-8") as file_handle:
-        file_handle.write("ok\n")
-    with open(os.path.join(checkout_dir, "src", "scratch.txt"), "w", encoding="utf-8") as file_handle:
-        file_handle.write("error\n")
-
-    result = provider.grep(repo=_FULL_REPO, pattern="error", output_mode="count")
-
-    assert result == {
-        "text": "",
-        "files_matched": 0,
-        "warnings": [],
-        "partial": False,
-    }
-
-
 def test_gitlab_grep_supports_match_all_shortcut_compile_errors_and_warning_paths(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
     monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
@@ -1254,7 +1225,7 @@ def test_gitlab_grep_returns_guard_result_without_reading_large_scopes(monkeypat
     assert result["warnings"] == [
         "candidate file count 2 exceeds SMITH_GREP_MAX_FILES=1; narrow with --path/--glob or start with `smith code search`."
     ]
-    assert checkout_calls == [{"repo": _FULL_REPO, "branch": "main"}]
+    assert checkout_calls == [{"repo": _FULL_REPO, "branch": "main", "sparse_patterns": None}]
     assert "Search scope contains 2 candidate files which exceeds the safety limit (1)." in result["text"]
     assert 'smith code search "<query>"' in result["text"]
 

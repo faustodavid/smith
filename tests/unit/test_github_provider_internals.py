@@ -11,7 +11,7 @@ import pytest
 import requests
 from tests.support import FakeResponse, RecordingSession, make_runtime_config
 
-from smith.errors import SmithApiError, SmithAuthError
+from smith.errors import SmithApiError, SmithAuthError, SmithError
 from smith.providers.github import GitHubProvider
 
 
@@ -197,12 +197,7 @@ def test_github_grep_attempts_local_checkout_before_api_listing(monkeypatch: Any
     monkeypatch.setattr(
         provider,
         "_ensure_local_checkout",
-        lambda *, repo, branch: checkout_calls.append((repo, branch)) or str(tmp_path),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_get_local_repository_files",
-        lambda **kwargs: [{"path": "/src/app.py", "is_binary": False, "sha": None, "local_path": str(local_file)}],
+        lambda *, repo, branch, sparse_patterns=None: checkout_calls.append((repo, branch)) or str(tmp_path),
     )
     monkeypatch.setattr(
         provider,
@@ -211,7 +206,7 @@ def test_github_grep_attempts_local_checkout_before_api_listing(monkeypatch: Any
     )
     monkeypatch.setattr(
         provider,
-        "_git_grep_local",
+        "_ripgrep_local_result",
         lambda **kwargs: {"text": "/src/app.py", "files_matched": 1, "warnings": [], "partial": False},
     )
 
@@ -245,45 +240,6 @@ def test_github_grep_no_clone_skips_local_checkout(monkeypatch: Any) -> None:
         "warnings": [],
         "partial": False,
     }
-
-
-def test_github_git_grep_local_reads_only_matched_files(monkeypatch: Any, tmp_path: Any) -> None:
-    provider = _provider()
-    matched_file = tmp_path / "src" / "app.py"
-    matched_file.parent.mkdir(parents=True)
-    matched_file.write_text("first line\nneedle\n", encoding="utf-8")
-    other_file = tmp_path / "README.md"
-    other_file.write_text("other line\n", encoding="utf-8")
-    git_calls: list[list[str]] = []
-
-    def _fake_git_result(args: list[str], *, cwd: str | None = None, check: bool = True) -> Any:
-        del cwd
-        git_calls.append(args)
-        assert check is False
-        return SimpleNamespace(returncode=0, stdout="src/app.py\n", stderr="")
-
-    monkeypatch.setattr(provider, "_git_subprocess_result", _fake_git_result)
-
-    result = provider._git_grep_local(
-        checkout_dir=str(tmp_path),
-        pattern="needle",
-        case_insensitive=True,
-        output_mode="content",
-        context_lines=0,
-        matching=[
-            {"path": "/src/app.py", "is_binary": False, "sha": None, "local_path": str(matched_file)},
-            {"path": "/README.md", "is_binary": False, "sha": None, "local_path": str(other_file)},
-        ],
-        search_pattern=re.compile("needle", re.IGNORECASE),
-    )
-
-    assert result == {
-        "text": "/src/app.py\n2:needle",
-        "files_matched": 1,
-        "warnings": [],
-        "partial": False,
-    }
-    assert "-F" in git_calls[0]
 
 
 def test_github_default_grep_workers_scale_by_candidate_count() -> None:
@@ -631,3 +587,179 @@ def test_github_request_semaphore_serializes_requests(monkeypatch: Any) -> None:
 
     assert not errors
     assert max_in_flight == 1
+
+
+def test_github_compute_sparse_patterns_narrows_by_path_and_simple_glob() -> None:
+    assert GitHubProvider._compute_sparse_patterns(None, None) is None
+    assert GitHubProvider._compute_sparse_patterns("/", None) is None
+    assert GitHubProvider._compute_sparse_patterns("/src", None) == ["/*", "/src/"]
+    assert GitHubProvider._compute_sparse_patterns(None, "*.yml") == ["/*", "**/*.yml"]
+    assert GitHubProvider._compute_sparse_patterns("/configs", "*.yml") == [
+        "/*",
+        "/configs/**/*.yml",
+    ]
+    assert GitHubProvider._compute_sparse_patterns(None, "src/*.yml") is None
+    assert GitHubProvider._compute_sparse_patterns(None, "{*.yml,*.yaml}") is None
+
+
+def test_github_partial_clone_adds_sparse_flag_when_patterns_given(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_require_github_org", lambda: "octo")
+
+    git_calls: list[list[str]] = []
+
+    def _fake_git(args: list[str], *, cwd: str | None = None) -> None:
+        git_calls.append(args)
+        if args[:2] == ["git", "clone"]:
+            target = args[-1]
+            os.makedirs(os.path.join(target, ".git"), exist_ok=True)
+
+    monkeypatch.setattr(provider, "_git_subprocess", _fake_git)
+
+    checkout_dir = provider._ensure_local_checkout(
+        repo="repo-a",
+        branch="main",
+        sparse_patterns=["/*", "**/*.yml"],
+    )
+
+    assert checkout_dir is not None
+    clone_call = next(call for call in git_calls if "clone" in call)
+    assert "--filter=blob:none" in clone_call
+    assert "--sparse" in clone_call
+    sparse_calls = [call for call in git_calls if "sparse-checkout" in call]
+    assert sparse_calls, "sparse-checkout set should be invoked when patterns are provided"
+    assert sparse_calls[0][-2:] == ["/*", "**/*.yml"]
+
+
+def test_github_ls_remote_precheck_skips_fetch_when_head_matches(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(provider, "_require_github_org", lambda: "octo")
+    checkout_dir = provider._local_checkout_path(org="octo", repo="repo-a", branch="main")
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    monkeypatch.setattr(provider, "_local_checkout_needs_refresh", lambda d: True)
+    monkeypatch.setattr(provider, "_remote_head_sha", lambda *a, **k: "abc123")
+    monkeypatch.setattr(provider, "_local_head_sha", lambda *a, **k: "abc123")
+
+    mark_calls: list[str] = []
+    monkeypatch.setattr(
+        provider, "_mark_local_checkout_refreshed", lambda d: mark_calls.append(d)
+    )
+    monkeypatch.setattr(
+        provider,
+        "_git_subprocess",
+        lambda *a, **k: pytest.fail("fetch must be skipped when HEAD is unchanged"),
+    )
+
+    result = provider._ensure_local_checkout(repo="repo-a", branch="main")
+
+    assert result == checkout_dir
+    assert mark_calls == [checkout_dir]
+
+
+def test_github_ripgrep_files_with_matches_uses_subprocess(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    provider = _provider()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.yml").write_text("trigger: deploy\n", encoding="utf-8")
+    rg_calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: "/usr/bin/rg" if name == "rg" else None,
+    )
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        rg_calls.append(args)
+        return SimpleNamespace(returncode=0, stdout=f"{tmp_path}/src/app.yml\n", stderr="")
+
+    monkeypatch.setattr("smith.providers.local_checkout.subprocess.run", _fake_run)
+
+    result = provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="trigger:",
+        case_insensitive=True,
+        path=None,
+        glob="*.yml",
+        filename_filter=re.compile(r".*\.yml$"),
+        output_mode="files_with_matches",
+        context_lines=0,
+    )
+
+    assert result is not None
+    assert result["text"] == "/src/app.yml"
+    assert result["files_matched"] == 1
+    assert rg_calls, "ripgrep should be invoked"
+    rg_args = rg_calls[0]
+    assert rg_args[0] == "/usr/bin/rg"
+    assert "-l" in rg_args
+    assert "-e" in rg_args
+    assert "trigger:" in rg_args
+    assert "*.yml" in rg_args
+
+
+def test_github_ripgrep_parses_content_output_with_context(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    provider = _provider()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text(
+        "before\ntrigger: x\nafter\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: "/usr/bin/rg" if name == "rg" else None,
+    )
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.subprocess.run",
+        lambda args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=f"{tmp_path}/src/app.py\n1-before\n2:trigger: x\n3-after\n",
+            stderr="",
+        ),
+    )
+
+    result = provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="trigger:",
+        case_insensitive=False,
+        path=None,
+        glob=None,
+        filename_filter=re.compile(r".*"),
+        output_mode="content",
+        context_lines=1,
+    )
+
+    assert result is not None
+    assert result["files_matched"] == 1
+    assert result["text"] == "/src/app.py\n1-before\n2:trigger: x\n3-after"
+
+
+def test_github_grep_raises_when_ripgrep_missing(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: None,
+    )
+
+    with pytest.raises(SmithError) as excinfo:
+        provider._ripgrep_local_result(
+            checkout_dir=str(tmp_path),
+            pattern="x",
+            case_insensitive=True,
+            path=None,
+            glob=None,
+            filename_filter=re.compile(r".*"),
+            output_mode="files_with_matches",
+            context_lines=0,
+        )
+    assert "ripgrep" in str(excinfo.value).lower()

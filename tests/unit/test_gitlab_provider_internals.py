@@ -11,7 +11,7 @@ import pytest
 import requests
 from tests.support import make_runtime_config
 
-from smith.errors import SmithApiError, SmithAuthError
+from smith.errors import SmithApiError, SmithAuthError, SmithError
 from smith.providers.gitlab import GitLabProvider
 
 _FULL_REPO = "gitlab-org/repo-a"
@@ -228,6 +228,7 @@ def test_gitlab_local_checkout_clone_uses_token_auth_when_available(monkeypatch:
                 "-c",
                 f"http.extraHeader=Authorization: Basic {expected_basic}",
                 "clone",
+                "--filter=blob:none",
                 "--depth",
                 "1",
                 "--branch",
@@ -250,6 +251,8 @@ def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch:
     monkeypatch.setattr(provider, "_get_token", lambda force_refresh=False: "env-token")
     monkeypatch.setattr(provider, "_local_checkout_has_expected_origin", lambda *args, **kwargs: True)
     monkeypatch.setattr(provider, "_local_checkout_needs_refresh", lambda *args, **kwargs: True)
+    monkeypatch.setattr(provider, "_remote_head_sha", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_local_head_sha", lambda *args, **kwargs: None)
     monkeypatch.setattr(provider, "_checkout_local_ref", lambda *args, **kwargs: None)
     monkeypatch.setattr(provider, "_reset_local_checkout", lambda *args, **kwargs: None)
     monkeypatch.setattr(provider, "_mark_local_checkout_refreshed", lambda *args, **kwargs: None)
@@ -277,6 +280,7 @@ def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch:
                 "-C",
                 checkout_dir,
                 "fetch",
+                "--filter=blob:none",
                 "--depth",
                 "1",
                 "origin",
@@ -285,47 +289,6 @@ def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch:
             "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         }
     ]
-
-
-def test_gitlab_grep_uses_git_grep_fast_path_before_listing(monkeypatch: Any, tmp_path: Any) -> None:
-    provider = _provider()
-    local_file = tmp_path / "src" / "app.py"
-    local_file.parent.mkdir(parents=True)
-    local_file.write_text("needle\n", encoding="utf-8")
-    checkout_calls: list[tuple[str, str]] = []
-
-    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
-    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
-    monkeypatch.setattr(
-        provider,
-        "_ensure_local_checkout",
-        lambda *, repo, branch: checkout_calls.append((repo, branch)) or str(tmp_path),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_grep_via_search_api",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Search API should not be used")),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_get_local_repository_files",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Local file listing should be skipped")),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_get_repository_files",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("API listing should not be used")),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_git_grep_local_fast",
-        lambda **kwargs: [{"path": "/src/app.py", "is_binary": False, "sha": None, "local_path": str(local_file)}],
-    )
-
-    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="files_with_matches")
-
-    assert checkout_calls == [(_FULL_REPO, "main")]
-    assert result["text"] == "/src/app.py"
 
 
 def test_gitlab_grep_no_clone_skips_local_checkout(monkeypatch: Any) -> None:
@@ -354,160 +317,6 @@ def test_gitlab_grep_no_clone_skips_local_checkout(monkeypatch: Any) -> None:
     }
 
 
-def test_gitlab_git_grep_local_fast_uses_pathspecs_for_simple_glob(monkeypatch: Any, tmp_path: Any) -> None:
-    provider = _provider()
-    top_level = tmp_path / "src" / "app.py"
-    nested = tmp_path / "src" / "nested" / "tool.py"
-    filtered = tmp_path / "src" / "Main.java"
-    top_level.parent.mkdir(parents=True)
-    nested.parent.mkdir(parents=True)
-    top_level.write_text("needle\n", encoding="utf-8")
-    nested.write_text("needle\n", encoding="utf-8")
-    filtered.write_text("needle\n", encoding="utf-8")
-    git_calls: list[list[str]] = []
-
-    def _fake_git_result(args: list[str], *, cwd: str | None = None, check: bool = True) -> Any:
-        del cwd
-        git_calls.append(args)
-        assert check is False
-        return SimpleNamespace(returncode=0, stdout="src/app.py\nsrc/nested/tool.py\nsrc/Main.java\n", stderr="")
-
-    monkeypatch.setattr(provider, "_git_subprocess_result", _fake_git_result)
-
-    result = provider._git_grep_local_fast(
-        checkout_dir=str(tmp_path),
-        pattern="needle",
-        case_insensitive=True,
-        path="/src",
-        glob="*.py",
-        filename_filter=re.compile(r".*\.py$"),
-    )
-
-    assert result == [
-        {"path": "/src/app.py", "is_binary": False, "sha": None, "local_path": str(top_level)},
-        {"path": "/src/nested/tool.py", "is_binary": False, "sha": None, "local_path": str(nested)},
-    ]
-    assert ":(glob)src/*.py" in git_calls[0]
-    assert ":(glob)src/**/*.py" in git_calls[0]
-
-
-def test_gitlab_git_grep_local_fast_returns_no_matches_for_missing_path(monkeypatch: Any, tmp_path: Any) -> None:
-    provider = _provider()
-    monkeypatch.setattr(
-        provider,
-        "_git_subprocess_result",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("git grep should be skipped")),
-    )
-
-    result = provider._git_grep_local_fast(
-        checkout_dir=str(tmp_path),
-        pattern="needle",
-        case_insensitive=True,
-        path="/missing",
-        glob=None,
-        filename_filter=re.compile(r".*"),
-    )
-
-    assert result == []
-
-
-def test_gitlab_grep_fast_path_returns_content_without_rereading_files(monkeypatch: Any, tmp_path: Any) -> None:
-    provider = _provider()
-    local_file = tmp_path / "src" / "app.py"
-    local_file.parent.mkdir(parents=True)
-    local_file.write_text("before\nneedle\nafter\n", encoding="utf-8")
-    git_calls: list[list[str]] = []
-
-    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
-    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
-    monkeypatch.setattr(provider, "_ensure_local_checkout", lambda **kwargs: str(tmp_path))
-    monkeypatch.setattr(
-        provider,
-        "_grep_via_search_api",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Search API should not be used")),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_get_local_repository_files",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Local file listing should be skipped")),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_get_repository_files",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("API listing should not be used")),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_read_local_file_text",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("files should not be re-read")),
-    )
-
-    def _fake_git_result(args: list[str], *, cwd: str | None = None, check: bool = True) -> Any:
-        del cwd
-        git_calls.append(args)
-        assert check is False
-        return SimpleNamespace(returncode=0, stdout="src/app.py\n1-before\n2:needle\n3-after\n", stderr="")
-
-    monkeypatch.setattr(provider, "_git_subprocess_result", _fake_git_result)
-
-    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="content", context_lines=1)
-
-    assert result == {
-        "text": "/src/app.py\n1-before\n2:needle\n3-after",
-        "files_matched": 1,
-        "warnings": [],
-        "partial": False,
-    }
-    assert "--heading" in git_calls[0]
-    assert "-n" in git_calls[0]
-    assert "-C" in git_calls[0]
-
-
-def test_gitlab_grep_fast_path_returns_count_without_rereading_files(monkeypatch: Any, tmp_path: Any) -> None:
-    provider = _provider()
-    local_file = tmp_path / "src" / "app.py"
-    local_file.parent.mkdir(parents=True)
-    local_file.write_text("needle\nneedle\n", encoding="utf-8")
-    git_calls: list[list[str]] = []
-
-    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
-    monkeypatch.setattr(provider, "_get_project_default_branch", lambda repo: "main")
-    monkeypatch.setattr(provider, "_ensure_local_checkout", lambda **kwargs: str(tmp_path))
-    monkeypatch.setattr(
-        provider,
-        "_get_local_repository_files",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Local file listing should be skipped")),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_get_repository_files",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("API listing should not be used")),
-    )
-    monkeypatch.setattr(
-        provider,
-        "_read_local_file_text",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("files should not be re-read")),
-    )
-
-    def _fake_git_result(args: list[str], *, cwd: str | None = None, check: bool = True) -> Any:
-        del cwd
-        git_calls.append(args)
-        assert check is False
-        return SimpleNamespace(returncode=0, stdout="src/app.py:2\n", stderr="")
-
-    monkeypatch.setattr(provider, "_git_subprocess_result", _fake_git_result)
-
-    result = provider.grep(repo=_FULL_REPO, pattern="needle", output_mode="count", context_lines=0)
-
-    assert result == {
-        "text": "/src/app.py:2",
-        "files_matched": 1,
-        "warnings": [],
-        "partial": False,
-    }
-    assert "-c" in git_calls[0]
-
-
 def test_gitlab_grep_does_not_retry_local_checkout_after_api_listing(monkeypatch: Any) -> None:
     provider = _provider()
     checkout_calls: list[dict[str, Any]] = []
@@ -531,7 +340,7 @@ def test_gitlab_grep_does_not_retry_local_checkout_after_api_listing(monkeypatch
         "warnings": [],
         "partial": False,
     }
-    assert checkout_calls == [{"repo": _FULL_REPO, "branch": "main"}]
+    assert checkout_calls == [{"repo": _FULL_REPO, "branch": "main", "sparse_patterns": None}]
 
 
 def test_gitlab_grep_parallel_api_fallback_uses_worker_sessions(monkeypatch: Any) -> None:
@@ -605,40 +414,257 @@ def test_gitlab_grep_content_uses_search_api_prefilter_when_local_checkout_unava
     }
 
 
-def test_gitlab_git_grep_local_reads_only_matched_files(monkeypatch: Any, tmp_path: Any) -> None:
+def test_gitlab_compute_sparse_patterns_narrows_by_path_and_simple_glob() -> None:
+    assert GitLabProvider._compute_sparse_patterns(None, None) is None
+    assert GitLabProvider._compute_sparse_patterns("/", None) is None
+    assert GitLabProvider._compute_sparse_patterns("/src", None) == ["/*", "/src/"]
+    assert GitLabProvider._compute_sparse_patterns(None, "*.yml") == ["/*", "**/*.yml"]
+    assert GitLabProvider._compute_sparse_patterns("/configs", "*.yml") == ["/*", "/configs/**/*.yml"]
+    assert GitLabProvider._compute_sparse_patterns(None, "src/*.yml") is None
+    assert GitLabProvider._compute_sparse_patterns(None, "{*.yml,*.yaml}") is None
+
+
+def test_gitlab_partial_clone_adds_sparse_flag_when_patterns_given(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
-    matched_file = tmp_path / "src" / "app.py"
-    matched_file.parent.mkdir(parents=True)
-    matched_file.write_text("first line\nneedle\n", encoding="utf-8")
-    other_file = tmp_path / "README.md"
-    other_file.write_text("other line\n", encoding="utf-8")
     git_calls: list[list[str]] = []
 
-    def _fake_git_result(args: list[str], *, cwd: str | None = None, check: bool = True) -> Any:
-        del cwd
+    monkeypatch.setattr(provider, "_gitlab_grep_cache_root", lambda: str(tmp_path))
+    monkeypatch.setattr(provider, "_get_token", lambda force_refresh=False: "env-token")
+    monkeypatch.setattr(provider, "_checkout_local_ref", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_reset_local_checkout", lambda *args, **kwargs: None)
+    monkeypatch.setattr(provider, "_mark_local_checkout_refreshed", lambda *args, **kwargs: None)
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
         git_calls.append(args)
-        assert check is False
-        return SimpleNamespace(returncode=0, stdout="src/app.py\n", stderr="")
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
 
-    monkeypatch.setattr(provider, "_git_subprocess_result", _fake_git_result)
+    monkeypatch.setattr("smith.providers.gitlab_code.subprocess.run", _fake_run)
 
-    result = provider._git_grep_local(
-        checkout_dir=str(tmp_path),
-        pattern="needle",
-        case_insensitive=True,
-        output_mode="content",
-        context_lines=0,
-        matching=[
-            {"path": "/src/app.py", "is_binary": False, "sha": None, "local_path": str(matched_file)},
-            {"path": "/README.md", "is_binary": False, "sha": None, "local_path": str(other_file)},
-        ],
-        search_pattern=re.compile("needle", re.IGNORECASE),
+    checkout_dir = provider._ensure_local_checkout(
+        repo=_FULL_REPO,
+        branch="main",
+        sparse_patterns=["/*", "**/*.yml"],
     )
 
-    assert result == {
-        "text": "/src/app.py\n2:needle",
-        "files_matched": 1,
-        "warnings": [],
-        "partial": False,
-    }
-    assert "-F" in git_calls[0]
+    assert checkout_dir == provider._local_checkout_path(repo=_FULL_REPO, branch="main")
+    clone_call = next(call for call in git_calls if "clone" in call)
+    assert "--filter=blob:none" in clone_call
+    assert "--sparse" in clone_call
+    sparse_calls = [call for call in git_calls if "sparse-checkout" in call]
+    assert sparse_calls, "sparse-checkout set should be invoked when patterns are provided"
+    assert sparse_calls[0][-2:] == ["/*", "**/*.yml"]
+
+
+def test_gitlab_ls_remote_precheck_skips_fetch_when_head_matches(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setattr(provider, "_gitlab_grep_cache_root", lambda: str(tmp_path))
+    checkout_dir = provider._local_checkout_path(repo=_FULL_REPO, branch="main")
+    Path(checkout_dir, ".git").mkdir(parents=True)
+    monkeypatch.setattr(provider, "_local_checkout_has_expected_origin", lambda *args, **kwargs: True)
+    monkeypatch.setattr(provider, "_local_checkout_needs_refresh", lambda *args, **kwargs: True)
+    monkeypatch.setattr(provider, "_remote_head_sha", lambda *args, **kwargs: "abc123")
+    monkeypatch.setattr(provider, "_local_head_sha", lambda *args, **kwargs: "abc123")
+
+    mark_calls: list[str] = []
+    monkeypatch.setattr(
+        provider,
+        "_mark_local_checkout_refreshed",
+        lambda dir_: mark_calls.append(dir_),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_git_auth_subprocess",
+        lambda *args, **kwargs: pytest.fail("fetch should be skipped when HEAD is unchanged"),
+    )
+
+    result = provider._ensure_local_checkout(repo=_FULL_REPO, branch="main")
+
+    assert result == checkout_dir
+    assert mark_calls == [checkout_dir]
+
+
+def test_gitlab_ripgrep_content_reverse_flips_blocks_within_file_only(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    provider = _provider()
+
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: "/usr/bin/rg" if name == "rg" else None,
+    )
+    stub_output = (
+        f"{tmp_path}/b.py\n"
+        "1-x\n"
+        "2:hit\n"
+        "3-y\n"
+        "--\n"
+        "10-x\n"
+        "11:hit\n"
+        "12-y\n"
+        f"\n{tmp_path}/a.py\n"
+        "5:hit\n"
+    )
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.subprocess.run",
+        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout=stub_output, stderr=""),
+    )
+
+    result = provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="hit",
+        case_insensitive=False,
+        path=None,
+        glob=None,
+        filename_filter=re.compile(r".*"),
+        output_mode="content",
+        context_lines=1,
+        reverse=True,
+    )
+
+    lines = result["text"].splitlines()
+    assert lines[0] == "/b.py"
+    sep_index = lines.index("--")
+    assert lines[1:sep_index] == ["10-x", "11:hit", "12-y"]
+    assert lines[sep_index + 1 : sep_index + 4] == ["1-x", "2:hit", "3-y"]
+    assert lines[-2:] == ["/a.py", "5:hit"]
+
+
+def test_gitlab_ripgrep_uses_sortr_when_reverse_is_requested(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    provider = _provider()
+    rg_calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: "/usr/bin/rg" if name == "rg" else None,
+    )
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        rg_calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("smith.providers.local_checkout.subprocess.run", _fake_run)
+
+    provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="x",
+        case_insensitive=False,
+        path=None,
+        glob=None,
+        filename_filter=re.compile(r".*"),
+        output_mode="files_with_matches",
+        context_lines=0,
+        reverse=True,
+    )
+    assert "--sortr" in rg_calls[-1]
+    assert "--sort" not in rg_calls[-1]
+
+    provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="x",
+        case_insensitive=False,
+        path=None,
+        glob=None,
+        filename_filter=re.compile(r".*"),
+        output_mode="files_with_matches",
+        context_lines=0,
+        reverse=False,
+    )
+    assert "--sort" in rg_calls[-1]
+    assert "--sortr" not in rg_calls[-1]
+
+
+def test_gitlab_ripgrep_files_with_matches_uses_subprocess(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.yml").write_text("trigger: deploy\n", encoding="utf-8")
+    rg_calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: "/usr/bin/rg" if name == "rg" else None,
+    )
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        rg_calls.append(args)
+        return SimpleNamespace(returncode=0, stdout=f"{tmp_path}/src/app.yml\n", stderr="")
+
+    monkeypatch.setattr("smith.providers.local_checkout.subprocess.run", _fake_run)
+
+    result = provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="trigger:",
+        case_insensitive=True,
+        path=None,
+        glob="*.yml",
+        filename_filter=re.compile(r".*\.yml$"),
+        output_mode="files_with_matches",
+        context_lines=0,
+    )
+
+    assert result is not None
+    assert result["text"] == "/src/app.yml"
+    assert result["files_matched"] == 1
+    assert rg_calls, "ripgrep should be invoked"
+    rg_args = rg_calls[0]
+    assert rg_args[0] == "/usr/bin/rg"
+    assert "-l" in rg_args
+    assert "-e" in rg_args
+    assert "trigger:" in rg_args
+    assert "*.yml" in rg_args
+
+
+def test_gitlab_grep_raises_when_ripgrep_missing(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: None,
+    )
+
+    with pytest.raises(SmithError) as excinfo:
+        provider._ripgrep_local_result(
+            checkout_dir=str(tmp_path),
+            pattern="x",
+            case_insensitive=True,
+            path=None,
+            glob=None,
+            filename_filter=re.compile(r".*"),
+            output_mode="files_with_matches",
+            context_lines=0,
+        )
+    assert "ripgrep" in str(excinfo.value).lower()
+
+
+def test_gitlab_ripgrep_parses_content_output_with_context(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("before\ntrigger: x\nafter\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: "/usr/bin/rg" if name == "rg" else None,
+    )
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.subprocess.run",
+        lambda args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=f"{tmp_path}/src/app.py\n1-before\n2:trigger: x\n3-after\n",
+            stderr="",
+        ),
+    )
+
+    result = provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="trigger:",
+        case_insensitive=False,
+        path=None,
+        glob=None,
+        filename_filter=re.compile(r".*"),
+        output_mode="content",
+        context_lines=1,
+    )
+
+    assert result is not None
+    assert result["files_matched"] == 1
+    assert result["text"] == "/src/app.py\n1-before\n2:trigger: x\n3-after"

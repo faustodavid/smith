@@ -70,6 +70,7 @@ def test_azdo_list_project_repository_and_search_code_views(monkeypatch: Any) ->
 
 
 def test_azdo_grep_supports_match_all_shortcut_and_warning_paths(monkeypatch: Any) -> None:
+    monkeypatch.setenv("AZDO_GREP_USE_LOCAL_CACHE", "false")
     provider = _provider(make_runtime_config(max_output_chars=50))
     repo_url = f"{provider.org_url}/proj-a/_apis/git/repositories/repo-a/items"
 
@@ -107,6 +108,7 @@ def test_azdo_grep_supports_match_all_shortcut_and_warning_paths(monkeypatch: An
 
 
 def test_azdo_grep_returns_guard_result_before_reading_large_scopes(monkeypatch: Any) -> None:
+    monkeypatch.setenv("AZDO_GREP_USE_LOCAL_CACHE", "false")
     provider = _provider(make_runtime_config(grep_max_files=1))
     repo_url = f"{provider.org_url}/proj-a/_apis/git/repositories/repo-a/items"
 
