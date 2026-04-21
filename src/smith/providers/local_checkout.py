@@ -236,12 +236,13 @@ def ripgrep_local_result(
         base_args.append("-i")
     if glob:
         base_args.extend(["--glob", glob])
+    sort_flag = "--sortr" if reverse else "--sort"
     if output_mode == "files_with_matches":
-        base_args.extend(["-l", "--sort", "path", "-e", pattern])
+        base_args.extend(["-l", sort_flag, "path", "-e", pattern])
     elif output_mode == "count":
-        base_args.extend(["-c", "--sort", "path", "-e", pattern])
+        base_args.extend(["-c", sort_flag, "path", "-e", pattern])
     else:
-        base_args.extend(["-n", "--heading", "--sort", "path"])
+        base_args.extend(["-n", "--heading", sort_flag, "path"])
         if context_lines > 0:
             base_args.extend(["-C", str(context_lines)])
         base_args.extend(["-e", pattern])
@@ -299,8 +300,6 @@ def ripgrep_local_result(
             matched_paths.append(full_path)
         if len(matched_paths) > grep_max_files:
             return grep_too_many_files_result(len(matched_paths), grep_max_files)
-        if reverse:
-            matched_paths.reverse()
         return build_grep_result(
             output_lines=matched_paths,
             matched_count=len(matched_paths),
@@ -323,8 +322,6 @@ def ripgrep_local_result(
             files_matched += 1
         if files_matched > grep_max_files:
             return grep_too_many_files_result(files_matched, grep_max_files)
-        if reverse:
-            count_lines.reverse()
         return build_grep_result(
             output_lines=count_lines,
             matched_count=files_matched,
@@ -381,7 +378,7 @@ def ripgrep_local_result(
     ordered_blocks: list[tuple[str, list[list[str]]]]
     if reverse:
         ordered_blocks = [
-            (file_path, list(reversed(blocks))) for file_path, blocks in reversed(file_blocks)
+            (file_path, list(reversed(blocks))) for file_path, blocks in file_blocks
         ]
     else:
         ordered_blocks = file_blocks

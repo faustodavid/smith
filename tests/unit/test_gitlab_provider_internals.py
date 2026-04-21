@@ -483,6 +483,98 @@ def test_gitlab_ls_remote_precheck_skips_fetch_when_head_matches(monkeypatch: An
     assert mark_calls == [checkout_dir]
 
 
+def test_gitlab_ripgrep_content_reverse_flips_blocks_within_file_only(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    provider = _provider()
+
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: "/usr/bin/rg" if name == "rg" else None,
+    )
+    stub_output = (
+        f"{tmp_path}/b.py\n"
+        "1-x\n"
+        "2:hit\n"
+        "3-y\n"
+        "--\n"
+        "10-x\n"
+        "11:hit\n"
+        "12-y\n"
+        f"\n{tmp_path}/a.py\n"
+        "5:hit\n"
+    )
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.subprocess.run",
+        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout=stub_output, stderr=""),
+    )
+
+    result = provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="hit",
+        case_insensitive=False,
+        path=None,
+        glob=None,
+        filename_filter=re.compile(r".*"),
+        output_mode="content",
+        context_lines=1,
+        reverse=True,
+    )
+
+    lines = result["text"].splitlines()
+    assert lines[0] == "/b.py"
+    sep_index = lines.index("--")
+    assert lines[1:sep_index] == ["10-x", "11:hit", "12-y"]
+    assert lines[sep_index + 1 : sep_index + 4] == ["1-x", "2:hit", "3-y"]
+    assert lines[-2:] == ["/a.py", "5:hit"]
+
+
+def test_gitlab_ripgrep_uses_sortr_when_reverse_is_requested(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    provider = _provider()
+    rg_calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "smith.providers.local_checkout.shutil.which",
+        lambda name: "/usr/bin/rg" if name == "rg" else None,
+    )
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        rg_calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("smith.providers.local_checkout.subprocess.run", _fake_run)
+
+    provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="x",
+        case_insensitive=False,
+        path=None,
+        glob=None,
+        filename_filter=re.compile(r".*"),
+        output_mode="files_with_matches",
+        context_lines=0,
+        reverse=True,
+    )
+    assert "--sortr" in rg_calls[-1]
+    assert "--sort" not in rg_calls[-1]
+
+    provider._ripgrep_local_result(
+        checkout_dir=str(tmp_path),
+        pattern="x",
+        case_insensitive=False,
+        path=None,
+        glob=None,
+        filename_filter=re.compile(r".*"),
+        output_mode="files_with_matches",
+        context_lines=0,
+        reverse=False,
+    )
+    assert "--sort" in rg_calls[-1]
+    assert "--sortr" not in rg_calls[-1]
+
+
 def test_gitlab_ripgrep_files_with_matches_uses_subprocess(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     (tmp_path / "src").mkdir()
