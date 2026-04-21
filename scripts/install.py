@@ -40,6 +40,16 @@ def main() -> None:
 
     require_tool("uv", "Install uv from: https://github.com/astral-sh/uv\n  curl -LsSf https://astral.sh/uv/install.sh | sh")
     require_tool("git", "Install git from: https://git-scm.com/")
+    require_tool(
+        "rg",
+        "Install ripgrep from your OS package manager:\n"
+        "  macOS:   brew install ripgrep\n"
+        "  Debian:  sudo apt install ripgrep\n"
+        "  Arch:    sudo pacman -S ripgrep\n"
+        "  Windows: winget install BurntSushi.ripgrep.MSVC\n"
+        "  Cargo:   cargo install ripgrep\n"
+        "See https://github.com/BurntSushi/ripgrep#installation for more options.",
+    )
 
     REPO_DIR.parent.mkdir(parents=True, exist_ok=True)
     TARGET_SKILL_DIR.parent.mkdir(parents=True, exist_ok=True)

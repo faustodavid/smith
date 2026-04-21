@@ -151,7 +151,7 @@ def test_github_grep_returns_guard_result_without_reading_large_scopes(monkeypat
     assert result["warnings"] == [
         "candidate file count 2 exceeds SMITH_GREP_MAX_FILES=1; narrow with --path/--glob or start with `smith code search`."
     ]
-    assert checkout_calls == [{"repo": "repo-a", "branch": "main"}]
+    assert checkout_calls == [{"repo": "repo-a", "branch": "main", "sparse_patterns": None}]
     assert "Search scope contains 2 candidate files which exceeds the safety limit (1)." in result["text"]
     assert 'smith code search "<query>"' in result["text"]
 
