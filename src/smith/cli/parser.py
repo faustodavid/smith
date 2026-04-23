@@ -7,6 +7,8 @@ from typing import Any, Callable, Never
 from smith.cli.handlers import (
     _csv_list,
     handle_cache_clean,
+    handle_ci_artifacts_grep,
+    handle_ci_artifacts_list,
     handle_ci_grep,
     handle_ci_list,
     handle_code_grep,
@@ -170,6 +172,32 @@ def _add_ci_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--output-mode",
         choices=["content", "logs_with_matches", "count"],
+        default="content",
+    )
+    parser.add_argument("--context-lines", type=int, default=3)
+    parser.add_argument("--from-line", type=int)
+    parser.add_argument("--to-line", type=int)
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Emit matches in reverse order so the most recent hits appear first.",
+    )
+    parser.add_argument("--case-sensitive", action="store_true")
+
+
+def _add_artifact_grep_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--path", help="Artifact path scope within the extracted archive")
+    parser.add_argument("--glob", help="Artifact filename glob filter")
+    parser.add_argument(
+        "pattern",
+        help=(
+            'Regex pattern. Use ".*" to match all. '
+            'Form: smith <remote> pipelines artifacts grep <scope> <pipeline_id> <job_id> "<regex>"'
+        ),
+    )
+    parser.add_argument(
+        "--output-mode",
+        choices=["content", "files_with_matches", "count"],
         default="content",
     )
     parser.add_argument("--context-lines", type=int, default=3)
@@ -548,6 +576,56 @@ def _add_remote_pipelines_group(remote_subparsers: Any, *, remote: RemoteConfig)
     _add_ci_grep_options(pipelines_grep)
     _add_output_format(pipelines_grep)
     _set_handler(pipelines_grep, handle_ci_grep, "pipelines.grep", primary_path="pipelines grep")
+
+    if remote.provider == "gitlab":
+        pipelines_artifacts = _add_parser(
+            pipelines_sub,
+            "artifacts",
+            help_text="List and grep GitLab job artifacts",
+        )
+        pipelines_artifacts_sub = pipelines_artifacts.add_subparsers(
+            dest="pipelines_artifacts_action",
+            required=True,
+        )
+
+        pipelines_artifacts_list = _add_parser(
+            pipelines_artifacts_sub,
+            "list",
+            help_text="List artifact paths for a job",
+        )
+        _add_pipeline_positional_args(
+            pipelines_artifacts_list,
+            remote=remote,
+            id_label=id_label,
+        )
+        pipelines_artifacts_list.add_argument("job_id", type=int, help="Job ID")
+        _add_output_format(pipelines_artifacts_list)
+        _set_handler(
+            pipelines_artifacts_list,
+            handle_ci_artifacts_list,
+            "pipelines.artifacts.list",
+            primary_path="pipelines artifacts list",
+        )
+
+        pipelines_artifacts_grep = _add_parser(
+            pipelines_artifacts_sub,
+            "grep",
+            help_text="Search extracted GitLab job artifacts",
+        )
+        _add_pipeline_positional_args(
+            pipelines_artifacts_grep,
+            remote=remote,
+            id_label=id_label,
+        )
+        pipelines_artifacts_grep.add_argument("job_id", type=int, help="Job ID")
+        _add_artifact_grep_options(pipelines_artifacts_grep)
+        _add_output_format(pipelines_artifacts_grep)
+        _set_handler(
+            pipelines_artifacts_grep,
+            handle_ci_artifacts_grep,
+            "pipelines.artifacts.grep",
+            primary_path="pipelines artifacts grep",
+        )
 
 
 def _add_remote_stories_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:

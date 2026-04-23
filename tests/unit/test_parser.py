@@ -595,6 +595,72 @@ def test_pipelines_grep_parser_accepts_log_id_before_pattern() -> None:
     assert args.pattern == "error"
 
 
+def test_gitlab_pipelines_artifacts_list_parser_uses_canonical_command_id() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(
+        [
+            "gitlab",
+            "pipelines",
+            "artifacts",
+            "list",
+            "engineering-tools/repo-a",
+            "42",
+            "18",
+        ]
+    )
+
+    assert args.command_id == "pipelines.artifacts.list"
+    assert args.remote == "gitlab"
+    assert args.remote_provider == "gitlab"
+    assert args.repo == "engineering-tools/repo-a"
+    assert args.id == 42
+    assert args.job_id == 18
+
+
+def test_gitlab_pipelines_artifacts_grep_parser_accepts_grep_flags() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(
+        [
+            "gitlab",
+            "pipelines",
+            "artifacts",
+            "grep",
+            "engineering-tools/repo-a",
+            "42",
+            "18",
+            "--path",
+            "reports",
+            "--glob",
+            "*.txt",
+            "--output-mode",
+            "files_with_matches",
+            "--context-lines",
+            "1",
+            "--from-line",
+            "10",
+            "--to-line",
+            "20",
+            "--reverse",
+            "--case-sensitive",
+            "error",
+        ]
+    )
+
+    assert args.command_id == "pipelines.artifacts.grep"
+    assert args.repo == "engineering-tools/repo-a"
+    assert args.id == 42
+    assert args.job_id == 18
+    assert args.path == "reports"
+    assert args.glob == "*.txt"
+    assert args.output_mode == "files_with_matches"
+    assert args.context_lines == 1
+    assert args.from_line == 10
+    assert args.to_line == 20
+    assert args.reverse is True
+    assert args.case_sensitive is True
+    assert args.pattern == "error"
+
+
 def test_code_search_parser_rejects_removed_global_filters() -> None:
     parser = _build_test_parser()
 
@@ -713,7 +779,7 @@ def test_youtrack_remote_help_lists_only_stories(capsys: pytest.CaptureFixture[s
     assert "orgs" not in output
 
 
-def test_pipelines_help_lists_list_and_grep(capsys: pytest.CaptureFixture[str]) -> None:
+def test_gitlab_pipelines_help_lists_artifacts(capsys: pytest.CaptureFixture[str]) -> None:
     parser = _build_test_parser()
 
     with pytest.raises(SystemExit):
@@ -722,11 +788,24 @@ def test_pipelines_help_lists_list_and_grep(capsys: pytest.CaptureFixture[str]) 
     output = capsys.readouterr().out
     assert "list" in output
     assert "grep" in output
+    assert "artifacts" in output
     assert "List a pipeline and its downstream pipelines" in output
     assert "Search or read pipeline logs" in output
-    assert "{list,grep}" in output
+    assert "List and grep GitLab job artifacts" in output
+    assert "{list,grep,artifacts}" in output
     assert "{list,logs}" not in output
     assert "Inspect pipeline logs" not in output
+
+
+def test_github_pipelines_help_omits_artifacts(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = _build_test_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["github", "pipelines", "--help"])
+
+    output = capsys.readouterr().out
+    assert "artifacts" not in output
+    assert "{list,grep}" in output
 
 
 def test_stories_query_path_fails_to_parse() -> None:

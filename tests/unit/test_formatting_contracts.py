@@ -749,3 +749,18 @@ def test_render_text_pipelines_list_renders_stage_less_jobs_without_stage_header
         "returned_count: 1\n"
         "total_count: 1"
     )
+
+
+def test_render_text_pipelines_artifacts_list_emits_paths_only() -> None:
+    rendered = render_text(
+        "pipelines.artifacts.list",
+        {
+            "paths": [
+                "reports/",
+                "reports/sonar.log",
+                "coverage/index.html",
+            ]
+        },
+    )
+
+    assert rendered == "reports/\nreports/sonar.log\ncoverage/index.html"

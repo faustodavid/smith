@@ -80,6 +80,15 @@ class SmithClient:
             raise ValueError(f"{command} does not support target 'all'. Use a configured remote name.")
         return target
 
+    def _require_gitlab_target(self, remote_or_provider: str, *, command: str) -> str:
+        target = self._require_single_target(remote_or_provider, command=command)
+        remotes = self._resolve_remotes(target)
+        if not remotes:
+            raise ValueError(f"No enabled remote found for '{target}'")
+        if len(remotes) != 1 or remotes[0].provider != "gitlab":
+            raise ValueError(f"{command} is only supported for GitLab remotes.")
+        return target
+
     def _get_provider_for_remote(self, remote: RemoteConfig) -> BaseProvider:
         if remote.name in self._provider_cache:
             return self._provider_cache[remote.name]
@@ -715,6 +724,74 @@ class SmithClient:
                     build_id=build_id,
                     log_id=log_id,
                     pattern=pattern,
+                    output_mode=output_mode,
+                    case_insensitive=case_insensitive,
+                    context_lines=context_lines,
+                    from_line=from_line,
+                    to_line=to_line,
+                    reverse=reverse,
+                ),
+            },
+        )
+
+    def execute_ci_artifacts_list(
+        self,
+        *,
+        remote_or_provider: str,
+        project: str | None,
+        repo: str | None,
+        pipeline_id: int,
+        job_id: int,
+    ) -> dict[str, Any]:
+        target = self._require_gitlab_target(
+            remote_or_provider,
+            command="pipelines.artifacts.list",
+        )
+        effective_repo = repo or project
+        return self._fanout(
+            remote_or_provider=target,
+            operations={
+                "gitlab": lambda r: self._gitlab_provider(r).list_job_artifacts(
+                    repo=str(effective_repo),
+                    pipeline_id=pipeline_id,
+                    job_id=job_id,
+                ),
+            },
+        )
+
+    def execute_ci_artifacts_grep(
+        self,
+        *,
+        remote_or_provider: str,
+        project: str | None,
+        repo: str | None,
+        pipeline_id: int,
+        job_id: int,
+        pattern: str | None,
+        path: str | None,
+        glob: str | None,
+        output_mode: Literal["content", "files_with_matches", "count"],
+        case_insensitive: bool,
+        context_lines: int | None,
+        from_line: int | None,
+        to_line: int | None,
+        reverse: bool = False,
+    ) -> dict[str, Any]:
+        target = self._require_gitlab_target(
+            remote_or_provider,
+            command="pipelines.artifacts.grep",
+        )
+        effective_repo = repo or project
+        return self._fanout(
+            remote_or_provider=target,
+            operations={
+                "gitlab": lambda r: self._gitlab_provider(r).grep_job_artifacts(
+                    repo=str(effective_repo),
+                    pipeline_id=pipeline_id,
+                    job_id=job_id,
+                    pattern=pattern,
+                    path=path,
+                    glob=glob,
                     output_mode=output_mode,
                     case_insensitive=case_insensitive,
                     context_lines=context_lines,
