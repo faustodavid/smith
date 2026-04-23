@@ -43,6 +43,8 @@ Full vocabulary and flags live in `references/usage-recipes.md`. The minimum you
 | Pipelines | `smith <github-remote-name> pipelines list <repo> <id>`, `smith <gitlab-remote-name> pipelines list <group/project> <id>`, `smith <github-remote-name> pipelines grep <repo> <id> "<regex>"`, `smith <gitlab-remote-name> pipelines grep <group/project> <id> "<regex>"`, `smith <gitlab-remote-name> pipelines artifacts list <group/project> <pipeline-id> <job-id>`, `smith <gitlab-remote-name> pipelines artifacts grep <group/project> <pipeline-id> <job-id> "<regex>"` |
 | Stories / Issues | `smith <azdo-remote-name> stories search <project> --query`, `smith <gitlab-remote-name> stories search <group/project> --query`, `smith <youtrack-remote-name> stories search --query` |
 
+All grep commands (code, pipeline logs, artifacts) support: `--path`, `--glob`, `--output-mode` (content/files_with_matches/count), `--context-lines`, `--from-line`/`--to-line`, `--reverse`, `--case-sensitive`. Code grep adds: `--branch`, `--no-clone`. Pipeline grep adds: `--log-id`.
+
 Rules that save retries:
 
 - **GitHub**: repo arg is bare `<repo>`, not `org/repo`. Search output may look like `org/repo:path` but commands still take `<repo>`.
