@@ -633,6 +633,47 @@ def handle_ci_grep(client: SmithClient, args: argparse.Namespace) -> int:
     )
 
 
+def handle_ci_artifacts_list(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_ci_artifacts_list(
+        remote_or_provider=_selected_target(args),
+        project=getattr(args, "project", None),
+        repo=getattr(args, "repo", None),
+        pipeline_id=args.id,
+        job_id=args.job_id,
+    )
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=data,
+        partial=_is_partial_result(data),
+    )
+
+
+def handle_ci_artifacts_grep(client: SmithClient, args: argparse.Namespace) -> int:
+    data = client.execute_ci_artifacts_grep(
+        remote_or_provider=_selected_target(args),
+        project=getattr(args, "project", None),
+        repo=getattr(args, "repo", None),
+        pipeline_id=args.id,
+        job_id=args.job_id,
+        pattern=args.pattern,
+        path=getattr(args, "path", None),
+        glob=getattr(args, "glob", None),
+        output_mode=args.output_mode,
+        case_insensitive=not args.case_sensitive,
+        context_lines=args.context_lines,
+        from_line=args.from_line,
+        to_line=args.to_line,
+        reverse=getattr(args, "reverse", False),
+    )
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=data,
+        partial=_is_partial_result(data),
+    )
+
+
 def handle_work_get(client: SmithClient, args: argparse.Namespace) -> int:
     request_kwargs: dict[str, Any] = {
         "remote_or_provider": _selected_target(args),

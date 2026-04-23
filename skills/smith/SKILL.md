@@ -40,7 +40,7 @@ Full vocabulary and flags live in `references/usage-recipes.md`. The minimum you
 | Discovery | `smith <azdo-remote-name> orgs`, `smith <github-remote-name> orgs`, `smith <gitlab-remote-name> groups`, `smith <azdo-remote-name> repos <project>`, `smith <github-remote-name> repos`, `smith <gitlab-remote-name> repos` |
 | Focused grep | `smith <azdo-remote-name> code grep <project> <repo> "<regex>"`, `smith <github-remote-name> code grep <repo> "<regex>"`, `smith <gitlab-remote-name> code grep <group/project> "<regex>"` |
 | PRs / MRs | `smith <azdo-remote-name> prs search`, `smith <github-remote-name> prs search`, `smith <gitlab-remote-name> prs search`, `smith <github-remote-name> prs list <repo>`, `smith <gitlab-remote-name> prs list <group/project>` |
-| Pipelines | `smith <github-remote-name> pipelines list <repo> <id>`, `smith <gitlab-remote-name> pipelines list <group/project> <id>`, `smith <github-remote-name> pipelines grep <repo> <id> "<regex>"`, `smith <gitlab-remote-name> pipelines grep <group/project> <id> "<regex>"` |
+| Pipelines | `smith <github-remote-name> pipelines list <repo> <id>`, `smith <gitlab-remote-name> pipelines list <group/project> <id>`, `smith <github-remote-name> pipelines grep <repo> <id> "<regex>"`, `smith <gitlab-remote-name> pipelines grep <group/project> <id> "<regex>"`, `smith <gitlab-remote-name> pipelines artifacts list <group/project> <pipeline-id> <job-id>`, `smith <gitlab-remote-name> pipelines artifacts grep <group/project> <pipeline-id> <job-id> "<regex>"` |
 | Stories / Issues | `smith <azdo-remote-name> stories search <project> --query`, `smith <gitlab-remote-name> stories search <group/project> --query`, `smith <youtrack-remote-name> stories search --query` |
 
 Rules that save retries:
@@ -51,6 +51,7 @@ Rules that save retries:
 - **YouTrack**: no repo arg; only issue IDs (e.g. `RAD-1055`) and `--query`.
 - Global `smith code search` and `smith prs search` target every enabled remote and reject `--project` or `--repo`. Use `smith <remote> ...` to narrow.
 - `pipelines grep ... <id>` expects a pipeline/run/build ID. For a specific job or log, call `pipelines list ...` first to find the parent ID, then `pipelines grep ... <pipeline-id> ".*" --log-id <job-or-log-id>`.
+- `pipelines artifacts ... <pipeline-id> <job-id>` is GitLab-only. Use `artifacts list` to enumerate archive paths and `artifacts grep`
 - `pipelines list ... <id>` prints a compact DAG (`@` pipelines, `#` stages, `*` jobs, inline `<needs` and `>>` downstream). GitLab traverses child pipelines via GraphQL (REST fallback emits header-only rows with a warning). Filter with `--status`, `--grep`, `--skip`/`--take`, `--max-depth` (gitlab only, default 0 = unlimited). Full grammar lives in `references/pipelines-format.md`.
 
 Use `--help` on any command for flags.
@@ -67,6 +68,7 @@ Use `--help` on any command for flags.
 ### Pipeline Analysis
 1. Use `smith pipelines list <repo> <pipeline_id> --status failed` to focus on failed jobs.
 2. Once you know the pipeline log ID, use `smith pipelines grep <repo> <pipeline_id> <log_id> --reverse` to analyze the logs.
+3. For GitLab artifact-backed failures, use `smith <gitlab-remote-name> pipelines artifacts list <group/project> <pipeline_id> <job_id>` and then `... artifacts grep ... "<regex>"`.
 ## Stop Conditions
 
 Stop narrowing and answer when any of these is true:

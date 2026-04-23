@@ -239,6 +239,11 @@ def _render_grep(data: Any) -> str:
     return text
 
 
+def _render_artifacts_list(data: Any) -> str:
+    paths = data.get("paths", []) if isinstance(data, dict) else []
+    return "\n".join(str(path) for path in paths if str(path).strip())
+
+
 def _render_cache_clean(data: Any) -> str:
     cleaned = data.get("cleaned", []) if isinstance(data, dict) else []
     missing = data.get("missing", []) if isinstance(data, dict) else []
@@ -758,6 +763,8 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "cache.clean": _render_cache_clean,
     "pipelines.list": _render_pipelines_list,
     "pipelines.grep": _render_grep,
+    "pipelines.artifacts.list": _render_artifacts_list,
+    "pipelines.artifacts.grep": _render_grep,
     "prs.search": _render_pr_list,
     "prs.list": _render_pr_list,
     "prs.get": _render_pr_get,
@@ -805,7 +812,7 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
             lines.append(rendered)
 
         warnings = _visible_remote_warnings(command, remote_data, entry.get("warnings") or [])
-        if command not in {"code.grep", "pipelines.grep"}:
+        if command not in {"code.grep", "pipelines.grep", "pipelines.artifacts.grep"}:
             for warning in warnings:
                 lines.append(f"warning: {warning}")
         return "\n".join(lines).rstrip()
@@ -851,7 +858,7 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
                 output_lines.append(rendered)
 
         warnings = _visible_remote_warnings(command, remote_data, entry.get("warnings") or [])
-        if command not in {"code.grep", "pipelines.grep"}:
+        if command not in {"code.grep", "pipelines.grep", "pipelines.artifacts.grep"}:
             for warning in warnings:
                 output_lines.append(f"warning: {warning}")
         output_lines.append("")

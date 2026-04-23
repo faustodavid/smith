@@ -564,6 +564,58 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
             },
         ),
         (
+            "execute_ci_artifacts_list",
+            {
+                "remote_or_provider": "gitlab",
+                "project": None,
+                "repo": "group/project",
+                "pipeline_id": 19,
+                "job_id": 5,
+            },
+            "gitlab",
+            "list_job_artifacts",
+            {
+                "repo": "group/project",
+                "pipeline_id": 19,
+                "job_id": 5,
+            },
+        ),
+        (
+            "execute_ci_artifacts_grep",
+            {
+                "remote_or_provider": "gitlab",
+                "project": None,
+                "repo": "group/project",
+                "pipeline_id": 19,
+                "job_id": 5,
+                "pattern": "error",
+                "path": "reports",
+                "glob": "*.txt",
+                "output_mode": "files_with_matches",
+                "case_insensitive": False,
+                "context_lines": 0,
+                "from_line": 1,
+                "to_line": 2,
+                "reverse": True,
+            },
+            "gitlab",
+            "grep_job_artifacts",
+            {
+                "repo": "group/project",
+                "pipeline_id": 19,
+                "job_id": 5,
+                "pattern": "error",
+                "path": "reports",
+                "glob": "*.txt",
+                "output_mode": "files_with_matches",
+                "case_insensitive": False,
+                "context_lines": 0,
+                "from_line": 1,
+                "to_line": 2,
+                "reverse": True,
+            },
+        ),
+        (
             "execute_work_get",
             {"remote_or_provider": "github", "project": "proj-a", "repo": None, "work_item_id": 21},
             "github",
@@ -664,6 +716,39 @@ def test_execute_methods_dispatch_to_remote_operations(
     remote_entry = result["remotes"][expected_provider]["data"]
     assert remote_entry["method"] == expected_method
     assert remote_entry["kwargs"] == expected_kwargs
+
+
+@pytest.mark.parametrize("method_name", ["execute_ci_artifacts_list", "execute_ci_artifacts_grep"])
+def test_execute_ci_artifacts_commands_require_gitlab_remote(
+    monkeypatch: Any,
+    method_name: str,
+) -> None:
+    runtime = make_runtime_config()
+    _install_client_fakes(monkeypatch, runtime)
+    client = SmithClient(session=object(), smith_config=_make_smith_config(runtime))
+
+    kwargs: dict[str, Any] = {
+        "remote_or_provider": "github",
+        "project": None,
+        "repo": "repo-a",
+        "pipeline_id": 19,
+        "job_id": 5,
+    }
+    if method_name == "execute_ci_artifacts_grep":
+        kwargs.update(
+            pattern="error",
+            path=None,
+            glob=None,
+            output_mode="content",
+            case_insensitive=True,
+            context_lines=3,
+            from_line=None,
+            to_line=None,
+            reverse=False,
+        )
+
+    with pytest.raises(ValueError, match="only supported for GitLab remotes"):
+        getattr(client, method_name)(**kwargs)
 
 
 def test_execute_pr_search_fans_out_to_all_supported_providers(monkeypatch: Any) -> None:

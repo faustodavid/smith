@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import time
+import zipfile
 from typing import Any
 
 import pytest
@@ -1721,6 +1723,130 @@ def test_gitlab_merge_request_views_build_logs_and_grep(monkeypatch: Any) -> Non
         "warnings": [],
         "partial": False,
     }
+
+
+def test_gitlab_list_job_artifacts_uses_tree_api(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_paginated_list(path: str, **kwargs: Any) -> list[dict[str, Any]]:
+        calls.append({"path": path, **kwargs})
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77/jobs":
+            return [
+                {
+                    "id": 88,
+                    "name": "sonar",
+                    "artifacts_file": {"filename": "artifacts.zip"},
+                }
+            ]
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/jobs/88/artifacts/tree":
+            return [
+                {"path": "reports/"},
+                {"path": "reports/sonar.log"},
+                {"path": "coverage/index.html"},
+            ]
+        raise AssertionError(f"unexpected paginated list: {path}")
+
+    monkeypatch.setattr(provider, "_get_paginated_list", _fake_paginated_list)
+
+    result = provider.list_job_artifacts(repo=_FULL_REPO, pipeline_id=77, job_id=88)
+
+    assert result == {
+        "paths": [
+            "coverage/index.html",
+            "reports/",
+            "reports/sonar.log",
+        ]
+    }
+    assert calls == [
+        {"path": f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77/jobs"},
+        {
+            "path": f"/projects/{_ROOT_PROJECT_TOKEN}/jobs/88/artifacts/tree",
+            "params": {"recursive": "true"},
+        },
+    ]
+
+
+def test_gitlab_grep_job_artifacts_downloads_extracts_and_reuses_temp_checkout(
+    monkeypatch: Any,
+    tmp_path: Any,
+) -> None:
+    provider = _provider()
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w") as archive:
+        archive.writestr("reports/sonar.log", "ok\nerror\nok\n")
+        archive.writestr("coverage/index.html", "<html>ok</html>\n")
+    archive_bytes = archive_buffer.getvalue()
+    download_calls: list[str] = []
+
+    class _BinaryResponse:
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
+    def _fake_paginated_list(path: str, **kwargs: Any) -> list[dict[str, Any]]:
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/pipelines/77/jobs":
+            return [
+                {
+                    "id": 88,
+                    "name": "sonar",
+                    "artifacts_file": {"filename": "artifacts.zip"},
+                }
+            ]
+        raise AssertionError(f"unexpected paginated list: {path}")
+
+    def _fake_request_response(method: str, path: str, **kwargs: Any) -> _BinaryResponse:
+        assert method == "GET"
+        download_calls.append(path)
+        if path == f"/projects/{_ROOT_PROJECT_TOKEN}/jobs/88/artifacts":
+            return _BinaryResponse(archive_bytes)
+        raise AssertionError(f"unexpected request response: {path}")
+
+    monkeypatch.setattr(provider, "_get_paginated_list", _fake_paginated_list)
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+    monkeypatch.setattr(provider, "_artifacts_cache_root", lambda: str(tmp_path))
+
+    files_result = provider.grep_job_artifacts(
+        repo=_FULL_REPO,
+        pipeline_id=77,
+        job_id=88,
+        pattern="error",
+        output_mode="files_with_matches",
+        context_lines=0,
+    )
+    count_result = provider.grep_job_artifacts(
+        repo=_FULL_REPO,
+        pipeline_id=77,
+        job_id=88,
+        pattern="error",
+        output_mode="count",
+        context_lines=0,
+        from_line=2,
+        to_line=2,
+    )
+
+    checkout_dir = (
+        tmp_path
+        / provider._sanitize_cache_component(provider._gitlab_host())
+        / provider._sanitize_cache_component(_FULL_REPO)
+        / "77"
+        / "88"
+    )
+    extracted_file = checkout_dir / "files" / "reports" / "sonar.log"
+
+    assert files_result == {
+        "text": "/reports/sonar.log",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+    assert count_result == {
+        "text": "/reports/sonar.log:1",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+    assert download_calls == [f"/projects/{_ROOT_PROJECT_TOKEN}/jobs/88/artifacts"]
+    assert extracted_file.read_text(encoding="utf-8") == "ok\nerror\nok\n"
 
 
 def test_gitlab_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) -> None:

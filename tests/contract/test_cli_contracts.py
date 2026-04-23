@@ -49,6 +49,7 @@ def _make_args(**overrides: Any) -> Namespace:
         "no_clone": False,
         "cache_remote": "all",
         "id": 42,
+        "job_id": 17,
         "log_id": 9,
         "wiql": "SELECT [System.Id] FROM WorkItems",
         "area": "Ops",
@@ -289,6 +290,80 @@ def test_handle_ci_grep_forwards_reverse(monkeypatch: Any, capsys: Any) -> None:
 
     assert exit_code == handlers.EXIT_OK
     assert client.calls[0][1]["reverse"] is True
+
+
+def test_handle_ci_artifacts_list_forwards_expected_arguments(monkeypatch: Any, capsys: Any) -> None:
+    client = _RecordingClient(payload={"marker": "ci-artifacts-list"})
+    args = _make_args(
+        command_id="pipelines.artifacts.list",
+        remote="gitlab",
+        remote_provider="gitlab",
+        repo="group/project",
+        project=None,
+        job_id=18,
+    )
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
+
+    exit_code = handlers.handle_ci_artifacts_list(client, args)
+    _ = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert client.calls == [
+        (
+            "execute_ci_artifacts_list",
+            {
+                "remote_or_provider": "gitlab",
+                "project": None,
+                "repo": "group/project",
+                "pipeline_id": 42,
+                "job_id": 18,
+            },
+        )
+    ]
+
+
+def test_handle_ci_artifacts_grep_forwards_expected_arguments(monkeypatch: Any, capsys: Any) -> None:
+    client = _RecordingClient(payload={"marker": "ci-artifacts-grep"})
+    args = _make_args(
+        command_id="pipelines.artifacts.grep",
+        remote="gitlab",
+        remote_provider="gitlab",
+        repo="group/project",
+        project=None,
+        path="reports",
+        glob="*.txt",
+        job_id=18,
+        from_line=None,
+        to_line=None,
+        reverse=True,
+    )
+    monkeypatch.setattr(handlers, "render_text", lambda command, data: f"{command}:{data['marker']}")
+
+    exit_code = handlers.handle_ci_artifacts_grep(client, args)
+    _ = capsys.readouterr()
+
+    assert exit_code == handlers.EXIT_OK
+    assert client.calls == [
+        (
+            "execute_ci_artifacts_grep",
+            {
+                "remote_or_provider": "gitlab",
+                "project": None,
+                "repo": "group/project",
+                "pipeline_id": 42,
+                "job_id": 18,
+                "pattern": "error",
+                "path": "reports",
+                "glob": "*.txt",
+                "output_mode": "content",
+                "case_insensitive": True,
+                "context_lines": 2,
+                "from_line": None,
+                "to_line": None,
+                "reverse": True,
+            },
+        )
+    ]
 
 
 def test_handle_code_grep_uses_named_remote(monkeypatch: Any, capsys: Any) -> None:

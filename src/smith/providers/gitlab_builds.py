@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
+import stat
+import subprocess
+import tempfile
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from smith.errors import SmithApiError
@@ -14,7 +21,15 @@ from smith.pipeline_listing import (
     build_pipeline_row,
     normalize_gitlab_status,
 )
-from smith.providers.helpers import grep_build_logs_core
+from smith.providers import local_checkout as _local_checkout
+from smith.providers.helpers import (
+    build_grep_result,
+    grep_build_logs_core,
+    grep_compile_error_result,
+    grep_match_lines,
+    grep_too_many_files_result,
+)
+from smith.utils import compile_search_pattern, normalize_path, slice_lines
 
 if TYPE_CHECKING:  # pragma: no cover - import-time only
     pass
@@ -181,6 +196,7 @@ _PIPELINE_GQL_QUERY_MAP: dict[str, dict[str, str]] = {
 _GID_PIPELINE_PATTERN = re.compile(r"/(?:Ci::Pipeline|CiPipeline)/(\d+)$")
 _GID_JOB_PATTERN = re.compile(r"/(?:Ci::Build|Ci::Bridge|CiJob)/(\d+)$")
 _GID_PROJECT_PATTERN = re.compile(r"/Project/(\d+)$")
+_ARTIFACT_TREE_UNAVAILABLE_HINT = "This command requires GitLab 18.8+ and a job with downloadable artifacts."
 
 
 def _extract_numeric_id(gid: Any, pattern: re.Pattern[str]) -> int | str | None:
@@ -205,6 +221,13 @@ def _extract_numeric_id(gid: Any, pattern: re.Pattern[str]) -> int | str | None:
 
 def _pipeline_gid(pipeline_id: int | str) -> str:
     return f"gid://gitlab/Ci::Pipeline/{pipeline_id}"
+
+
+def _ids_match(left: Any, right: Any) -> bool:
+    try:
+        return int(left) == int(right)
+    except (TypeError, ValueError):
+        return str(left or "").strip() == str(right or "").strip()
 
 
 def _is_graphql_schema_error(exc: SmithApiError) -> bool:
@@ -314,6 +337,408 @@ class GitLabBuildMixin:
             to_line=to_line,
             max_output_chars=self.max_output_chars,
             reverse=reverse,
+        )
+
+    def _pipeline_jobs(
+        self: Any,
+        *,
+        repo: str,
+        pipeline_id: int,
+    ) -> list[dict[str, Any]]:
+        return [
+            item
+            for item in self._get_paginated_list(
+                f"/projects/{self._project_id(repo)}/pipelines/{pipeline_id}/jobs"
+            )
+            if isinstance(item, dict)
+        ]
+
+    @staticmethod
+    def _job_has_downloadable_artifacts(job: dict[str, Any]) -> bool:
+        artifacts_file = job.get("artifacts_file")
+        if isinstance(artifacts_file, dict) and str(artifacts_file.get("filename") or "").strip():
+            return True
+        artifacts = job.get("artifacts")
+        if not isinstance(artifacts, list):
+            return False
+        return any(
+            isinstance(item, dict)
+            and str(item.get("file_type") or "").strip().lower() == "archive"
+            for item in artifacts
+        )
+
+    def _pipeline_job_with_artifacts(
+        self: Any,
+        *,
+        repo: str,
+        pipeline_id: int,
+        job_id: int,
+    ) -> dict[str, Any]:
+        for job in self._pipeline_jobs(repo=repo, pipeline_id=pipeline_id):
+            if _ids_match(job.get("id"), job_id):
+                if self._job_has_downloadable_artifacts(job):
+                    return job
+                raise ValueError(
+                    f"Job {job_id} in pipeline {pipeline_id} has no downloadable artifacts."
+                )
+        raise ValueError(f"Job {job_id} not found in pipeline {pipeline_id}.")
+
+    @staticmethod
+    def _artifacts_cache_root() -> str:
+        return str(Path(tempfile.gettempdir()) / "smith-gitlab-artifacts")
+
+    def _artifacts_checkout_path(
+        self: Any,
+        *,
+        repo: str,
+        pipeline_id: int,
+        job_id: int,
+    ) -> str:
+        return os.path.join(
+            self._artifacts_cache_root(),
+            self._sanitize_cache_component(self._gitlab_host()),
+            self._sanitize_cache_component(self._full_project_path(repo)),
+            str(pipeline_id),
+            str(job_id),
+        )
+
+    @staticmethod
+    def _artifacts_archive_path(checkout_dir: str) -> str:
+        return os.path.join(checkout_dir, "artifacts.zip")
+
+    @staticmethod
+    def _artifacts_extract_path(checkout_dir: str) -> str:
+        return os.path.join(checkout_dir, "files")
+
+    @staticmethod
+    def _artifacts_ready_marker(checkout_dir: str) -> str:
+        return os.path.join(checkout_dir, ".ready")
+
+    def _artifact_tree_entries(
+        self: Any,
+        *,
+        repo: str,
+        job_id: int,
+    ) -> list[dict[str, Any]]:
+        try:
+            return [
+                item
+                for item in self._get_paginated_list(
+                    f"/projects/{self._project_id(repo)}/jobs/{job_id}/artifacts/tree",
+                    params={"recursive": "true"},
+                )
+                if isinstance(item, dict)
+            ]
+        except SmithApiError as exc:
+            if exc.status_code == 404:
+                raise SmithApiError(
+                    f"GitLab artifact tree is unavailable for job {job_id}. {_ARTIFACT_TREE_UNAVAILABLE_HINT}",
+                    status_code=exc.status_code,
+                ) from exc
+            raise
+
+    def list_job_artifacts(
+        self: Any,
+        *,
+        repo: str,
+        pipeline_id: int,
+        job_id: int,
+    ) -> dict[str, Any]:
+        self._pipeline_job_with_artifacts(repo=repo, pipeline_id=pipeline_id, job_id=job_id)
+        paths = sorted(
+            {
+                str(item.get("path") or "").strip()
+                for item in self._artifact_tree_entries(repo=repo, job_id=job_id)
+                if str(item.get("path") or "").strip()
+            }
+        )
+        return {"paths": paths}
+
+    def _download_artifacts_archive(
+        self: Any,
+        *,
+        repo: str,
+        job_id: int,
+        archive_path: str,
+    ) -> None:
+        try:
+            response = self._request_response(
+                "GET",
+                f"/projects/{self._project_id(repo)}/jobs/{job_id}/artifacts",
+            )
+        except SmithApiError as exc:
+            if exc.status_code == 404:
+                raise SmithApiError(
+                    f"Artifacts archive not found for job {job_id}.",
+                    status_code=exc.status_code,
+                ) from exc
+            raise
+        os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+        with open(archive_path, "wb") as handle:
+            handle.write(bytes(response.content))
+
+    @staticmethod
+    def _extract_artifacts_archive(
+        archive_path: str,
+        extract_dir: str,
+    ) -> None:
+        extract_root = os.path.realpath(extract_dir)
+        with zipfile.ZipFile(archive_path) as archive:
+            for member in archive.infolist():
+                member_name = str(member.filename or "")
+                if not member_name:
+                    continue
+                mode = member.external_attr >> 16
+                if stat.S_ISLNK(mode):
+                    raise SmithApiError("Artifacts archive contains an unsupported symlink entry.")
+                target_path = os.path.realpath(os.path.join(extract_dir, member_name))
+                if os.path.commonpath([extract_root, target_path]) != extract_root:
+                    raise SmithApiError("Artifacts archive contains an invalid path traversal entry.")
+                archive.extract(member, path=extract_dir)
+
+    def _ensure_artifacts_checkout(
+        self: Any,
+        *,
+        repo: str,
+        pipeline_id: int,
+        job_id: int,
+    ) -> str:
+        self._pipeline_job_with_artifacts(repo=repo, pipeline_id=pipeline_id, job_id=job_id)
+        checkout_dir = self._artifacts_checkout_path(
+            repo=repo,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+        )
+        extract_dir = self._artifacts_extract_path(checkout_dir)
+        ready_marker = self._artifacts_ready_marker(checkout_dir)
+        archive_path = self._artifacts_archive_path(checkout_dir)
+        checkout_lock = self._cache_lock(checkout_dir)
+
+        with checkout_lock:
+            if os.path.isdir(extract_dir) and os.path.isfile(ready_marker):
+                return extract_dir
+
+            if os.path.isdir(extract_dir):
+                shutil.rmtree(extract_dir, ignore_errors=True)
+            if os.path.isfile(ready_marker):
+                os.remove(ready_marker)
+
+            os.makedirs(checkout_dir, exist_ok=True)
+            self._download_artifacts_archive(
+                repo=repo,
+                job_id=job_id,
+                archive_path=archive_path,
+            )
+            try:
+                self._extract_artifacts_archive(archive_path, extract_dir)
+            except Exception:
+                shutil.rmtree(extract_dir, ignore_errors=True)
+                raise
+            Path(ready_marker).touch()
+        return extract_dir
+
+    def _artifact_candidate_paths(
+        self: Any,
+        *,
+        checkout_dir: str,
+        pattern: str,
+        case_insensitive: bool,
+        path: str | None,
+        glob: str | None,
+        reverse: bool,
+    ) -> list[str]:
+        rg_binary = _local_checkout.require_ripgrep()
+        checkout_root = os.path.realpath(checkout_dir)
+        normalized_path = normalize_path(path)
+        prefix = normalized_path.strip("/")
+
+        if prefix:
+            target = os.path.join(checkout_dir, prefix.replace("/", os.sep))
+            if not _local_checkout.is_path_within_checkout(target, checkout_root) or os.path.islink(target):
+                return []
+            if _local_checkout.is_internal_local_path(prefix):
+                return []
+            if not os.path.exists(target):
+                return []
+
+        base_args = [
+            rg_binary,
+            "--no-messages",
+            "--no-config",
+            "--hidden",
+            "--glob",
+            "!.git",
+        ]
+        if case_insensitive:
+            base_args.append("-i")
+        if glob:
+            base_args.extend(["--glob", glob])
+        base_args.extend(["-l", "--sortr" if reverse else "--sort", "path", "-e", pattern])
+        search_target = os.path.join(checkout_dir, prefix) if prefix else checkout_dir
+
+        try:
+            result = subprocess.run(
+                [*base_args, search_target],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except Exception as exc:
+            raise SmithApiError(f"ripgrep failed to execute for {checkout_dir}: {exc}") from exc
+
+        return_code = int(getattr(result, "returncode", 2))
+        if return_code not in (0, 1):
+            stderr = str(getattr(result, "stderr", "") or "").strip()
+            raise SmithApiError(
+                f"ripgrep exited with status {return_code} for {checkout_dir}: {stderr or 'unknown error'}"
+            )
+
+        matches: list[str] = []
+        seen: set[str] = set()
+        for line in str(getattr(result, "stdout", "") or "").splitlines():
+            raw_path = line.strip()
+            if not raw_path:
+                continue
+            if os.path.isabs(raw_path):
+                try:
+                    rel_path = os.path.relpath(raw_path, checkout_dir)
+                except ValueError:
+                    continue
+            else:
+                rel_path = raw_path
+            rel_path = rel_path.replace(os.sep, "/").lstrip("./")
+            if not rel_path or rel_path.startswith("../") or _local_checkout.is_internal_local_path(rel_path):
+                continue
+            if rel_path in seen:
+                continue
+            seen.add(rel_path)
+            matches.append(rel_path)
+        return matches
+
+    def _grep_artifacts_with_line_window(
+        self: Any,
+        *,
+        checkout_dir: str,
+        pattern: str,
+        search_pattern: re.Pattern[str],
+        output_mode: Literal["content", "files_with_matches", "count"],
+        case_insensitive: bool,
+        context_lines: int | None,
+        from_line: int | None,
+        to_line: int | None,
+        reverse: bool,
+        path: str | None,
+        glob: str | None,
+    ) -> dict[str, Any]:
+        matching = self._artifact_candidate_paths(
+            checkout_dir=checkout_dir,
+            pattern=pattern,
+            case_insensitive=case_insensitive,
+            path=path,
+            glob=glob,
+            reverse=reverse,
+        )
+        if len(matching) > self._config.grep_max_files:
+            return grep_too_many_files_result(len(matching), self._config.grep_max_files)
+
+        output_lines: list[str] = []
+        warnings: list[str] = []
+        files_matched = 0
+
+        for rel_path in matching:
+            full_path = os.path.join(checkout_dir, rel_path.replace("/", os.sep))
+            try:
+                content = Path(full_path).read_text(encoding="utf-8", errors="replace")
+            except Exception as exc:
+                warnings.append(f"failed to read /{rel_path}: {exc}")
+                continue
+
+            lines = slice_lines(
+                content.splitlines(),
+                from_line=from_line,
+                to_line=to_line,
+            )
+            line_offset = (from_line - 1) if from_line and from_line > 0 else 0
+            matched_lines, count = grep_match_lines(
+                lines=lines,
+                search_pattern=search_pattern,
+                file_label=f"/{rel_path}",
+                output_mode=output_mode,
+                context_lines=context_lines or 0,
+                line_offset=line_offset,
+                reverse=reverse,
+            )
+            if not count:
+                continue
+            files_matched += count
+            output_lines.extend(matched_lines)
+
+        return build_grep_result(
+            output_lines=output_lines,
+            matched_count=files_matched,
+            warnings=warnings,
+            max_output_chars=self.max_output_chars,
+            truncation_hint="Use from_line/to_line to read specific ranges, or narrow with --path/--glob.",
+        )
+
+    def grep_job_artifacts(
+        self: Any,
+        *,
+        repo: str,
+        pipeline_id: int,
+        job_id: int,
+        pattern: str | None = None,
+        path: str | None = None,
+        glob: str | None = None,
+        output_mode: Literal["content", "files_with_matches", "count"] = "content",
+        case_insensitive: bool = True,
+        context_lines: int | None = 3,
+        from_line: int | None = None,
+        to_line: int | None = None,
+        reverse: bool = False,
+    ) -> dict[str, Any]:
+        regex_pattern = pattern or ".*"
+        search_pattern, compile_error = compile_search_pattern(
+            regex_pattern,
+            case_insensitive=case_insensitive,
+        )
+        if compile_error or search_pattern is None:
+            return grep_compile_error_result(compile_error or "Invalid pattern")
+
+        checkout_dir = self._ensure_artifacts_checkout(
+            repo=repo,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+        )
+
+        if from_line is None and to_line is None:
+            return _local_checkout.ripgrep_local_result(
+                checkout_dir=checkout_dir,
+                pattern=regex_pattern,
+                case_insensitive=case_insensitive,
+                path=path,
+                glob=glob,
+                filename_filter=re.compile(r".*"),
+                output_mode=output_mode,
+                context_lines=context_lines or 0,
+                reverse=reverse,
+                max_output_chars=self.max_output_chars,
+                grep_max_files=self._config.grep_max_files,
+                truncation_hint="Use from_line/to_line to read specific ranges, or narrow with --path/--glob.",
+            )
+
+        return self._grep_artifacts_with_line_window(
+            checkout_dir=checkout_dir,
+            pattern=regex_pattern,
+            search_pattern=search_pattern,
+            output_mode=output_mode,
+            case_insensitive=case_insensitive,
+            context_lines=context_lines,
+            from_line=from_line,
+            to_line=to_line,
+            reverse=reverse,
+            path=path,
+            glob=glob,
         )
 
     def list_pipelines(
