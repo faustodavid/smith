@@ -68,9 +68,12 @@ Use `--help` on any command for flags.
 6. **Report** only what the retrieved evidence supports and cite `URL`.
 
 ### Pipeline Analysis
-1. Use `smith pipelines list <repo> <pipeline_id> --status failed` to focus on failed jobs.
-2. Once you know the pipeline log ID, use `smith pipelines grep <repo> <pipeline_id> <log_id> --reverse` to analyze the logs.
-3. For GitLab artifact-backed failures, use `smith <gitlab-remote-name> pipelines artifacts list <group/project> <pipeline_id> <job_id>` and then `... artifacts grep ... "<regex>"`.
+1. Use `smith <remote> pipelines list <scope> <pipeline_id> --status failed` to focus on failed jobs.
+2. Once you know the pipeline log ID, use `smith <remote> pipelines grep <scope> <pipeline_id> <log_id> --reverse` to analyze the logs.
+3. **For GitLab** if pipeline logs indicate that output was redirected to a file then:
+   - Use `smith <remote> pipelines artifacts list <group/project> <pipeline_id> <job_id>` to enumerate archive paths.
+   - Use `smith <remote> pipelines artifacts grep <group/project> <pipeline_id> <job_id> "<regex>"` to search within the artifacts.
+
 ## Stop Conditions
 
 Stop narrowing and answer when any of these is true:
