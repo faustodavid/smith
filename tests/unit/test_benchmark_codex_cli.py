@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from smith.benchmark.codex_cli import (
+    add_smith_codex_mcp_server,
     build_github_codex_prompt,
     build_smith_codex_prompt,
     extract_codex_last_agent_message,
@@ -65,6 +66,28 @@ def test_resolve_codex_cli_path_raises_when_missing(monkeypatch):
 
     with pytest.raises(FileNotFoundError):
         resolve_codex_cli_path(env={"PATH": "/usr/bin:/bin"})
+
+
+def test_add_smith_codex_mcp_server_keeps_token_out_of_argv(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append({"args": args, "env": kwargs["env"]})
+
+    monkeypatch.setattr("smith.benchmark.codex_cli.resolve_github_mcp_token", lambda env: "ghp_supersecret123")
+    monkeypatch.setattr("smith.benchmark.codex_cli.resolve_codex_cli_path", lambda env: "/usr/bin/codex")
+    monkeypatch.setattr("smith.benchmark.codex_cli.subprocess.run", fake_run)
+
+    env = add_smith_codex_mcp_server(
+        tmp_path,
+        env={"PATH": "/usr/bin", "PYTHONPATH": "/existing"},
+        repo_root=tmp_path,
+    )
+
+    assert env["GITHUB_TOKEN"] == "ghp_supersecret123"
+    assert calls
+    assert all("ghp_supersecret123" not in str(arg) for arg in calls[0]["args"])
+    assert calls[0]["env"]["GITHUB_TOKEN"] == "ghp_supersecret123"
 
 
 def test_parse_codex_jsonl_skips_non_json_lines():

@@ -69,6 +69,45 @@ def test_render_tool_trace_markdown_includes_auditable_arguments():
     assert "github auth failed" in markdown
 
 
+def test_tool_trace_redacts_sensitive_arguments_and_result_preview():
+    events = [
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "mcp_tool_call",
+                "server": "github-benchmark",
+                "tool": "search_code",
+                "status": "completed",
+                "arguments": {
+                    "query": "org:openai webhook",
+                    "Authorization": "Bearer ghp_supersecret123",
+                    "GITHUB_TOKEN": "ghp_supersecret456",
+                },
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "token=ghp_resultsecret789 path=src/client.ts",
+                        }
+                    ]
+                },
+            },
+        }
+    ]
+
+    trace = build_codex_tool_trace(events)
+    markdown = render_tool_trace_markdown(trace)
+
+    assert trace[0]["arguments"]["query"] == "org:openai webhook"
+    assert trace[0]["arguments"]["Authorization"] == "[REDACTED]"
+    assert trace[0]["arguments"]["GITHUB_TOKEN"] == "[REDACTED]"
+    assert "ghp_supersecret123" not in json.dumps(trace)
+    assert "ghp_supersecret456" not in json.dumps(trace)
+    assert "ghp_resultsecret789" not in trace[0]["result_preview"]
+    assert "ghp_supersecret123" not in markdown
+    assert "[REDACTED]" in markdown
+
+
 @pytest.mark.asyncio
 async def test_execute_eval_run_writes_tool_trace_artifacts(tmp_path, monkeypatch):
     eval_case = BenchmarkEval(

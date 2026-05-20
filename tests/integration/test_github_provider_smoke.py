@@ -23,6 +23,8 @@ def test_github_provider_smoke_repository_and_search(
         take=5,
     )
     assert isinstance(search["results"], list)
+    assert search["results"]
+    assert search["matchesCount"] > 0
     assert search["matchesCount"] >= len(search["results"])
 
 

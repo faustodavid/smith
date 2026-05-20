@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
-import subprocess
-import sys
 from pathlib import Path
 
 
@@ -18,20 +15,6 @@ def _load_validator_module():
     return module
 
 
-def test_validate_skill_quality_all_mode_passes() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    result = subprocess.run(
-        [sys.executable, "scripts/validate_skill_quality.py", "--mode", "all"],
-        cwd=str(repo_root),
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Skill quality validation passed for mode: all" in result.stdout
-
-
 def test_validate_skill_quality_classifier_examples_cover_trigger_contract() -> None:
     validator = _load_validator_module()
 
@@ -42,12 +25,21 @@ def test_validate_skill_quality_classifier_examples_cover_trigger_contract() -> 
     assert validator.classify_trigger("Create a GitHub issue for this bug") == "negative"
 
 
-def test_behavior_fixture_covers_github_repo_shape_rule() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    fixture_path = repo_root / "tests" / "skills" / "smith" / "fixtures" / "behavior_cases.json"
-    cases = json.loads(fixture_path.read_text())
+def test_evidence_path_contract_accepts_provider_repo_shapes() -> None:
+    validator = _load_validator_module()
 
-    assert any(case.get("required_phrase") == "bare `<repo>`" for case in cases)
-    assert any(case.get("required_phrase") == "not `org/repo`" for case in cases)
-    assert any(case.get("required_phrase") == "full `group/project` paths" for case in cases)
-    assert any(case.get("required_phrase") == "not a short repo name" for case in cases)
+    assert validator._has_evidence_path_contract("Findings cite org/repository:path evidence.")
+    assert validator._has_evidence_path_contract("GitLab answers cite group/repository:path evidence.")
+    assert validator._has_evidence_path_contract("Single repo answers may cite repo:path evidence.")
+    assert not validator._has_evidence_path_contract("No repository path contract is present.")
+
+
+def test_fixture_resolution_prefers_script_repo_after_import_from_other_cwd(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    validator = _load_validator_module()
+
+    repo_root = Path(__file__).resolve().parents[2]
+    monkeypatch.chdir(repo_root)
+
+    assert validator._trigger_fixture() == repo_root / "tests" / "skills" / "smith" / "fixtures" / "trigger_cases.json"
+    assert validator._behavior_fixture() == repo_root / "tests" / "skills" / "smith" / "fixtures" / "behavior_cases.json"

@@ -84,14 +84,13 @@ def add_smith_codex_mcp_server(
     github_token = resolve_github_mcp_token(run_env)
     codex_env = dict(run_env)
     codex_env["CODEX_HOME"] = str(codex_home)
+    codex_env["GITHUB_TOKEN"] = github_token
     subprocess.run(
         [
             resolve_codex_cli_path(codex_env),
             "mcp",
             "add",
             SMITH_CODEX_SERVER_NAME,
-            "--env",
-            f"GITHUB_TOKEN={github_token}",
             "--env",
             (
                 "PYTHONPATH="

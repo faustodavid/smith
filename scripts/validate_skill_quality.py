@@ -47,6 +47,10 @@ def _candidate_roots() -> list[Path]:
 
 
 def _resolve_fixture(filename: str) -> Path:
+    repo_fixture = REPO_ROOT / "tests" / "skills" / "smith" / "fixtures" / filename
+    if repo_fixture.exists():
+        return repo_fixture
+
     for root in _candidate_roots():
         path = root / "tests" / "skills" / "smith" / "fixtures" / filename
         if path.exists():
@@ -55,8 +59,12 @@ def _resolve_fixture(filename: str) -> Path:
     return Path.home() / "Documents" / "projects" / "smith" / "tests" / "skills" / "smith" / "fixtures" / filename
 
 
-TRIGGER_FIXTURE = _resolve_fixture("trigger_cases.json")
-BEHAVIOR_FIXTURE = _resolve_fixture("behavior_cases.json")
+def _trigger_fixture() -> Path:
+    return _resolve_fixture("trigger_cases.json")
+
+
+def _behavior_fixture() -> Path:
+    return _resolve_fixture("behavior_cases.json")
 
 
 def _read(path: Path) -> str:
@@ -158,8 +166,9 @@ def classify_trigger(prompt: str) -> str:
 
 def run_trigger_checks() -> list[str]:
     errors: list[str] = []
+    trigger_fixture = _trigger_fixture()
 
-    required_paths = [SKILL_MD, TRIGGER_CASES_DOC, TRIGGER_FIXTURE]
+    required_paths = [SKILL_MD, TRIGGER_CASES_DOC, trigger_fixture]
     for path in required_paths:
         if not path.exists():
             errors.append(f"Missing required trigger artifact: {path}")
@@ -215,7 +224,7 @@ def run_trigger_checks() -> list[str]:
         if marker not in skill_text:
             errors.append(f"SKILL.md missing explicit invocation marker: {marker}")
 
-    trigger_cases = _load_json(TRIGGER_FIXTURE)
+    trigger_cases = _load_json(trigger_fixture)
     if not isinstance(trigger_cases, list) or not trigger_cases:
         errors.append("trigger_cases.json must contain a non-empty array.")
         return errors
@@ -237,6 +246,7 @@ def run_trigger_checks() -> list[str]:
 
 def run_behavior_checks() -> list[str]:
     errors: list[str] = []
+    behavior_fixture = _behavior_fixture()
 
     required_files = [
         SKILL_MD,
@@ -244,7 +254,7 @@ def run_behavior_checks() -> list[str]:
         AUTH_TROUBLE,
         BEHAVIOR_GATES_DOC,
         FAILURE_PLAYBOOK_DOC,
-        BEHAVIOR_FIXTURE,
+        behavior_fixture,
     ]
     for path in required_files:
         if not path.exists():
@@ -304,7 +314,7 @@ def run_behavior_checks() -> list[str]:
         if marker not in recipes_text and marker not in skill_text:
             errors.append(f"Command coverage missing marker: {marker}")
 
-    behavior_cases = _load_json(BEHAVIOR_FIXTURE)
+    behavior_cases = _load_json(behavior_fixture)
     if not isinstance(behavior_cases, list) or not behavior_cases:
         errors.append("behavior_cases.json must contain a non-empty array.")
         return errors

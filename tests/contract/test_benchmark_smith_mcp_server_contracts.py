@@ -89,11 +89,15 @@ def test_benchmark_smith_mcp_server_shares_backpressure_across_concurrent_calls(
                 errors.append(exc)
 
         workers = [threading.Thread(target=run_call) for _ in range(2)]
-        for thread in workers:
-            thread.start()
-        barrier.wait()
-        for thread in workers:
-            thread.join(timeout=10)
+        try:
+            for thread in workers:
+                thread.start()
+            barrier.wait()
+            for thread in workers:
+                thread.join(timeout=10)
+            assert all(not thread.is_alive() for thread in workers), "worker thread did not finish"
+        finally:
+            smith_mcp_server._RUNNER = InProcessSmithCliRunner()
 
     assert not errors
     assert len(outputs) == 2

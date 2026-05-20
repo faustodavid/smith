@@ -78,15 +78,28 @@ class GitHubIssueMixin:
             qualifiers.append(f"assignee:{assigned_to}")
 
         q = " ".join(item for item in qualifiers if item.strip())
-        per_page = min(max(1, take), 100)
-        page = (max(0, skip) // per_page) + 1
-        data = self._request_json(
-            "GET",
-            "/search/issues",
-            params={"q": q, "per_page": per_page, "page": page},
-        )
-        items = [item for item in data.get("items", []) if isinstance(item, dict)]
-        offset = max(0, skip) % per_page
+        per_page = 100
+        start = max(0, skip)
+        window_size = max(1, take)
+        page = (start // per_page) + 1
+        offset = start % per_page
+        items: list[dict[str, Any]] = []
+        total = 0
+
+        while len(items) < offset + window_size:
+            data = self._request_json(
+                "GET",
+                "/search/issues",
+                params={"q": q, "per_page": per_page, "page": page},
+            )
+            if page == (start // per_page) + 1:
+                total = int(data.get("total_count", 0))
+            page_items = [item for item in data.get("items", []) if isinstance(item, dict)]
+            items.extend(page_items)
+            if len(page_items) < per_page:
+                break
+            page += 1
+
         paged = items[offset : offset + max(1, take)]
 
         results = []
@@ -95,7 +108,8 @@ class GitHubIssueMixin:
             repo_from_url = repository_url.rstrip("/").split("/")[-1] if repository_url else repo_name
             results.append(self._issue_to_work_item(issue, repo_from_url))
 
-        total = int(data.get("total_count", len(results)))
+        if not total:
+            total = len(results)
         return {
             "matchesCount": total,
             "returned_count": len(results),
