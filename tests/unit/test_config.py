@@ -161,6 +161,23 @@ def test_parse_runtime_config_supports_legacy_thanos_max_output_chars_env(monkey
     assert runtime.max_output_chars == 54321
 
 
+def test_parse_runtime_config_falls_back_to_legacy_var_when_new_var_is_invalid(monkeypatch: Any) -> None:
+    monkeypatch.setenv("SMITH_LOCAL_MAX_OUTPUT_CHARS", "invalid")
+    monkeypatch.setenv("THANOS_LOCAL_MAX_OUTPUT_CHARS", "54321")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.max_output_chars == 54321
+
+
 def test_parse_runtime_config_applies_timeout_and_backoff_overrides(monkeypatch: Any) -> None:
     monkeypatch.setenv("AZURE_DEVOPS_TIMEOUT_SECONDS", "45")
     monkeypatch.setenv("SMITH_GREP_MAX_FILES", "9000")
