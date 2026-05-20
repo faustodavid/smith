@@ -428,8 +428,13 @@ def parse_runtime_config(
         api_version=resolved_api_version,
         timeout_seconds=timeout,
         max_output_chars=parse_int_env(
-            "THANOS_LOCAL_MAX_OUTPUT_CHARS",
-            default=max_output_chars or 10240,
+            "SMITH_LOCAL_MAX_OUTPUT_CHARS",
+            default=parse_int_env(
+                "THANOS_LOCAL_MAX_OUTPUT_CHARS",
+                default=max_output_chars or 10240,
+                min_value=256,
+                max_value=1_000_000,
+            ),
             min_value=256,
             max_value=1_000_000,
         ),

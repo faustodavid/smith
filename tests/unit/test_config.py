@@ -78,6 +78,7 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
         "AZURE_DEVOPS_ORG",
         "AZURE_DEVOPS_API_VERSION",
         "AZURE_DEVOPS_TIMEOUT_SECONDS",
+        "SMITH_LOCAL_MAX_OUTPUT_CHARS",
         "THANOS_LOCAL_MAX_OUTPUT_CHARS",
         "SMITH_GREP_MAX_FILES",
         "GITHUB_ORG",
@@ -124,6 +125,40 @@ def test_parse_runtime_config_uses_defaults_when_env_not_set(monkeypatch: Any) -
     assert runtime.http_pool_connections == 16
     assert runtime.http_retry_max_attempts == 2
     assert runtime.http_retry_backoff_seconds == pytest.approx(0.4)
+
+
+def test_parse_runtime_config_prefers_smith_max_output_chars_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv("SMITH_LOCAL_MAX_OUTPUT_CHARS", "12345")
+    monkeypatch.setenv("THANOS_LOCAL_MAX_OUTPUT_CHARS", "99999")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.max_output_chars == 12345
+
+
+def test_parse_runtime_config_supports_legacy_thanos_max_output_chars_env(monkeypatch: Any) -> None:
+    monkeypatch.delenv("SMITH_LOCAL_MAX_OUTPUT_CHARS", raising=False)
+    monkeypatch.setenv("THANOS_LOCAL_MAX_OUTPUT_CHARS", "54321")
+
+    runtime = parse_runtime_config(
+        azdo_org="example",
+        api_version=None,
+        timeout_seconds=None,
+        max_output_chars=None,
+        github_api_url_default="https://api.github.com/",
+        github_api_version_default="2022-11-28",
+        gitlab_api_url_default="https://gitlab.com/api/v4/",
+    )
+
+    assert runtime.max_output_chars == 54321
 
 
 def test_parse_runtime_config_applies_timeout_and_backoff_overrides(monkeypatch: Any) -> None:
