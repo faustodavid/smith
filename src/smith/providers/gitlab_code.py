@@ -338,9 +338,14 @@ class GitLabCodeMixin:
 
         project_id = item.get("project_id")
         if project_id is not None:
-            project_path = self._project_path_from_id(project_id)
-            if project_path:
-                return project_path
+            try:
+                project_path = self._project_path_from_id(project_id)
+            except SmithApiError as exc:
+                item["_project_path_unresolved"] = True
+                item["_project_path_error"] = str(exc)
+            else:
+                if project_path:
+                    return project_path
 
         fallback = str(item.get("project_path") or "").strip().strip("/")
         if fallback:
@@ -519,6 +524,11 @@ class GitLabCodeMixin:
                 item,
                 repo=str(item.get("_repo_hint") or "") or None,
             )
+            if item.get("_project_path_unresolved"):
+                partial = True
+                warning = "GitLab search returned results whose project path could not be resolved."
+                if warning not in warnings:
+                    warnings.append(warning)
             path = normalize_path(str(item.get("path") or item.get("filename") or ""))
             results.append(f"{project_path}:{path}" if project_path else path)
 

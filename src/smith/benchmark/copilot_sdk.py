@@ -31,7 +31,7 @@ def resolve_copilot_cli_path(env: dict[str, str] | None = None) -> str:
     configured = run_env.get("COPILOT_CLI_PATH")
     if configured:
         return configured
-    resolved = shutil.which("copilot")
+    resolved = shutil.which("copilot", path=run_env.get("PATH"))
     if resolved:
         return resolved
     raise FileNotFoundError("Could not find the `copilot` CLI. Set COPILOT_CLI_PATH or add `copilot` to PATH.")

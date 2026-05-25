@@ -71,6 +71,37 @@ def test_github_search_code_builds_repo_qualifier_and_applies_skip_take(monkeypa
     ]
 
 
+def test_github_search_code_queries_each_requested_repo_before_slicing(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        query = str((params or {}).get("q") or "")
+        if "repo:octo-org/repo-a" in query:
+            return {
+                "total_count": 20,
+                "items": [{"repository": {"name": "repo-a"}, "path": f"src/a-{index}.py"} for index in range(20)],
+            }
+        if "repo:octo-org/repo-b" in query:
+            return {
+                "total_count": 3,
+                "items": [{"repository": {"name": "repo-b"}, "path": f"src/b-{index}.py"} for index in range(3)],
+            }
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_code(query="grafana", project=None, repos=["repo-a", "repo-b"], skip=0, take=20)
+
+    assert result["matchesCount"] == 23
+    assert len(result["results"]) == 20
+    assert [call["params"]["q"] for call in calls] == [
+        "grafana repo:octo-org/repo-a",
+        "grafana repo:octo-org/repo-b",
+    ]
+
+
 def test_github_grep_supports_match_all_shortcut_compile_errors_and_warning_paths(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
     monkeypatch.setenv("GITHUB_GREP_ENABLE_PARALLEL", "false")
@@ -613,6 +644,68 @@ def test_github_list_pull_requests_maps_statuses_filters_and_labels(monkeypatch:
     assert calls[1]["params"]["state"] == "closed"
 
 
+def test_github_list_pull_requests_fetches_closed_state_when_open_page_is_full(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+    open_pulls = [
+        {
+            "number": index,
+            "title": f"Open {index}",
+            "state": "open",
+            "draft": False,
+            "user": {"login": "alice"},
+            "created_at": f"2025-01-{index:02d}T00:00:00Z",
+            "closed_at": None,
+            "merged_at": None,
+            "head": {"ref": f"feature/open-{index}"},
+            "base": {"ref": "main"},
+            "labels": [],
+            "id": 1000 + index,
+        }
+        for index in range(1, 6)
+    ]
+    closed_pull = {
+        "number": 99,
+        "title": "Recently closed",
+        "state": "closed",
+        "draft": False,
+        "user": {"login": "bob"},
+        "created_at": "2025-02-01T00:00:00Z",
+        "closed_at": "2025-02-02T00:00:00Z",
+        "merged_at": "2025-02-02T00:00:00Z",
+        "head": {"ref": "feature/closed"},
+        "base": {"ref": "main"},
+        "labels": [],
+        "id": 2099,
+    }
+
+    def _fake_request(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        state = (params or {}).get("state")
+        if state == "open":
+            return open_pulls
+        if state == "closed":
+            return [closed_pull]
+        return []
+
+    monkeypatch.setattr(provider, "_request", _fake_request)
+
+    result = provider.list_pull_requests(
+        repos=["repo-a"],
+        statuses=["active", "completed"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=5,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert [call["params"]["state"] for call in calls] == ["open", "closed"]
+    assert result["results"][0]["pr_id"] == 99
+
+
 def test_github_search_pull_requests_uses_issue_search_and_maps_results(monkeypatch: Any) -> None:
     provider = _provider()
     calls: list[dict[str, Any]] = []
@@ -1125,6 +1218,48 @@ def test_github_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
         "results": [{"id": 10}],
         "warnings": [],
     }
+
+
+def test_github_issue_search_fetches_next_page_for_offset_window(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+    page_one = [
+        {
+            "number": index,
+            "title": f"Issue {index}",
+            "state": "open",
+            "repository_url": "https://api.github.com/repos/octo-org/repo-a",
+        }
+        for index in range(100)
+    ]
+    page_two = [
+        {
+            "number": 100 + index,
+            "title": f"Issue {100 + index}",
+            "state": "open",
+            "repository_url": "https://api.github.com/repos/octo-org/repo-a",
+        }
+        for index in range(20)
+    ]
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        page = (params or {}).get("page")
+        if page == 1:
+            return {"total_count": 120, "items": page_one}
+        if page == 2:
+            return {"total_count": 120, "items": page_two}
+        raise AssertionError(f"unexpected page: {page}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_work_items(query="incident", skip=95, take=20)
+
+    assert result["returned_count"] == 20
+    assert result["results"][0]["id"] == 95
+    assert result["results"][-1]["id"] == 114
+    assert result["has_more"] is True
+    assert [call["params"]["page"] for call in calls] == [1, 2]
 
 
 def test_github_list_pipelines_single_entry_normalizes_status(monkeypatch: Any) -> None:

@@ -28,6 +28,37 @@ def test_configure_logging_sets_expected_level() -> None:
     assert cli_main.logging.getLogger("smith").level == cli_main.logging.DEBUG
 
 
+def test_configure_logging_is_idempotent(monkeypatch: Any) -> None:
+    logger = cli_main.logging.getLogger("smith")
+    original_handlers = list(logger.handlers)
+    logger.handlers.clear()
+
+    try:
+        first_stream = []
+
+        class _ListStream:
+            def write(self, value: str) -> None:
+                first_stream.append(value)
+
+            def flush(self) -> None:
+                pass
+
+        monkeypatch.setattr(cli_main.sys, "stderr", _ListStream())
+
+        cli_main._configure_logging(verbose=True)
+        cli_main._configure_logging(verbose=False)
+
+        managed_handlers = [
+            handler
+            for handler in logger.handlers
+            if getattr(handler, cli_main._SMITH_CLI_HANDLER_ATTR, False)
+        ]
+        assert len(managed_handlers) == 1
+        assert managed_handlers[0].level == cli_main.logging.WARNING
+    finally:
+        logger.handlers[:] = original_handlers
+
+
 def test_main_returns_parse_exit_code(monkeypatch: Any) -> None:
     parser = _Parser(parse_error=2)
     monkeypatch.setattr(cli_main, "build_parser", lambda: parser)

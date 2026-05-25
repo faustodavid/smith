@@ -148,8 +148,8 @@ def test_code_search_without_config_file_reports_config_error(monkeypatch: Any, 
 
 
 def test_cache_clean_succeeds_without_configured_remotes(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
-    github_cache = tmp_path / "github-grep"
-    github_cache.mkdir()
+    github_cache = tmp_path / ".cache" / "smith" / "github-grep"
+    github_cache.mkdir(parents=True)
 
     monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))
     monkeypatch.setattr(

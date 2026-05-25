@@ -894,10 +894,10 @@ def test_handle_youtrack_work_get(monkeypatch: Any, capsys: Any) -> None:
 
 
 def test_handle_cache_clean_cleans_requested_remote_cache(monkeypatch: Any, capsys: Any, tmp_path: Any) -> None:
-    github_cache = tmp_path / "github-grep"
-    gitlab_cache = tmp_path / "gitlab-grep"
-    github_cache.mkdir()
-    gitlab_cache.mkdir()
+    github_cache = tmp_path / ".cache" / "smith" / "github-grep"
+    gitlab_cache = tmp_path / ".cache" / "smith" / "gitlab-grep"
+    github_cache.mkdir(parents=True)
+    gitlab_cache.mkdir(parents=True)
     args = _make_args(command_id="cache.clean", output_format="text", cache_remote="all")
 
     monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))

@@ -120,6 +120,7 @@ class GitHubPullRequestMixin:
             for github_state in states_to_fetch:
                 page = 1
                 per_page = 100
+                state_output_count = 0
                 while True:
                     pulls_data = self._request(
                         "GET",
@@ -163,8 +164,11 @@ class GitHubPullRequestMixin:
                                 include_labels=include_labels,
                             )
                         )
+                        state_output_count += 1
 
-                    if single_repo_mode and len(output) >= desired_count:
+                    if single_repo_mode and len(states_to_fetch) == 1 and len(output) >= desired_count:
+                        break
+                    if single_repo_mode and len(states_to_fetch) > 1 and state_output_count >= desired_count:
                         break
                     if (
                         github_state == "open"
@@ -176,8 +180,6 @@ class GitHubPullRequestMixin:
                     if len(pulls) < per_page:
                         break
                     page += 1
-                if single_repo_mode and len(output) >= desired_count:
-                    break
 
         output.sort(key=lambda row: str(row.get("creation_date") or ""), reverse=True)
         paged = paginate_results(output, skip=skip, take=take)

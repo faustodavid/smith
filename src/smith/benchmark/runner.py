@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -49,6 +50,13 @@ EVALS_PATH = REPO_ROOT / "benchmarks" / "evals" / "smith_skill_cases.json"
 SKILL_PATH = REPO_ROOT / "skills" / "smith" / "SKILL.md"
 DEFAULT_WORKSPACE_ROOT = REPO_ROOT / "benchmarks" / "workspaces"
 CONFIG_ORDER = ("smith_skill", "github_mcp")
+REDACTION_PLACEHOLDER = "[REDACTED]"
+SENSITIVE_KEY_RE = re.compile(r"(authorization|bearer|token|secret|password|api[_-]?key)", re.IGNORECASE)
+SENSITIVE_VALUE_RE = re.compile(
+    r"(Bearer\s+)[A-Za-z0-9._~+/=-]+|"
+    r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{8,}\b|"
+    r"\b[A-Za-z0-9_]*TOKEN[A-Za-z0-9_]*=[^\s,;]+"
+)
 
 
 @dataclass(frozen=True)
@@ -134,6 +142,30 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
+def _redact_text(value: str) -> str:
+    return SENSITIVE_VALUE_RE.sub(
+        lambda match: f"{match.group(1)}{REDACTION_PLACEHOLDER}" if match.group(1) else REDACTION_PLACEHOLDER,
+        value,
+    )
+
+
+def _redact_sensitive(value: Any, *, parent_key: str | None = None) -> Any:
+    normalized = _jsonable(value)
+    if parent_key and SENSITIVE_KEY_RE.search(parent_key):
+        return REDACTION_PLACEHOLDER
+    if isinstance(normalized, dict):
+        redacted: dict[str, Any] = {}
+        for key, item in normalized.items():
+            key_text = str(key)
+            redacted[key_text] = _redact_sensitive(item, parent_key=key_text)
+        return redacted
+    if isinstance(normalized, list):
+        return [_redact_sensitive(item, parent_key=parent_key) for item in normalized]
+    if isinstance(normalized, str):
+        return _redact_text(normalized)
+    return normalized
+
+
 def _extract_tool_name(raw_item: Any) -> str:
     payload = _jsonable(raw_item)
     if isinstance(payload, dict):
@@ -150,10 +182,10 @@ def _normalize_tool_arguments(value: Any) -> Any:
         stripped = normalized.strip()
         if stripped.startswith("{") or stripped.startswith("["):
             try:
-                return json.loads(stripped)
+                return _redact_sensitive(json.loads(stripped))
             except json.JSONDecodeError:
-                return normalized
-    return normalized
+                return _redact_sensitive(normalized)
+    return _redact_sensitive(normalized)
 
 
 def _build_result_preview(value: Any, *, max_chars: int = 1200) -> str:
@@ -178,7 +210,7 @@ def _build_result_preview(value: Any, *, max_chars: int = 1200) -> str:
     else:
         text = json.dumps(_jsonable(value), indent=2, sort_keys=True)
 
-    text = text.strip()
+    text = _redact_text(text.strip())
     if len(text) <= max_chars:
         return text
     return text[:max_chars].rstrip() + "\n...[truncated]"

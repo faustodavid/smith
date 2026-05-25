@@ -93,8 +93,9 @@ class GitHubCodeMixin:
 
         for target_repo in search_targets:
             page = 1
-            while len(all_items) < desired:
-                remaining = max(1, desired - len(all_items))
+            target_items: list[dict[str, Any]] = []
+            while len(target_items) < desired:
+                remaining = max(1, desired - len(target_items))
                 per_page = min(100, remaining)
                 qualifiers = [query]
                 if target_repo:
@@ -114,10 +115,11 @@ class GitHubCodeMixin:
                 page_items = [entry for entry in items if isinstance(entry, dict)]
                 if not page_items:
                     break
-                all_items.extend(page_items)
+                target_items.extend(page_items)
                 if len(page_items) < per_page:
                     break
                 page += 1
+            all_items.extend(target_items)
 
         sliced = all_items[max(0, skip) : max(0, skip) + max(1, take)]
         results: list[str] = []
