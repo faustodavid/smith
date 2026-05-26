@@ -164,24 +164,64 @@ def classify_trigger(prompt: str) -> str:
     return "ambiguous"
 
 
+def _missing_required_artifact_errors(paths: list[Path], label: str) -> list[str]:
+    for path in paths:
+        if not path.exists():
+            return [f"Missing required {label} artifact: {path}"]
+    return []
+
+
+def _missing_marker_errors(text: str, markers: list[str], template: str) -> list[str]:
+    return [template.format(marker=marker) for marker in markers if marker not in text]
+
+
+def _validate_trigger_frontmatter(skill_text: str, description: str) -> list[str]:
+    errors: list[str] = []
+    if "Use when" not in description:
+        errors.append("Frontmatter description is missing positive trigger phrasing ('Use when').")
+    if "Do not use" not in description and "### Do not use smith when" not in skill_text:
+        errors.append("Frontmatter description is missing anti-trigger phrasing ('Do not use').")
+    return errors
+
+
+def _validate_trigger_case(case: Any) -> list[str]:
+    prompt = str(case.get("prompt", "")).strip()
+    expected = str(case.get("expected", "")).strip()
+    if not prompt or expected not in {"positive", "negative", "ambiguous"}:
+        return [f"Invalid trigger case: {case}"]
+
+    predicted = classify_trigger(prompt)
+    if predicted != expected:
+        return [f"Trigger classification mismatch for '{prompt}': expected '{expected}', got '{predicted}'"]
+
+    return []
+
+
+def _validate_trigger_cases(trigger_cases: Any) -> list[str]:
+    if not isinstance(trigger_cases, list) or not trigger_cases:
+        return ["trigger_cases.json must contain a non-empty array."]
+
+    errors: list[str] = []
+    for case in trigger_cases:
+        errors.extend(_validate_trigger_case(case))
+    return errors
+
+
 def run_trigger_checks() -> list[str]:
     errors: list[str] = []
     trigger_fixture = _trigger_fixture()
 
-    required_paths = [SKILL_MD, TRIGGER_CASES_DOC, trigger_fixture]
-    for path in required_paths:
-        if not path.exists():
-            errors.append(f"Missing required trigger artifact: {path}")
-            return errors
+    required_paths = [SKILL_MD, USAGE_RECIPES, TRIGGER_CASES_DOC, trigger_fixture]
+    errors.extend(_missing_required_artifact_errors(required_paths, "trigger"))
+    if errors:
+        return errors
 
     skill_text = _read(SKILL_MD)
+    recipes_text = _read(USAGE_RECIPES)
+    combined_text = "\n".join([skill_text, recipes_text])
     frontmatter = _extract_frontmatter(skill_text)
     description = frontmatter.get("description", "")
-
-    if "Use when" not in description:
-        errors.append("Frontmatter description is missing positive trigger phrasing ('Use when').")
-    if "Do not use" not in description:
-        errors.append("Frontmatter description is missing anti-trigger phrasing ('Do not use').")
+    errors.extend(_validate_trigger_frontmatter(skill_text, description))
 
     required_sections = [
         "## Trigger Decision",
@@ -189,9 +229,7 @@ def run_trigger_checks() -> list[str]:
         "### Do not use smith when",
         "### Ambiguous request fallback",
     ]
-    for section in required_sections:
-        if section not in skill_text:
-            errors.append(f"SKILL.md missing section: {section}")
+    errors.extend(_missing_marker_errors(skill_text, required_sections, "SKILL.md missing section: {marker}"))
 
     explicit_invocation_markers = [
         "smith code search",
@@ -220,27 +258,65 @@ def run_trigger_checks() -> list[str]:
         "smith <azdo-remote-name> stories search <project> --query",
         "smith <gitlab-remote-name> stories search <group/project> --query",
     ]
-    for marker in explicit_invocation_markers:
-        if marker not in skill_text:
-            errors.append(f"SKILL.md missing explicit invocation marker: {marker}")
+    errors.extend(
+        _missing_marker_errors(combined_text, explicit_invocation_markers, "SKILL.md missing explicit invocation marker: {marker}")
+    )
 
     trigger_cases = _load_json(trigger_fixture)
-    if not isinstance(trigger_cases, list) or not trigger_cases:
-        errors.append("trigger_cases.json must contain a non-empty array.")
-        return errors
+    errors.extend(_validate_trigger_cases(trigger_cases))
 
-    for case in trigger_cases:
-        prompt = str(case.get("prompt", "")).strip()
-        expected = str(case.get("expected", "")).strip()
-        if not prompt or expected not in {"positive", "negative", "ambiguous"}:
-            errors.append(f"Invalid trigger case: {case}")
-            continue
-        predicted = classify_trigger(prompt)
-        if predicted != expected:
-            errors.append(
-                f"Trigger classification mismatch for '{prompt}': expected '{expected}', got '{predicted}'"
-            )
+    return errors
 
+
+def _validate_behavior_case_sequence(case_name: str, expected_sequence: Any, combined_text: str) -> list[str]:
+    if expected_sequence is None:
+        return []
+    if not isinstance(expected_sequence, list) or not expected_sequence:
+        return [f"Behavior case '{case_name}' has invalid expected_sequence"]
+
+    errors: list[str] = []
+    for marker in expected_sequence:
+        marker_text = str(marker).strip()
+        if marker_text and marker_text not in combined_text:
+            errors.append(f"Behavior case '{case_name}' missing sequence marker '{marker_text}' in docs")
+    return errors
+
+
+def _validate_behavior_case_phrase(case_name: str, required_phrase: Any, combined_text: str) -> list[str]:
+    if required_phrase is None:
+        return []
+
+    phrase = str(required_phrase).strip()
+    if phrase and phrase not in combined_text:
+        return [f"Behavior case '{case_name}' requires phrase '{phrase}' not found"]
+
+    return []
+
+
+def _validate_behavior_case_evidence(case_name: str, requires_evidence_paths: Any, combined_text: str) -> list[str]:
+    if requires_evidence_paths is True and not _has_evidence_path_contract(combined_text):
+        return [f"Behavior case '{case_name}' requires evidence path contract, but contract not found"]
+
+    return []
+
+
+def _validate_behavior_case(case: Any, combined_text: str) -> list[str]:
+    case_name = str(case.get("name", "")).strip() or "unnamed_case"
+
+    errors: list[str] = []
+    errors.extend(_validate_behavior_case_sequence(case_name, case.get("expected_sequence"), combined_text))
+    errors.extend(_validate_behavior_case_phrase(case_name, case.get("required_phrase"), combined_text))
+    errors.extend(_validate_behavior_case_evidence(case_name, case.get("requires_evidence_paths"), combined_text))
+    return errors
+
+
+def _validate_behavior_cases(behavior_cases: Any, combined_text: str) -> list[str]:
+    if not isinstance(behavior_cases, list) or not behavior_cases:
+        return ["behavior_cases.json must contain a non-empty array."]
+
+    errors: list[str] = []
+    for case in behavior_cases:
+        errors.extend(_validate_behavior_case(case, combined_text))
     return errors
 
 
@@ -256,10 +332,9 @@ def run_behavior_checks() -> list[str]:
         FAILURE_PLAYBOOK_DOC,
         behavior_fixture,
     ]
-    for path in required_files:
-        if not path.exists():
-            errors.append(f"Missing required behavior artifact: {path}")
-            return errors
+    errors.extend(_missing_required_artifact_errors(required_files, "behavior"))
+    if errors:
+        return errors
 
     skill_text = _read(SKILL_MD)
     recipes_text = _read(USAGE_RECIPES)
@@ -268,16 +343,18 @@ def run_behavior_checks() -> list[str]:
     required_skill_sections = [
         "## Investigation Algorithm",
         "## Stop Conditions",
-        "## Failure Handling Flow",
+        "## Failure Handling",
     ]
-    for section in required_skill_sections:
-        if section not in skill_text:
-            errors.append(f"SKILL.md missing behavioral section: {section}")
+    errors.extend(
+        _missing_marker_errors(skill_text, required_skill_sections, "SKILL.md missing behavioral section: {marker}")
+    )
 
     recovery_terms = ["401 or 403", "429", "Truncation", "Empty results", "Wrong repository"]
-    for term in recovery_terms:
-        if term not in skill_text and term not in failure_text:
-            errors.append(f"Recovery flow missing term: {term}")
+    errors.extend(
+        f"Recovery flow missing term: {term}"
+        for term in recovery_terms
+        if term not in skill_text and term not in failure_text
+    )
 
     command_markers = [
         "smith <azdo-remote-name> orgs",
@@ -310,44 +387,12 @@ def run_behavior_checks() -> list[str]:
         "smith <azdo-remote-name> stories mine <project>",
         "smith <gitlab-remote-name> stories mine <group/project>",
     ]
-    for marker in command_markers:
-        if marker not in recipes_text and marker not in skill_text:
-            errors.append(f"Command coverage missing marker: {marker}")
+    command_text = "\n".join([recipes_text, skill_text])
+    errors.extend(_missing_marker_errors(command_text, command_markers, "Command coverage missing marker: {marker}"))
 
     behavior_cases = _load_json(behavior_fixture)
-    if not isinstance(behavior_cases, list) or not behavior_cases:
-        errors.append("behavior_cases.json must contain a non-empty array.")
-        return errors
-
     combined_text = "\n".join([skill_text, recipes_text, failure_text])
-    for case in behavior_cases:
-        case_name = str(case.get("name", "")).strip() or "unnamed_case"
-
-        expected_sequence = case.get("expected_sequence")
-        if expected_sequence is not None:
-            if not isinstance(expected_sequence, list) or not expected_sequence:
-                errors.append(f"Behavior case '{case_name}' has invalid expected_sequence")
-            else:
-                for marker in expected_sequence:
-                    marker_text = str(marker).strip()
-                    if marker_text and marker_text not in combined_text:
-                        errors.append(
-                            f"Behavior case '{case_name}' missing sequence marker '{marker_text}' in docs"
-                        )
-
-        required_phrase = case.get("required_phrase")
-        if required_phrase is not None:
-            phrase = str(required_phrase).strip()
-            if phrase and phrase not in combined_text:
-                errors.append(
-                    f"Behavior case '{case_name}' requires phrase '{phrase}' not found"
-                )
-
-        requires_evidence_paths = case.get("requires_evidence_paths")
-        if requires_evidence_paths is True and not _has_evidence_path_contract(combined_text):
-            errors.append(
-                f"Behavior case '{case_name}' requires evidence path contract, but contract not found"
-            )
+    errors.extend(_validate_behavior_cases(behavior_cases, combined_text))
 
     return errors
 
