@@ -239,6 +239,7 @@ def _add_global_code_group(root_subparsers: Any) -> None:
         help_text="Search code across all configured remotes",
     )
     code_search.add_argument("query", nargs="?", help="Search query text")
+    code_search.add_argument("--glob", help="Path glob filter (e.g. *.py or src/**/*.ts)")
     code_search.add_argument("--skip", type=int, default=0, help=_RESULTS_OFFSET_HELP)
     code_search.add_argument("--take", type=int, default=20, help=_RESULTS_COUNT_HELP)
     code_search.set_defaults(remote="all", remote_provider="", project=None, repos=None)
@@ -417,6 +418,7 @@ def _add_remote_code_group(remote_subparsers: Any, *, remote: RemoteConfig) -> N
             else "Full repository path filter (repeatable, e.g. group/project)"
         ),
     )
+    code_search.add_argument("--glob", help="Path glob filter (e.g. *.py or src/**/*.ts)")
     code_search.add_argument("--skip", type=int, default=0, help=_RESULTS_OFFSET_HELP)
     code_search.add_argument("--take", type=int, default=20, help=_RESULTS_COUNT_HELP)
     _add_output_format(code_search)

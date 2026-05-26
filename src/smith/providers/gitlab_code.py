@@ -17,7 +17,7 @@ from urllib.parse import quote
 from smith.config import parse_bool_env, parse_int_env
 from smith.discovery import DiscoveryQuery, build_discovery_payload
 from smith.errors import SmithApiError
-from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
+from smith.formatting import code_search_glob_hints, compile_glob_matcher, glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers import local_checkout as _local_checkout
 from smith.providers.helpers import (
     build_grep_result,
@@ -417,6 +417,97 @@ class GitLabCodeMixin:
         page_items = [{**entry, "_repo_hint": repo} for entry in data if isinstance(entry, dict)]
         return page_items, total_count, next_page
 
+    def _search_code_with_glob(
+        self: Any,
+        *,
+        query: str,
+        repos: list[str] | None,
+        skip: int,
+        take: int,
+        glob: str,
+    ) -> dict[str, Any]:
+        effective_repos = [item for item in (repos or []) if item]
+        search_targets: list[str | None] = list(effective_repos) if effective_repos else [None]
+        start = max(0, skip)
+        window_size = max(1, take)
+        stop = start + window_size
+        per_page = 100
+        total_matches = 0
+        page_items_for_output: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        partial = False
+        matches_count_lower_bound = False
+        glob_matcher = compile_glob_matcher(glob)
+
+        for target_repo in search_targets:
+            current_page = 1
+            target_seen = 0
+            checked_extra_page_after_window = False
+
+            while True:
+                current_items, target_total_header, next_page = self._search_code_page(
+                    query=query,
+                    repo=target_repo,
+                    page=current_page,
+                    per_page=per_page,
+                )
+                if not current_items:
+                    break
+
+                target_seen += len(current_items)
+                for item in current_items:
+                    path = normalize_path(str(item.get("path") or item.get("filename") or ""))
+                    if not glob_matcher(path):
+                        continue
+                    global_index = total_matches
+                    if start <= global_index < stop:
+                        page_items_for_output.append(item)
+                    total_matches += 1
+
+                maybe_more = next_page is not None or len(current_items) >= per_page
+                if target_total_header is not None and target_seen >= max(target_total_header, len(current_items)):
+                    break
+
+                broad_search_without_total = target_repo is None and target_total_header is None
+                if broad_search_without_total and total_matches >= stop:
+                    if checked_extra_page_after_window or not maybe_more:
+                        if checked_extra_page_after_window and maybe_more:
+                            partial = True
+                            matches_count_lower_bound = True
+                            warning = (
+                                "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "
+                                "Narrow with `--repo group/project` for exact counts."
+                            )
+                            if warning not in warnings:
+                                warnings.append(warning)
+                        break
+                    checked_extra_page_after_window = True
+
+                if not maybe_more:
+                    break
+                current_page = next_page if next_page is not None else current_page + 1
+
+        results: list[str] = []
+        for item in page_items_for_output:
+            project_path = self._search_result_project_path(
+                item,
+                repo=str(item.get("_repo_hint") or "") or None,
+            )
+            path = normalize_path(str(item.get("path") or item.get("filename") or ""))
+            results.append(f"{project_path}:{path}" if project_path else path)
+
+        result: dict[str, Any] = {
+            "matchesCount": total_matches,
+            "results": results,
+        }
+        if warnings:
+            result["warnings"] = warnings
+        if partial:
+            result["partial"] = True
+        if matches_count_lower_bound:
+            result["matchesCountLowerBound"] = True
+        return result
+
     def search_code(
         self: Any,
         *,
@@ -425,8 +516,31 @@ class GitLabCodeMixin:
         repos: list[str] | None = None,
         skip: int = 0,
         take: int = 20,
+        glob: str | None = None,
     ) -> dict[str, Any]:
         del project
+
+        if glob:
+            glob_hints = code_search_glob_hints(glob)
+            glob_qualifiers: list[str] = []
+            if glob_hints.extension and not glob_hints.filename:
+                glob_qualifiers.append(f"extension:{glob_hints.extension}")
+            if glob_hints.filename:
+                glob_qualifiers.append(f"filename:{glob_hints.filename}")
+            if glob_hints.path_prefix:
+                glob_qualifiers.append(f"path:{glob_hints.path_prefix}")
+            query = " ".join(part for part in [query, *glob_qualifiers] if part.strip())
+            if not glob_hints.needs_local_filter:
+                glob = None
+
+        if glob:
+            return self._search_code_with_glob(
+                query=query,
+                repos=repos,
+                skip=skip,
+                take=take,
+                glob=glob,
+            )
 
         effective_repos = [item for item in (repos or []) if item]
         search_targets: list[str | None] = list(effective_repos) if effective_repos else [None]

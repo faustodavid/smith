@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote
 
 from smith.config import parse_bool_env, parse_int_env
-from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
+from smith.formatting import code_search_glob_hints, compile_glob_matcher, glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers import local_checkout as _local_checkout
 from smith.providers.helpers import (
     build_grep_result,
@@ -78,6 +78,7 @@ class AzdoCodeMixin:
         repos: list[str] | None = None,
         skip: int = 0,
         take: int = 20,
+        glob: str | None = None,
     ) -> dict[str, Any]:
         if repos and not project:
             raise ValueError("Repository filter requires --project")
@@ -88,8 +89,20 @@ class AzdoCodeMixin:
         if repos:
             filters["Repository"] = repos
 
+        glob_hints = code_search_glob_hints(glob)
+        glob_qualifiers: list[str] = []
+        if glob_hints.extension and not glob_hints.filename:
+            glob_qualifiers.append(f"ext:{glob_hints.extension}")
+        if glob_hints.filename:
+            glob_qualifiers.append(f"file:{glob_hints.filename}")
+        if glob_hints.path_prefix:
+            glob_qualifiers.append(f"path:{glob_hints.path_prefix}")
+        qualified_query = " ".join(part for part in [query, *glob_qualifiers] if part.strip())
+        use_local_filter = bool(glob and glob_hints.needs_local_filter)
+        glob_matcher = compile_glob_matcher(glob) if use_local_filter and glob else None
+
         payload: dict[str, Any] = {
-            "searchText": query,
+            "searchText": qualified_query,
             "$skip": max(0, skip),
             "$top": max(1, take),
             "filters": filters,
@@ -97,6 +110,52 @@ class AzdoCodeMixin:
         }
 
         url = self._almsearch_url(f"/_apis/search/codesearchresults?api-version={self.api_version}")
+        if glob_matcher:
+            start = max(0, skip)
+            window_size = max(1, take)
+            per_page = 100
+            filtered_count = 0
+            filtered_results: list[str] = []
+            current_skip = 0
+
+            while True:
+                page_payload = dict(payload)
+                page_payload["$skip"] = current_skip
+                page_payload["$top"] = per_page
+                data = self._request_json(
+                    "POST",
+                    url,
+                    json_body=page_payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                page_items = [item for item in data.get("results", []) if isinstance(item, dict)]
+                if not page_items:
+                    break
+
+                for item in page_items:
+                    path = str(item.get("path") or "")
+                    if not glob_matcher(path):
+                        continue
+                    project_name = (item.get("project") or {}).get("name", "")
+                    repo_name = (item.get("repository") or {}).get("name", "")
+                    global_index = filtered_count
+                    if start <= global_index < start + window_size:
+                        filtered_results.append(f"{project_name}/{repo_name}:{path}")
+                    filtered_count += 1
+
+                current_skip += len(page_items)
+                try:
+                    total_count = int(data.get("count", current_skip))
+                except (TypeError, ValueError):
+                    total_count = current_skip
+                if len(page_items) < per_page or current_skip >= total_count:
+                    break
+
+            return {
+                "matchesCount": filtered_count,
+                "results": filtered_results,
+            }
+
         data = self._request_json(
             "POST",
             url,

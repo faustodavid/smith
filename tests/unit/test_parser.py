@@ -676,12 +676,24 @@ def test_code_search_parser_rejects_removed_global_filters() -> None:
 
 def test_remote_code_search_parser_uses_named_remote() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(["gitlab-infra", "code", "search", "grafana", "--repo", "engineering-tools/repo-a"])
+    args = parser.parse_args(
+        ["gitlab-infra", "code", "search", "grafana", "--repo", "engineering-tools/repo-a", "--glob", "src/**/*.py"]
+    )
 
     assert args.command_id == "code.search"
     assert args.remote == "gitlab-infra"
     assert args.repos == ["engineering-tools/repo-a"]
     assert args.project is None
+    assert args.glob == "src/**/*.py"
+
+
+def test_global_code_search_parser_accepts_glob() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["code", "search", "grafana", "--glob", "*.py"])
+
+    assert args.command_id == "code.search"
+    assert args.remote == "all"
+    assert args.glob == "*.py"
 
 
 @pytest.mark.parametrize(

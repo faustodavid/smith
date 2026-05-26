@@ -69,6 +69,98 @@ def test_azdo_list_project_repository_and_search_code_views(monkeypatch: Any) ->
         provider.search_code(query="grafana", project=None, repos=["repo-a"])
 
 
+def test_azdo_search_code_filters_glob_before_skip_take(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_json(
+        method: str,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        calls.append({"method": method, "url": url, "params": params, "json_body": json_body})
+        return {
+            "count": 2,
+            "results": [
+                {"project": {"name": "proj-a"}, "repository": {"name": "repo-a"}, "path": "/tests/util.py"},
+            ],
+        }
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_code(query="grafana", project="proj-a", repos=["repo-a"], skip=1, take=1, glob="*.py")
+
+    expected_url = (
+        f"{provider.org_url.replace('https://dev.azure.com', 'https://almsearch.dev.azure.com')}"
+        f"/_apis/search/codesearchresults?api-version={provider.api_version}"
+    )
+    assert result == {"matchesCount": 2, "results": ["proj-a/repo-a:/tests/util.py"]}
+    assert calls == [
+        {
+            "method": "POST",
+            "url": expected_url,
+            "params": None,
+            "json_body": {
+                "searchText": "grafana ext:py",
+                "$skip": 1,
+                "$top": 1,
+                "filters": {"Project": ["proj-a"], "Repository": ["repo-a"]},
+                "$orderBy": [{"field": "filename", "sortOrder": "ASC"}],
+            },
+        },
+    ]
+
+
+def test_azdo_search_code_uses_api_glob_hints_then_residual_filter(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_json(
+        method: str,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        calls.append({"method": method, "url": url, "params": params, "json_body": json_body})
+        return {
+            "count": 3,
+            "results": [
+                {"project": {"name": "proj-a"}, "repository": {"name": "repo-a"}, "path": "/src/app.py"},
+                {"project": {"name": "proj-a"}, "repository": {"name": "repo-a"}, "path": "/src/nested/app.py"},
+                {"project": {"name": "proj-a"}, "repository": {"name": "repo-a"}, "path": "/docs/app.py"},
+            ],
+        }
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_code(query="grafana", project="proj-a", repos=["repo-a"], skip=0, take=10, glob="src/*.py")
+
+    expected_url = (
+        f"{provider.org_url.replace('https://dev.azure.com', 'https://almsearch.dev.azure.com')}"
+        f"/_apis/search/codesearchresults?api-version={provider.api_version}"
+    )
+    assert result == {"matchesCount": 1, "results": ["proj-a/repo-a:/src/app.py"]}
+    assert calls == [
+        {
+            "method": "POST",
+            "url": expected_url,
+            "params": None,
+            "json_body": {
+                "searchText": "grafana ext:py path:src",
+                "$skip": 0,
+                "$top": 100,
+                "filters": {"Project": ["proj-a"], "Repository": ["repo-a"]},
+                "$orderBy": [{"field": "filename", "sortOrder": "ASC"}],
+            },
+        },
+    ]
+
+
 def test_azdo_grep_supports_match_all_shortcut_and_warning_paths(monkeypatch: Any) -> None:
     monkeypatch.setenv("AZDO_GREP_USE_LOCAL_CACHE", "false")
     provider = _provider(make_runtime_config(max_output_chars=50))

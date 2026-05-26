@@ -71,6 +71,63 @@ def test_github_search_code_builds_repo_qualifier_and_applies_skip_take(monkeypa
     ]
 
 
+def test_github_search_code_filters_glob_before_skip_take(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        return {
+            "total_count": 2,
+            "items": [
+                {"repository": {"name": "repo-a"}, "path": "src/app.py"},
+                {"repository": {"name": "repo-a"}, "path": "tests/util.py"},
+            ],
+        }
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_code(query="grafana", project=None, repos=["repo-a"], skip=1, take=1, glob="*.py")
+
+    assert result == {"matchesCount": 2, "results": ["repo-a:/tests/util.py"]}
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/search/code",
+            "params": {"q": "grafana extension:py repo:octo-org/repo-a", "per_page": 2, "page": 1},
+        },
+    ]
+
+
+def test_github_search_code_uses_api_glob_hints_then_residual_filter(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        return {
+            "total_count": 3,
+            "items": [
+                {"repository": {"name": "repo-a"}, "path": "src/app.py"},
+                {"repository": {"name": "repo-a"}, "path": "src/nested/app.py"},
+                {"repository": {"name": "repo-a"}, "path": "docs/app.py"},
+            ],
+        }
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    result = provider.search_code(query="grafana", project=None, repos=["repo-a"], skip=0, take=10, glob="src/*.py")
+
+    assert result == {"matchesCount": 1, "results": ["repo-a:/src/app.py"]}
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/search/code",
+            "params": {"q": "grafana extension:py path:src repo:octo-org/repo-a", "per_page": 100, "page": 1},
+        },
+    ]
+
+
 def test_github_grep_supports_match_all_shortcut_compile_errors_and_warning_paths(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
     monkeypatch.setenv("GITHUB_GREP_ENABLE_PARALLEL", "false")

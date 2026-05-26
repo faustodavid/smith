@@ -28,8 +28,9 @@ class _FakeClient:
         repos: list[str] | None,
         skip: int,
         take: int,
+        glob: str | None = None,
     ) -> dict[str, Any]:
-        del remote_or_provider, query, project, repos, skip, take
+        del remote_or_provider, query, project, repos, skip, take, glob
         self.search_calls += 1
         return {"matchesCount": 1, "results": ["openai/openai-python:/README.md"]}
 

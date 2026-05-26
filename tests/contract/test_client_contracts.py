@@ -850,12 +850,14 @@ def test_execute_code_search_runs_all_remote_operations(monkeypatch: Any) -> Non
         repos=["repo-a"],
         skip=2,
         take=5,
+        glob="*.py",
     )
 
     assert result["summary"]["queried"] == ["github", "gitlab", "azdo"]
-    assert result["remotes"]["github"]["data"]["method"] == "search_code"
-    assert result["remotes"]["gitlab"]["data"]["method"] == "search_code"
+    assert result["remotes"]["github"]["data"]["kwargs"]["glob"] == "*.py"
+    assert result["remotes"]["gitlab"]["data"]["kwargs"]["glob"] == "*.py"
     assert result["remotes"]["azdo"]["data"]["kwargs"]["repos"] == ["repo-a"]
+    assert result["remotes"]["azdo"]["data"]["kwargs"]["glob"] == "*.py"
 
 
 def test_execute_code_search_all_skips_unconfigured_remotes(monkeypatch: Any) -> None:
