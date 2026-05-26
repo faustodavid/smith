@@ -14,6 +14,7 @@ def _benchmark_env(*, base_url: str) -> dict[str, str]:
     return {
         "GITHUB_TOKEN": "test-token",
         "GITHUB_API_URL": base_url,
+        "SMITH_CONFIG": "",
         "GITHUB_MAX_CONCURRENT_REQUESTS": "1",
         "SMITH_HTTP_RETRY_MAX_ATTEMPTS": "2",
         "SMITH_HTTP_RETRY_BACKOFF_SECONDS": "0",
