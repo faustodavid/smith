@@ -277,10 +277,36 @@ class SmithClient:
 
         roots: list[str] = []
         if "github" in providers:
-            roots.append(os.getenv("SMITH_GITHUB_GREP_CACHE_DIR") or str(Path.home() / ".cache" / "smith" / "github-grep"))
+            roots.append(
+                os.getenv("SMITH_GITHUB_GREP_CACHE_DIR", "").strip()
+                or str(Path.home() / ".cache" / "smith" / "github-grep")
+            )
         if "gitlab" in providers:
-            roots.append(os.getenv("SMITH_GITLAB_GREP_CACHE_DIR") or str(Path.home() / ".cache" / "smith" / "gitlab-grep"))
+            roots.append(
+                os.getenv("SMITH_GITLAB_GREP_CACHE_DIR", "").strip()
+                or str(Path.home() / ".cache" / "smith" / "gitlab-grep")
+            )
         return roots
+
+    @staticmethod
+    def _validated_cache_clean_path(root: str) -> Path:
+        raw_path = str(root or "").strip()
+        if not raw_path:
+            raise ValueError("Refusing to clean empty cache path")
+
+        path = Path(raw_path).expanduser()
+        resolved_path = path.resolve(strict=False)
+        home_path = Path.home().resolve(strict=False)
+        expected_names = {"github-grep", "gitlab-grep"}
+
+        if (
+            resolved_path == Path(resolved_path.anchor)
+            or resolved_path == home_path
+            or resolved_path.name not in expected_names
+            or resolved_path.parent.name != "smith"
+        ):
+            raise ValueError(f"Refusing to clean unsafe cache path: {resolved_path}")
+        return resolved_path
 
     @staticmethod
     def execute_cache_clean(
@@ -292,7 +318,7 @@ class SmithClient:
         missing: list[str] = []
 
         for root in SmithClient._cache_clean_roots(remote=remote, smith_config=smith_config):
-            path = Path(root)
+            path = SmithClient._validated_cache_clean_path(root)
             if path.exists():
                 shutil.rmtree(path)
                 cleaned.append(str(path))

@@ -849,6 +849,32 @@ def test_gitlab_search_code_global_fallback_keeps_lower_bound_warning_without_gr
     ]
 
 
+def test_gitlab_search_code_keeps_result_when_project_path_lookup_fails(monkeypatch: Any) -> None:
+    provider = _provider(gitlab_org=None)
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        return _FakeJsonResponse(
+            [{"project_id": 123, "path": "src/app.py"}],
+            headers={"X-Total": "1"},
+        )
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+    monkeypatch.setattr(
+        provider,
+        "_project_path_from_id",
+        lambda project_id: (_ for _ in ()).throw(SmithApiError("project lookup failed")),
+    )
+
+    result = provider.search_code(query="grafana", project=None, repos=None, skip=0, take=20)
+
+    assert result == {
+        "matchesCount": 1,
+        "results": ["/src/app.py"],
+        "warnings": ["GitLab search returned results whose project path could not be resolved."],
+        "partial": True,
+    }
+
+
 def test_gitlab_grep_files_with_matches_uses_server_side_search_api(monkeypatch: Any) -> None:
     provider = _provider(make_runtime_config(max_output_chars=50))
     calls: list[dict[str, Any]] = []

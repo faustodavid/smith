@@ -110,8 +110,10 @@ class GitHubCodeMixin:
             page = 1
             target_seen = 0
             target_total: int | None = None
-            while use_local_filter or len(all_items) < desired:
-                per_page = 100 if use_local_filter else min(100, max(1, desired - len(all_items)))
+            target_items: list[dict[str, Any]] = []
+            while use_local_filter or len(target_items) < desired:
+                remaining = max(1, desired - len(target_items))
+                per_page = 100 if use_local_filter else min(100, remaining)
                 qualifiers = [qualified_query]
                 if target_repo:
                     qualifiers.append(f"repo:{org}/{target_repo}")
@@ -142,12 +144,14 @@ class GitHubCodeMixin:
                             all_items.append(item)
                         total_count += 1
                 else:
-                    all_items.extend(page_items)
+                    target_items.extend(page_items)
                 if len(page_items) < per_page:
                     break
                 if target_total is not None and target_seen >= target_total:
                     break
                 page += 1
+            if not glob_matcher:
+                all_items.extend(target_items)
 
         sliced = all_items if use_local_filter else all_items[start : start + window_size]
         results: list[str] = []

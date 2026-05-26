@@ -15,13 +15,22 @@ from smith.cli.handlers import (
 from smith.cli.parser import build_parser
 from smith.errors import SmithApiError, SmithAuthError
 
+_SMITH_CLI_HANDLER_ATTR = "_smith_cli_handler"
+
 
 def _configure_logging(*, verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.WARNING
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     root = logging.getLogger("smith")
     root.setLevel(level)
+    for handler in root.handlers:
+        if getattr(handler, _SMITH_CLI_HANDLER_ATTR, False):
+            handler.setLevel(level)
+            return
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(level)
+    setattr(handler, _SMITH_CLI_HANDLER_ATTR, True)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     root.addHandler(handler)
 
 

@@ -11,6 +11,7 @@ from smith.benchmark.copilot_sdk import (
     build_github_copilot_payload,
     build_smith_copilot_payload,
     copilot_tool_name,
+    resolve_copilot_cli_path,
     summarize_copilot_events,
 )
 
@@ -78,6 +79,19 @@ def test_build_copilot_auth_env_populates_gh_token_from_gh_auth_fallback(monkeyp
     env = build_copilot_auth_env()
 
     assert env["GH_TOKEN"] == "secret-token"
+
+
+def test_resolve_copilot_cli_path_uses_provided_path(monkeypatch):
+    calls = []
+
+    def fake_which(command, path=None):
+        calls.append((command, path))
+        return "/custom/bin/copilot" if path == "/custom/bin:/usr/bin" else None
+
+    monkeypatch.setattr("smith.benchmark.copilot_sdk.shutil.which", fake_which)
+
+    assert resolve_copilot_cli_path(env={"PATH": "/custom/bin:/usr/bin"}) == "/custom/bin/copilot"
+    assert calls == [("copilot", "/custom/bin:/usr/bin")]
 
 
 def test_summarize_copilot_events_aggregates_usage_and_tool_calls():

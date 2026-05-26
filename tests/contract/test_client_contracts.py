@@ -234,10 +234,10 @@ def test_fanout_normalizes_remote_and_preserves_order(monkeypatch: Any) -> None:
 
 
 def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_path: Any) -> None:
-    github_cache = tmp_path / "github-grep"
-    gitlab_cache = tmp_path / "gitlab-grep"
-    github_cache.mkdir()
-    gitlab_cache.mkdir()
+    github_cache = tmp_path / ".cache" / "smith" / "github-grep"
+    gitlab_cache = tmp_path / ".cache" / "smith" / "gitlab-grep"
+    github_cache.mkdir(parents=True)
+    gitlab_cache.mkdir(parents=True)
 
     monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))
     monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(gitlab_cache))
@@ -254,6 +254,42 @@ def test_execute_cache_clean_removes_requested_cache_dirs(monkeypatch: Any, tmp_
     }
     assert not github_cache.exists()
     assert gitlab_cache.exists()
+
+
+def test_execute_cache_clean_rejects_unsafe_cache_dir_override(monkeypatch: Any, tmp_path: Any) -> None:
+    marker = tmp_path / "marker.txt"
+    marker.write_text("keep", encoding="utf-8")
+
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
+
+    runtime = make_runtime_config()
+    with pytest.raises(ValueError, match="Refusing to clean unsafe cache path"):
+        SmithClient.execute_cache_clean(
+            remote="github",
+            smith_config=_make_smith_config(runtime),
+        )
+
+    assert marker.exists()
+    assert tmp_path.exists()
+
+
+def test_execute_cache_clean_allows_scoped_cache_dir_override(monkeypatch: Any, tmp_path: Any) -> None:
+    github_cache = tmp_path / ".cache" / "smith" / "github-grep"
+    github_cache.mkdir(parents=True)
+
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(github_cache))
+
+    runtime = make_runtime_config()
+    result = SmithClient.execute_cache_clean(
+        remote="github",
+        smith_config=_make_smith_config(runtime),
+    )
+
+    assert result == {
+        "cleaned": [str(github_cache.resolve())],
+        "missing": [],
+    }
+    assert not github_cache.exists()
 
 
 @pytest.mark.parametrize(
