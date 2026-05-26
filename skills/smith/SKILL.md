@@ -1,6 +1,6 @@
 ---
 name: smith
-description: Use when the user asks to read, search, or investigate code, configs, pull/merge requests, pipeline logs, work items, or issues on GitHub, GitLab, Azure DevOps, or YouTrack. Make sure to invoke this skill for any read-only source-of-truth lookup in those systems, including ambiguous "where is X configured?" or "why did this build fail?" questions. Do not use for write operations, commenting, approving, or general internet research.
+description: Use when the user asks to read, search, grep, or investigate code/config across GitHub, GitLab, Azure DevOps, and YouTrack. Use especially for remote cross-repo code search, PRs/MRs, pipelines, and issues.
 ---
 
 # Smith
@@ -11,119 +11,117 @@ Read-only, evidence-first investigations across GitHub, GitLab, Azure DevOps, an
 
 ### Use smith when
 
-- The request is read-only and the source of truth is GitHub, GitLab, Azure DevOps, or YouTrack.
-- Search, locate, or grep code or config.
-- Inspect a pull/merge request, review threads, or changed files.
-- Investigate a pipeline error or build failure.
-- Read or search work items or issues.
+- Search, locate, or grep code or config across remotes.
+- Inspect PRs/MRs, review threads, or changed files.
+- Investigate pipeline errors or build failures.
+- Read or search work items, stories, or issues.
 
 ### Do not use smith when
 
-- The request is a write operation: create, update, approve, comment, or post.
+- The request is a write operation (create, update, approve, comment, post).
 - The source of truth is the public internet.
 
 ### Ambiguous request fallback
 
 - Default to `smith code search "<stable noun>"`.
-- YouTrack-only context: `smith <youtrack-remote-name> stories search --query "<text>"`.
-- If scope is unknown, discover first (see `references/usage-recipes.md`).
-- If still unclear after discovery, return findings so far plus the best next narrowing command.
+- YouTrack: `smith <youtrack-remote> stories search --query "<text>"`.
+- Unknown scope: discover first (see `references/usage-recipes.md`).
+- Still unclear: return findings plus the best narrowing command.
 
 ## Command Map
 
-Full vocabulary and flags live in `references/usage-recipes.md`. The minimum you need:
+Full vocabulary and flags in `references/usage-recipes.md`.
 
 | Scope | Command form |
 |---|---|
-| Cross-remote search | `smith code search "<query>"`, `smith prs search "<query>"` |
-| Single remote search | `smith <azdo-remote-name> code search`, `smith <github-remote-name> code search`, `smith <gitlab-remote-name> code search` |
-| Discovery | `smith <azdo-remote-name> orgs`, `smith <github-remote-name> orgs`, `smith <gitlab-remote-name> groups`, `smith <azdo-remote-name> repos <project>`, `smith <github-remote-name> repos`, `smith <gitlab-remote-name> repos` |
-| Focused grep | `smith <azdo-remote-name> code grep <project> <repo> "<regex>"`, `smith <github-remote-name> code grep <repo> "<regex>"`, `smith <gitlab-remote-name> code grep <group/project> "<regex>"` |
-| PRs / MRs | `smith <azdo-remote-name> prs search`, `smith <github-remote-name> prs search`, `smith <gitlab-remote-name> prs search`, `smith <github-remote-name> prs list <repo>`, `smith <gitlab-remote-name> prs list <group/project>` |
-| Pipelines | `smith <github-remote-name> pipelines list <repo> <id>`, `smith <gitlab-remote-name> pipelines list <group/project> <id>`, `smith <github-remote-name> pipelines grep <repo> <id> "<regex>"`, `smith <gitlab-remote-name> pipelines grep <group/project> <id> "<regex>"`, `smith <gitlab-remote-name> pipelines artifacts list <group/project> <pipeline-id> <job-id>`, `smith <gitlab-remote-name> pipelines artifacts grep <group/project> <pipeline-id> <job-id> "<regex>"` |
-| Stories / Issues | `smith <azdo-remote-name> stories search <project> --query`, `smith <gitlab-remote-name> stories search <group/project> --query`, `smith <youtrack-remote-name> stories search --query` |
+| Cross-remote search | `smith code search "<query>" [--glob "<glob>"]`, `smith prs search "<query>"` |
+| Single remote search | `smith <remote> code search [--glob "<glob>"]` |
+| Discovery | `smith <remote> orgs`, `smith <remote> repos [scope]`, `smith <remote> groups` (GitLab) |
+| Focused grep | `smith <remote> code grep <scope> "<regex>"` |
+| PRs / MRs | `smith <remote> prs search`, `smith <remote> prs list <scope>`, `smith <remote> prs get <scope> <id>` |
+| Pipelines | `smith <remote> pipelines list <scope> <id>`, `smith <remote> pipelines grep <scope> <id> "<regex>"` |
+| Pipeline artifacts | `smith <remote> pipelines artifacts list\|grep <group/project> <pipeline-id> <job-id>` (GitLab only) |
+| Stories / Issues | `smith <remote> stories search [scope] --query` |
 
-All grep commands (code, pipeline logs, artifacts) support: `--path`, `--glob`, `--output-mode` (content/files_with_matches/count), `--context-lines`, `--from-line`/`--to-line`, `--reverse`, `--case-sensitive`. Code grep adds: `--branch`, `--no-clone`. Pipeline grep adds: `--log-id`.
+### Key flags
 
-Rules that save retries:
+- `--glob` on code search filters result paths by file type/pattern. Use early when the question implies file types.
+- Code/pipeline grep: `--path`, `--glob`, `--output-mode` (content/files_with_matches/count), `--context-lines`, `--from-line`/`--to-line`, `--reverse`, `--case-sensitive`.
+- Code grep adds: `--branch`.
+- Pipeline grep adds: `--log-id`.
 
-- **GitHub**: repo arg is bare `<repo>`, not `org/repo`. Search output may look like `org/repo:path` but commands still take `<repo>`.
-- **GitLab**: repo arg uses full `group/project` paths, not a short repo name.
-- **Azure DevOps**: two positional args, `<project> <repo>`.
-- **YouTrack**: no repo arg; only issue IDs (e.g. `RAD-1055`) and `--query`.
-- Global `smith code search` and `smith prs search` target every enabled remote and reject `--project` or `--repo`. Use `smith <remote> ...` to narrow.
-- `pipelines grep ... <id>` expects a pipeline/run/build ID. For a specific job or log, call `pipelines list ...` first to find the parent ID, then `pipelines grep ... <pipeline-id> ".*" --log-id <job-or-log-id>`.
-- `pipelines artifacts ... <pipeline-id> <job-id>` is GitLab-only. Use `artifacts list` to enumerate archive paths and `artifacts grep`
-- `pipelines list ... <id>` prints a compact DAG (`@` pipelines, `#` stages, `*` jobs, inline `<needs` and `>>` downstream). GitLab traverses child pipelines via GraphQL (REST fallback emits header-only rows with a warning). Filter with `--status`, `--grep`, `--skip`/`--take`, `--max-depth` (gitlab only, default 0 = unlimited). Full grammar lives in `references/pipelines-format.md`.
+### Repo argument rules
 
-Use `--help` on any command for flags.
+- **GitHub**: bare `<repo>`, not `org/repo`.
+- **GitLab**: full `group/project` path. `code search` and `prs search` exclude personal projects by default; add `--include-personal` when needed.
+- **Azure DevOps**: `<project> <repo>`.
+- **YouTrack**: no repo arg; only issue IDs and `--query`.
+- Global `smith code search` / `smith prs search` target all enabled remotes and reject `--project`/`--repo`.
+
+### Pipeline specifics
+
+- `pipelines grep ... <id>` expects a pipeline/run/build ID. Use `pipelines list` first to find the parent ID, then grep with `--log-id <job-id>`.
+- `pipelines list` prints a compact DAG (`@` pipelines, `#` stages, `*` jobs). Filter with `--status`, `--grep`, `--skip`/`--take`, `--max-depth` (GitLab only). Grammar in `references/pipelines-format.md`.
+- GitLab `prs get` includes `pipeline_id` and `pipeline_status`.
 
 ## Investigation Algorithm
 
-1. **List remotes** with `smith config list` so you know what's configured.
-2. **Go broad** with `smith code search "<stable noun>"` (all remotes) or `smith <remote> code search` when the remote is known. For YouTrack, start with `stories search`. If org, project, or repo scope is unknown, use discovery first.
-3. **Map the subtree** with `smith <remote> code grep <scope> ".*" --output-mode files_with_matches --path <dir>` before running wider regex.
-4. **Extract proof** with focused grep. Narrow in this order: repo → `--path` → `--glob` → regex → `--from-line`/`--to-line`. Use `--no-clone` for one-off scans across many repos; keep the default clone path when you expect multiple greps in the same repo so the checkout can be reused.
-5. **Corroborate only when needed**: `prs` for review context, `pipelines` for build evidence (`pipelines list` once, pick the relevant job by stage/name, then `pipelines grep` only that `--log-id`; for error log analysis prefer `--reverse` so the latest hits survive truncation), `stories` for work-item context. When a story has images, download attachments to `/tmp` (macOS/Linux) or `%TEMP%` (Windows) and read them before drawing conclusions.
-6. **Report** only what the retrieved evidence supports and cite `URL`.
+You have access to tools to deeply investigate repositories code and documentation. Never yield until you've explored **multiple perspectives** and are confident in your answer.
 
-### Pipeline Analysis
-1. Use `smith <remote> pipelines list <scope> <pipeline_id> --status failed` to focus on failed jobs.
-2. Once you know the pipeline log ID, use `smith <remote> pipelines grep <scope> <pipeline_id> <log_id> --reverse` to analyze the logs.
-3. **For GitLab** if pipeline logs indicate that output was redirected to a file then:
-   - Use `smith <remote> pipelines artifacts list <group/project> <pipeline_id> <job_id>` to enumerate archive paths.
-   - Use `smith <remote> pipelines artifacts grep <group/project> <pipeline_id> <job_id> "<regex>"` to search within the artifacts.
+Evidence hierarchy:
+
+- **Primary proof**: non-example implementation code, configuration, migrations, scripts, or executable tests that exercise real behavior.
+- **Supporting proof**: PR/MR discussion, pipeline/build logs, or story context.
+- **Weak context only**: Readme or examples code.
+
+1. **Go broad**: for code: `smith code search "<stable noun>" --glob "<glob>"`; for stories: `smith <youtrack-remote> stories search --query "<query>"`.
+2. **Map the subtree**: `smith <remote> code grep <scope> ".*" --output-mode files_with_matches --path <dir>`.
+3. **Reject weak sources early**: when hits are in examples, docs or readmes, treat them as leads only. Continue searching for primary proof before answering.
+4. **Extract proof from multiple perspectives**: `smith <remote> code grep <scope> "<regex>"` — narrow in order: repo → `--path` → `--glob` → regex → `--from-line`/`--to-line`. Use `--no-clone` for one-off scans across many repos.
+5. **Seek the truth**: Keep repeating 1-4 until you find **actual implementation or executable test usage**. Try different angles and perspectives.
+6. **Corroborate when needed**: `prs` for review context, `pipelines` for build evidence (use `--reverse` for error logs so latest hits survive truncation), `stories` for work-item context. Download story image attachments to `/tmp` and read before concluding.
+7. **Report** only what primary or supporting evidence proves. Cite URLs.
+
+### Pipeline analysis flow
+
+1. `pipelines list <scope> <pipeline_id> --status failed` to focus on failures.
+2. `pipelines grep <scope> <pipeline_id> "<regex>" --log-id <job-id> --reverse` for log analysis.
+3. GitLab: if logs indicate redirected output, use `pipelines artifacts list`/`grep` to search within artifacts.
 
 ## Stop Conditions
 
-Stop narrowing and answer when any of these is true:
+Stop and answer when:
 
-- The required `<scope>:<path>` evidence is in hand and sufficient for the question.
-- Every reasonable narrowing path has been tried and returned empty — respond with `not enough evidence` and one next command.
-- A recovery loop for `401 or 403`, `429`, `Truncation`, `Empty results`, or `Wrong repository` has already retried once without progress — surface the blocker (see Failure Handling Flow).
+- Required evidence is in hand.
+- All narrowing paths tried and empty — respond with `not enough evidence` and one next command.
+- A recovery loop retried once without progress — surface the blocker.
 
-## Failure Handling Flow
+## Failure Handling
 
-Use `references/failure-playbook.md` for the full matrix and `references/auth-troubleshooting.md` for env/credential steps. In short:
+Full matrix in `references/failure-playbook.md`, credentials in `references/auth-troubleshooting.md`.
 
-- **401 or 403** — confirm the remote is in the active config, confirm the token env var is set, run `az login` / `gh auth login` / `glab auth login`, retry once.
-- **429** — lower `--take` and narrow `--path`/`--glob`/regex; for GitHub grep, reduce `GITHUB_GREP_MAX_WORKERS` or unset `GITHUB_GREP_ENABLE_PARALLEL`.
-- **Truncation** — narrow `--path` and `--glob`, page with `--from-line`/`--to-line`, reduce `--context-lines`.
-- **Empty results** — broaden the `code search` query, drop strict filters, rerun focused grep on the candidate repo.
-- **Wrong repository** — rerun `smith code search "<broader>"`; remember GitHub wants bare `<repo>`, GitLab wants full `group/project`.
+- **401/403** — confirm remote in config, token env var set, run provider login, retry once.
+- **429** — lower `--take`, narrow `--path`/`--glob`/regex; for GitHub grep, reduce `GITHUB_GREP_MAX_WORKERS`.
+- **Truncation** — narrow `--path`/`--glob`, page with `--from-line`/`--to-line`, reduce `--context-lines`.
+- **Empty results** — broaden query, drop strict filters, rerun grep on candidate repo.
+- **Wrong repository** — rerun broader `code search`; check repo argument format per rules above.
 
 ## Answer Contract
 
-- Findings first, concise and evidence-based. Every claim cites `<project>/<repository>:<path>`, `<org>/<repository>:<path>`, or `<group>/<repository>:<path>` (or just `repo:path` if the caller explicitly asks for that contract).
-- Single-remote answers stay flat. Multi-remote answers split by remote.
-- Unresolved answers include `not enough evidence` and one next command.
-- Always end with a `Sources` section of absolute URLs.
+- Findings first, evidence-based. Cite `<scope>/<repo>:<path>` (or `repo:path` if caller requests).
+- Single-remote: flat. Multi-remote: split by remote.
+- Unresolved: `not enough evidence` + one next command.
+- End with `Sources` section of absolute URLs.
 
-### Sources URL templates
+### URL templates
 
-Build URLs from the remote's `host` and `org` (see `smith config show <remote>`). Default hosts: `github.com`, `gitlab.com`, `dev.azure.com`. `HEAD` resolves to the current default branch at click time; swap in a branch or commit SHA if you need a permalink. Anchor multi-line ranges to the primary match line. For Azure DevOps legacy hosts (e.g. `<org>.visualstudio.com`), use the remote's `host` in place of `dev.azure.com/<org>`.
+Build absolute URLs from remote's `host` and `org` (`smith config show <remote>`). Defaults: `github.com`, `gitlab.com`, `dev.azure.com`. Use `HEAD` for default branch; swap in branch/SHA for permalinks.
 
-File / blob:
+| Type | GitHub | GitLab | Azure DevOps |
+|---|---|---|---|
+| File | `https://<host>/<org>/<repo>/blob/HEAD/<path>#L<line>` | `https://<host>/<grp>/<proj>/-/blob/HEAD/<path>#L<line>` | `https://dev.azure.com/<org>/<proj>/_git/<repo>?path=/<path>&line=<line>&_a=contents` |
+| PR/MR | `https://<host>/<org>/<repo>/pull/<id>` | `https://<host>/<grp>/<proj>/-/merge_requests/<id>` | `https://dev.azure.com/<org>/<proj>/_git/<repo>/pullrequest/<id>` |
+| Pipeline | `https://<host>/<org>/<repo>/actions/runs/<id>` | `https://<host>/<grp>/<proj>/-/pipelines/<id>` | `https://dev.azure.com/<org>/<proj>/_build/results?buildId=<id>` |
+| Issue | `https://<host>/<org>/<repo>/issues/<id>` | `https://<host>/<grp>/<proj>/-/issues/<id>` | `https://dev.azure.com/<org>/<proj>/_workitems/edit/<id>` |
 
-- GitHub: `https://<host>/<org>/<repo>/blob/HEAD/<path>#L<line>`
-- GitLab: `https://<host>/<group>/<project>/-/blob/HEAD/<path>#L<line>`
-- Azure DevOps: `https://dev.azure.com/<org>/<project>/_git/<repo>?path=/<path>&line=<line>&_a=contents`
-
-Pull / merge request:
-
-- GitHub: `https://<host>/<org>/<repo>/pull/<id>`
-- GitLab: `https://<host>/<group>/<project>/-/merge_requests/<id>`
-- Azure DevOps: `https://dev.azure.com/<org>/<project>/_git/<repo>/pullrequest/<id>`
-
-Pipeline / run:
-
-- GitHub: `https://<host>/<org>/<repo>/actions/runs/<id>`
-- GitLab: `https://<host>/<group>/<project>/-/pipelines/<id>`
-- Azure DevOps: `https://dev.azure.com/<org>/<project>/_build/results?buildId=<id>`
-
-Story / issue / work item:
-
-- GitHub: `https://<host>/<org>/<repo>/issues/<id>`
-- GitLab: `https://<host>/<group>/<project>/-/issues/<id>`
-- Azure DevOps: `https://dev.azure.com/<org>/<project>/_workitems/edit/<id>`
-- YouTrack: `https://<host>/issue/<id>`
+YouTrack: `https://<host>/issue/<id>`. Azure DevOps legacy hosts: use remote's `host` in place of `dev.azure.com/<org>`.
