@@ -16,7 +16,7 @@ from urllib.parse import quote
 import requests
 
 from smith.config import parse_bool_env, parse_int_env
-from smith.formatting import glob_to_regex, normalize_branch_name, truncate_output
+from smith.formatting import code_search_glob_hints, compile_glob_matcher, glob_to_regex, normalize_branch_name, truncate_output
 from smith.providers import local_checkout as _local_checkout
 from smith.providers.helpers import (
     build_grep_result,
@@ -82,22 +82,39 @@ class GitHubCodeMixin:
         repos: list[str] | None = None,
         skip: int = 0,
         take: int = 20,
+        glob: str | None = None,
     ) -> dict[str, Any]:
         org = self._require_github_org()
         effective_repos = [item for item in (repos or []) if item]
 
         search_targets: list[str | None] = list(effective_repos) if effective_repos else [None]
-        desired = max(1, skip + take)
+        start = max(0, skip)
+        window_size = max(1, take)
+        glob_hints = code_search_glob_hints(glob)
+        use_local_filter = bool(glob and glob_hints.needs_local_filter)
+        glob_matcher = compile_glob_matcher(glob) if use_local_filter and glob else None
+        glob_qualifiers: list[str] = []
+        if glob_hints.extension and not glob_hints.filename:
+            glob_qualifiers.append(f"extension:{glob_hints.extension}")
+        if glob_hints.filename:
+            glob_qualifiers.append(f"filename:{glob_hints.filename}")
+        if glob_hints.path_prefix:
+            glob_qualifiers.append(f"path:{glob_hints.path_prefix}")
+        qualified_query = " ".join(part for part in [query, *glob_qualifiers] if part.strip())
+
+        desired = max(1, start + window_size) if use_local_filter else max(1, skip + take)
         all_items: list[dict[str, Any]] = []
         total_count = 0
 
         for target_repo in search_targets:
             page = 1
+            target_seen = 0
+            target_total: int | None = None
             target_items: list[dict[str, Any]] = []
-            while len(target_items) < desired:
+            while use_local_filter or len(target_items) < desired:
                 remaining = max(1, desired - len(target_items))
-                per_page = min(100, remaining)
-                qualifiers = [query]
+                per_page = 100 if use_local_filter else min(100, remaining)
+                qualifiers = [qualified_query]
                 if target_repo:
                     qualifiers.append(f"repo:{org}/{target_repo}")
                 else:
@@ -109,19 +126,34 @@ class GitHubCodeMixin:
                     params={"q": q, "per_page": per_page, "page": page},
                 )
                 if page == 1:
-                    total_count += int(data.get("total_count", 0))
+                    target_total = int(data.get("total_count", 0))
+                    if not use_local_filter:
+                        total_count += target_total
 
                 items = data.get("items", [])
                 page_items = [entry for entry in items if isinstance(entry, dict)]
                 if not page_items:
                     break
-                target_items.extend(page_items)
+                target_seen += len(page_items)
+                if glob_matcher:
+                    for item in page_items:
+                        if not glob_matcher(str(item.get("path") or "")):
+                            continue
+                        global_index = total_count
+                        if start <= global_index < start + window_size:
+                            all_items.append(item)
+                        total_count += 1
+                else:
+                    target_items.extend(page_items)
                 if len(page_items) < per_page:
                     break
+                if target_total is not None and target_seen >= target_total:
+                    break
                 page += 1
-            all_items.extend(target_items)
+            if not glob_matcher:
+                all_items.extend(target_items)
 
-        sliced = all_items[max(0, skip) : max(0, skip) + max(1, take)]
+        sliced = all_items if use_local_filter else all_items[start : start + window_size]
         results: list[str] = []
         for item in sliced:
             repository = item.get("repository") or {}

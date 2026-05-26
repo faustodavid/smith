@@ -712,6 +712,7 @@ def test_handle_config_toggle_persists_updated_remote_state(
                 "repos": None,
                 "skip": 3,
                 "take": 7,
+                "glob": "*.py",
             },
         ),
         (

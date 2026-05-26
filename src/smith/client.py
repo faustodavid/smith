@@ -388,6 +388,7 @@ class SmithClient:
         repos: list[str] | None,
         skip: int,
         take: int,
+        glob: str | None = None,
     ) -> dict[str, Any]:
         return self._fanout(
             remote_or_provider=remote_or_provider,
@@ -398,6 +399,7 @@ class SmithClient:
                     repos=repos,
                     skip=skip,
                     take=take,
+                    glob=glob,
                 ),
                 "github": lambda r: self._github_provider(r).search_code(
                     query=query,
@@ -405,6 +407,7 @@ class SmithClient:
                     repos=repos,
                     skip=skip,
                     take=take,
+                    glob=glob,
                 ),
                 "gitlab": lambda r: self._gitlab_provider(r).search_code(
                     query=query,
@@ -412,6 +415,7 @@ class SmithClient:
                     repos=repos,
                     skip=skip,
                     take=take,
+                    glob=glob,
                 ),
             },
         )

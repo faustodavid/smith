@@ -144,6 +144,63 @@ def test_gitlab_maps_group_repository_views_and_search_code(monkeypatch: Any) ->
     ]
 
 
+def test_gitlab_search_code_filters_glob_before_skip_take(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        return _FakeJsonResponse(
+            [
+                {"path": "src/app.py"},
+                {"path": "tests/util.py"},
+            ],
+            headers={"X-Total": "2"},
+        )
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+
+    result = provider.search_code(query="grafana", project=None, repos=[_FULL_REPO], skip=1, take=1, glob="*.py")
+
+    assert result == {"matchesCount": 2, "results": [f"{_FULL_REPO}:/tests/util.py"]}
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/search",
+            "params": {"scope": "blobs", "search": "grafana extension:py", "per_page": 100, "page": 1},
+        },
+    ]
+
+
+def test_gitlab_search_code_uses_api_glob_hints_then_residual_filter(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_response(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"method": method, "path": path, "params": params})
+        return _FakeJsonResponse(
+            [
+                {"path": "src/app.py"},
+                {"path": "src/nested/app.py"},
+                {"path": "docs/app.py"},
+            ],
+            headers={"X-Total": "3"},
+        )
+
+    monkeypatch.setattr(provider, "_request_response", _fake_request_response)
+
+    result = provider.search_code(query="grafana", project=None, repos=[_FULL_REPO], skip=0, take=10, glob="src/*.py")
+
+    assert result == {"matchesCount": 1, "results": [f"{_FULL_REPO}:/src/app.py"]}
+    assert calls == [
+        {
+            "method": "GET",
+            "path": "/projects/gitlab-org%2Frepo-a/search",
+            "params": {"scope": "blobs", "search": "grafana extension:py path:src", "per_page": 100, "page": 1},
+        },
+    ]
+
+
 def test_gitlab_discover_groups_applies_grep_skip_take_and_truncation(monkeypatch: Any) -> None:
     provider = _provider()
     calls: list[dict[str, Any]] = []

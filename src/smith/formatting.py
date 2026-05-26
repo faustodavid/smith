@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 import re
 from collections import OrderedDict
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 from toon_format import encode as toon_encode
 
@@ -80,6 +81,116 @@ def glob_to_regex(glob_pattern: str) -> str:
             result.append(c)
         i += 1
     return "".join(result) + "$"
+
+
+@dataclass(frozen=True)
+class CodeSearchGlobHints:
+    extension: str | None = None
+    filename: str | None = None
+    path_prefix: str | None = None
+    needs_local_filter: bool = False
+
+
+_GLOB_META_CHARS = frozenset("*?{}[]")
+_SAFE_EXTENSION = re.compile(r"^[A-Za-z0-9_+-]+$")
+_SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._+-]+$")
+_SAFE_PATH_PREFIX = re.compile(r"^[A-Za-z0-9._+/-]+$")
+
+
+def _has_glob_meta(value: str) -> bool:
+    return any(char in value for char in _GLOB_META_CHARS)
+
+
+def _safe_extension(value: str) -> str | None:
+    return value if _SAFE_EXTENSION.match(value) else None
+
+
+def _safe_filename(value: str) -> str | None:
+    return value if _SAFE_FILENAME.match(value) else None
+
+
+def _safe_path_prefix(value: str) -> str | None:
+    normalized = value.strip("/")
+    return normalized if normalized and _SAFE_PATH_PREFIX.match(normalized) else None
+
+
+def _static_path_prefix(normalized_glob: str) -> str | None:
+    if "/" not in normalized_glob:
+        return None
+
+    stripped = normalized_glob.strip("/")
+    if not stripped:
+        return None
+
+    segments = stripped.split("/")
+    prefix: list[str] = []
+    for segment in segments:
+        if not segment or _has_glob_meta(segment):
+            break
+        prefix.append(segment)
+
+    if prefix and len(prefix) == len(segments) and not normalized_glob.endswith("/"):
+        prefix = prefix[:-1]
+
+    if not prefix:
+        return None
+    return _safe_path_prefix("/".join(prefix))
+
+
+def code_search_glob_hints(glob_pattern: str | None) -> CodeSearchGlobHints:
+    normalized_glob = str(glob_pattern or "").replace("\\", "/").strip().lstrip("/")
+    if not normalized_glob:
+        return CodeSearchGlobHints()
+
+    basename = normalized_glob.rsplit("/", 1)[-1]
+    extension: str | None = None
+    if "." in basename:
+        candidate_extension = basename.rsplit(".", 1)[-1]
+        if candidate_extension and not _has_glob_meta(candidate_extension):
+            extension = _safe_extension(candidate_extension)
+
+    filename = _safe_filename(basename) if basename and not _has_glob_meta(basename) else None
+    path_prefix = _static_path_prefix(normalized_glob)
+    fully_represented = bool(
+        (extension and normalized_glob in {f"*.{extension}", f"**/*.{extension}"})
+        or (filename and normalized_glob in {filename, f"**/{filename}"})
+    )
+
+    return CodeSearchGlobHints(
+        extension=extension,
+        filename=filename,
+        path_prefix=path_prefix,
+        needs_local_filter=not fully_represented,
+    )
+
+
+def compile_glob_matcher(glob_pattern: str) -> Callable[[str], bool]:
+    normalized_glob = str(glob_pattern or "").replace("\\", "/").strip().lstrip("/")
+    if not normalized_glob:
+        return lambda path: bool(str(path or "").replace("\\", "/").strip().lstrip("/"))
+
+    pattern = re.compile(glob_to_regex(normalized_glob))
+
+    if "/" in normalized_glob:
+
+        def _matches_path(path: str) -> bool:
+            normalized_path = str(path or "").replace("\\", "/").strip().lstrip("/")
+            return bool(normalized_path and pattern.match(normalized_path))
+
+        return _matches_path
+
+    def _matches_basename(path: str) -> bool:
+        normalized_path = str(path or "").replace("\\", "/").strip().lstrip("/")
+        if not normalized_path:
+            return False
+        basename = normalized_path.rsplit("/", 1)[-1]
+        return pattern.match(basename) is not None
+
+    return _matches_basename
+
+
+def path_matches_glob(path: str, glob_pattern: str) -> bool:
+    return compile_glob_matcher(glob_pattern)(path)
 
 
 def _group_contiguous_lines(sorted_line_nums: list[int]) -> list[list[int]]:

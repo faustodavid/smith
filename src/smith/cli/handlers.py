@@ -474,6 +474,7 @@ def handle_code_search(client: SmithClient, args: argparse.Namespace) -> int:
         repos=args.repos,
         skip=args.skip,
         take=args.take,
+        glob=getattr(args, "glob", None),
     )
     return _emit_success(
         args=args,

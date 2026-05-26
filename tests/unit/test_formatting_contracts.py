@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import re
 
-from smith.formatting import format_grep_matches, glob_to_regex, normalize_branch_name, render_text, truncate_output
+from smith.formatting import (
+    code_search_glob_hints,
+    compile_glob_matcher,
+    format_grep_matches,
+    glob_to_regex,
+    normalize_branch_name,
+    path_matches_glob,
+    render_text,
+    truncate_output,
+)
 
 
 def test_normalize_branch_name_handles_head_pull_and_passthrough_values() -> None:
@@ -20,6 +29,45 @@ def test_glob_to_regex_supports_recursive_globs_and_groups() -> None:
     assert pattern.search("src/smith/test.py") is not None
     assert pattern.search("src/smith/deep/main.py") is not None
     assert pattern.search("src/smith/deep/main.ts") is None
+
+
+def test_path_matches_glob_matches_basename_or_rooted_path() -> None:
+    assert path_matches_glob("/src/app.py", "*.py")
+    assert path_matches_glob("/src/app.py", "src/*.py")
+    assert path_matches_glob("/src/app.py", "/src/*.py")
+    assert path_matches_glob("/src/smith/app.py", "src/**/*.py")
+    assert not path_matches_glob("/docs/src/app.py", "src/*.py")
+    assert not path_matches_glob("/src/app.ts", "*.py")
+
+
+def test_code_search_glob_hints_extracts_safe_api_qualifiers() -> None:
+    extension_only = code_search_glob_hints("*.py")
+    assert extension_only.extension == "py"
+    assert extension_only.filename is None
+    assert extension_only.path_prefix is None
+    assert not extension_only.needs_local_filter
+
+    literal_filename = code_search_glob_hints("Dockerfile")
+    assert literal_filename.filename == "Dockerfile"
+    assert not literal_filename.needs_local_filter
+
+    rooted_glob = code_search_glob_hints("src/**/*.ts")
+    assert rooted_glob.extension == "ts"
+    assert rooted_glob.path_prefix == "src"
+    assert rooted_glob.needs_local_filter
+
+    partial_filename = code_search_glob_hints("**/values*.yaml")
+    assert partial_filename.extension == "yaml"
+    assert partial_filename.filename is None
+    assert partial_filename.needs_local_filter
+
+
+def test_compile_glob_matcher_reuses_glob_semantics() -> None:
+    matcher = compile_glob_matcher("src/*.py")
+
+    assert matcher("/src/app.py")
+    assert not matcher("/src/nested/app.py")
+    assert not matcher("/docs/app.py")
 
 
 def test_format_grep_matches_includes_context_and_gap_markers() -> None:

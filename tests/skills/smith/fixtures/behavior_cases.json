@@ -32,19 +32,19 @@
   },
   {
     "name": "gitlab_repo_shape_rule",
-    "required_phrase": "full `group/project` paths",
+    "required_phrase": "full `group/project` path",
     "requires_evidence_paths": false
   },
   {
     "name": "gitlab_repo_shape_negative_example",
-    "required_phrase": "not a short repo name",
+    "required_phrase": "full `group/project` path",
     "requires_evidence_paths": false
   },
   {
     "name": "read_only_followups",
     "expected_sequence": [
       "smith <github-remote-name> prs list <repo>",
-      "smith <github-remote-name> pipelines grep <repo> <id> \"<regex>\"",
+      "smith <github-remote-name> pipelines grep <repo> <id> \"ERROR|Exception\"",
       "smith <azdo-remote-name> stories search <project> --query"
     ],
     "requires_evidence_paths": true
@@ -53,7 +53,7 @@
     "name": "gitlab_followups",
     "expected_sequence": [
       "smith <gitlab-remote-name> prs list <group/project>",
-      "smith <gitlab-remote-name> pipelines grep <group/project> <id> \"<regex>\"",
+      "smith <gitlab-remote-name> pipelines grep <group/project> <id> \"ERROR|Exception\"",
       "smith <gitlab-remote-name> stories search <group/project> --query"
     ],
     "requires_evidence_paths": true
