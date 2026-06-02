@@ -6,8 +6,7 @@ class Smith < Formula
 
   desc "Read-only source-of-truth investigation CLI for AI agents"
   homepage "https://github.com/faustodavid/smith"
-  url "https://github.com/faustodavid/smith.git", branch: "main"
-  version "0.1.0"
+  url "https://github.com/faustodavid/smith.git", tag: "v0.1.0"
   license "MIT"
   head "https://github.com/faustodavid/smith.git", branch: "main"
 
@@ -16,6 +15,31 @@ class Smith < Formula
   depends_on "libyaml"
   depends_on "python@3.14"
   depends_on "ripgrep"
+
+  resource "packaging" do
+    url "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl"
+    sha256 "29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484"
+  end
+
+  resource "wheel" do
+    url "https://files.pythonhosted.org/packages/87/22/b76d483683216dde3d67cba61fb2444be8d5be289bf628c13fc0fd90e5f9/wheel-0.46.3-py3-none-any.whl"
+    sha256 "4b399d56c9d9338230118d705d9737a2a468ccca63d5e813e2a4fc7815d8bc4d"
+  end
+
+  resource "semantic-version" do
+    url "https://files.pythonhosted.org/packages/6a/23/8146aad7d88f4fcb3a6218f41a60f6c2d4e3a72de72da1825dc7c8f7877c/semantic_version-2.10.0-py2.py3-none-any.whl"
+    sha256 "de78a3b8e0feda74cabc54aab2da702113e33ac9d9eb9d2389bcf1f58b7d9177"
+  end
+
+  resource "setuptools-rust" do
+    url "https://files.pythonhosted.org/packages/f9/7b/d05b1778f2d4e354d103e3421c6267d923032fefcc5ca5b7df0cb21cefd0/setuptools_rust-1.12.0-py3-none-any.whl"
+    sha256 "7e7db90547f224a835b45f5ad90c983340828a345554a9a660bdb2de8605dcdd"
+  end
+
+  resource "maturin" do
+    url "https://files.pythonhosted.org/packages/9c/1c/612d23d33ec21b9ae7ece7b3f0dd5f9dfd57b4009e9d2938165869ebd6ae/maturin-1.13.3.tar.gz"
+    sha256 "771e1e9e71a278e56db01552e0d1acfd1464259f9575b6e72842f893cd299079"
+  end
 
   resource "azure-core" do
     url "https://files.pythonhosted.org/packages/a6/f3/b416179e408990df5db0d516283022dde0f5d0111d98c1a848e41853e81c/azure_core-1.41.0.tar.gz"
@@ -103,7 +127,9 @@ class Smith < Formula
   end
 
   def install
-    virtualenv_install_with_resources
+    venv = virtualenv_create(libexec, "python3.14")
+    venv.pip_install resources, build_isolation: false
+    venv.pip_install_and_link buildpath, build_isolation: false
     pkgshare.install "skills"
   end
 

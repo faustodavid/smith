@@ -163,12 +163,14 @@ To mirror the skill to a different location, rerun post-install with `SMITH_SKIL
 SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/smith/smith
 ```
 
-### Install from a local clone
+### Test the formula from a local clone
 
 ```bash
 brew tap faustodavid/smith "$(pwd)"
 brew install faustodavid/smith/smith
 ```
+
+This reads the formula from your local checkout but still installs Smith from the tagged upstream release referenced by the formula.
 
 ### Install with the standalone script
 
