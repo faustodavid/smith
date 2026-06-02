@@ -97,6 +97,20 @@ def _remove_existing_target(target: Path) -> None:
         shutil.rmtree(target)
 
 
+def _absolute_path_without_resolving(path: Path) -> Path:
+    return Path(os.path.abspath(path.expanduser()))
+
+
+def _symlink_destination(target: Path) -> Path | None:
+    try:
+        destination = Path(os.readlink(target))
+    except OSError:
+        return None
+    if destination.is_absolute():
+        return _absolute_path_without_resolving(destination)
+    return _absolute_path_without_resolving(target.parent / destination)
+
+
 def sync_skill(
     *,
     source_dir: Path | None = None,
@@ -116,13 +130,20 @@ def sync_skill(
             message="Smith skill source not found.",
         )
 
-    source = source.resolve()
+    source = _absolute_path_without_resolving(source)
     target_parent = target.parent
 
     if target.exists() or target.is_symlink():
         try:
-            if target.resolve() == source:
-                mode = "symlink" if target.is_symlink() else "directory"
+            is_current = False
+            if target.is_symlink():
+                is_current = _symlink_destination(target) == source
+                mode = "symlink"
+            else:
+                is_current = target.resolve() == source.resolve()
+                mode = "directory"
+
+            if is_current:
                 return SkillSyncResult(
                     ok=True,
                     status="current",

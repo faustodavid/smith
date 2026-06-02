@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from smith import skill
@@ -10,6 +11,19 @@ def _make_skill_source(tmp_path: Path) -> Path:
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("---\nname: smith\n---\n", encoding="utf-8")
     return source
+
+
+def _make_homebrew_opt_skill(tmp_path: Path) -> tuple[Path, Path]:
+    cellar_prefix = tmp_path / "Cellar" / "smith" / "1.0"
+    cellar_source = cellar_prefix / "share" / "smith" / "skills" / "smith"
+    cellar_source.mkdir(parents=True)
+    (cellar_source / "SKILL.md").write_text("---\nname: smith\n---\n", encoding="utf-8")
+
+    opt_dir = tmp_path / "opt"
+    opt_dir.mkdir()
+    (opt_dir / "smith").symlink_to(cellar_prefix, target_is_directory=True)
+    opt_source = opt_dir / "smith" / "share" / "smith" / "skills" / "smith"
+    return opt_source, cellar_source
 
 
 def test_sync_skill_links_target_to_source(tmp_path: Path) -> None:
@@ -51,6 +65,36 @@ def test_sync_skill_reports_current_when_target_already_points_to_source(tmp_pat
     assert result.ok is True
     assert result.status == "current"
     assert result.mode == "symlink"
+
+
+def test_sync_skill_preserves_homebrew_opt_symlink_target(tmp_path: Path) -> None:
+    opt_source, cellar_source = _make_homebrew_opt_skill(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+
+    result = skill.sync_skill(source_dir=opt_source, target_dir=target)
+
+    assert result.ok is True
+    assert result.status == "linked"
+    assert result.source == opt_source
+    assert target.is_symlink()
+    assert Path(os.readlink(target)) == opt_source
+    assert target.resolve() == cellar_source.resolve()
+
+
+def test_sync_skill_replaces_cellar_link_with_opt_link(tmp_path: Path) -> None:
+    opt_source, cellar_source = _make_homebrew_opt_skill(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+    target.parent.mkdir(parents=True)
+    target.symlink_to(cellar_source, target_is_directory=True)
+
+    result = skill.sync_skill(source_dir=opt_source, target_dir=target)
+
+    assert result.ok is True
+    assert result.status == "linked"
+    assert result.source == opt_source
+    assert target.is_symlink()
+    assert Path(os.readlink(target)) == opt_source
+    assert target.resolve() == cellar_source.resolve()
 
 
 def test_sync_skill_reports_missing_source(tmp_path: Path) -> None:
