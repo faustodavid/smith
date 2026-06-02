@@ -24,6 +24,7 @@ class TestValidateRemoteName:
         assert _validate_remote_name("all") is not None
         assert _validate_remote_name("cache") is not None
         assert _validate_remote_name("config") is not None
+        assert _validate_remote_name("skill") is not None
 
     def test_valid_name_accepted(self) -> None:
         assert _validate_remote_name("my-github") is None

@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from smith import skill
+
+
+def _make_skill_source(tmp_path: Path) -> Path:
+    source = tmp_path / "source" / "skills" / "smith"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: smith\n---\n", encoding="utf-8")
+    return source
+
+
+def test_sync_skill_links_target_to_source(tmp_path: Path) -> None:
+    source = _make_skill_source(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+
+    result = skill.sync_skill(source_dir=source, target_dir=target)
+
+    assert result.ok is True
+    assert result.status == "linked"
+    assert result.mode == "symlink"
+    assert target.is_symlink()
+    assert target.resolve() == source.resolve()
+
+
+def test_sync_skill_replaces_stale_directory_with_symlink(tmp_path: Path) -> None:
+    source = _make_skill_source(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+    target.mkdir(parents=True)
+    (target / "old.md").write_text("old", encoding="utf-8")
+
+    result = skill.sync_skill(source_dir=source, target_dir=target)
+
+    assert result.ok is True
+    assert result.status == "linked"
+    assert target.is_symlink()
+    assert target.resolve() == source.resolve()
+    assert not (target / "old.md").exists()
+
+
+def test_sync_skill_reports_current_when_target_already_points_to_source(tmp_path: Path) -> None:
+    source = _make_skill_source(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+    target.parent.mkdir(parents=True)
+    target.symlink_to(source, target_is_directory=True)
+
+    result = skill.sync_skill(source_dir=source, target_dir=target)
+
+    assert result.ok is True
+    assert result.status == "current"
+    assert result.mode == "symlink"
+
+
+def test_sync_skill_reports_missing_source(tmp_path: Path) -> None:
+    result = skill.sync_skill(source_dir=tmp_path / "missing", target_dir=tmp_path / "target")
+
+    assert result.ok is False
+    assert result.status == "missing_source"
+
+
+def test_resolve_skill_source_prefers_homebrew_opt_path(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "opt" / "smith" / "share" / "smith" / "skills" / "smith"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: smith\n---\n", encoding="utf-8")
+    monkeypatch.setenv("SMITH_HOMEBREW_PREFIX", str(tmp_path))
+    monkeypatch.delenv("SMITH_SKILL_SOURCE_DIR", raising=False)
+
+    assert skill.resolve_skill_source_dir() == source

@@ -9,6 +9,7 @@ from typing import Any
 from smith.client import SmithClient
 from smith.config import RemoteConfig, SmithConfig, _default_config_path, load_config, save_config
 from smith.formatting import dumps_json, make_envelope, render_text
+from smith.skill import SkillSyncResult, default_skill_target_dir, resolve_skill_source_dir, sync_skill
 
 EXIT_OK = 0
 EXIT_INVALID_ARGS = 2
@@ -254,6 +255,14 @@ def handle_config_show(client: SmithClient | None, args: argparse.Namespace) -> 
 def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> int:
     del client
     path = _default_config_path()
+    skill_result = sync_skill()
+    if args.output_format != "json":
+        stream = sys.stdout if skill_result.ok else sys.stderr
+        print(skill_result.message, file=stream)
+        if skill_result.ok and skill_result.mode == "symlink":
+            print("The skill will stay current when Smith is upgraded.", file=stream)
+        print(file=stream)
+
     if path.exists():
         return _emit_error(
             args=args,
@@ -269,7 +278,7 @@ def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> 
         return _emit_success(
             args=args,
             command=args.command_id,
-            data={"path": str(path), "remotes_count": 0},
+            data={"path": str(path), "remotes_count": 0, "skill": skill_result.to_dict()},
             partial=False,
         )
 
@@ -294,20 +303,24 @@ def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> 
             raise SystemExit(1)
         if not raw or raw == "1":
             config = run_interactive_init(config_path=path)
+            if args.output_format != "json":
+                return EXIT_OK
             return _emit_success(
                 args=args,
                 command=args.command_id,
-                data={"path": str(path), "remotes_count": len(config.remotes)},
+                data={"path": str(path), "remotes_count": len(config.remotes), "skill": skill_result.to_dict()},
                 partial=False,
             )
         if raw == "2":
             config = SmithConfig(remotes={}, defaults={})
             save_config(config, config_path=path)
             _print_manual_setup_instructions(path)
+            if args.output_format != "json":
+                return EXIT_OK
             return _emit_success(
                 args=args,
                 command=args.command_id,
-                data={"path": str(path), "remotes_count": 0},
+                data={"path": str(path), "remotes_count": 0, "skill": skill_result.to_dict()},
                 partial=False,
             )
         print("  Enter 1 or 2.")
@@ -336,6 +349,60 @@ def handle_config_path(client: SmithClient | None, args: argparse.Namespace) -> 
         args=args,
         command=args.command_id,
         data={"path": str(path), "exists": path.exists()},
+        partial=False,
+    )
+
+
+def _skill_status_data(result: SkillSyncResult | None = None) -> dict[str, object]:
+    target = default_skill_target_dir()
+    source = resolve_skill_source_dir()
+    target_exists = target.exists() or target.is_symlink()
+    points_to_source = False
+    mode: str | None = None
+    if target_exists:
+        mode = "symlink" if target.is_symlink() else "directory"
+        if source is not None:
+            try:
+                points_to_source = target.resolve() == source.resolve()
+            except OSError:
+                points_to_source = False
+    data: dict[str, object] = {
+        "target": str(target),
+        "source": str(source) if source is not None else None,
+        "exists": target_exists,
+        "mode": mode,
+        "current": bool(target_exists and points_to_source),
+    }
+    if result is not None:
+        data["sync"] = result.to_dict()
+    return data
+
+
+def handle_skill_sync(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    result = sync_skill()
+    if not result.ok:
+        return _emit_error(
+            args=args,
+            command=args.command_id,
+            code=result.status,
+            message=result.message,
+            exit_code=EXIT_INVALID_ARGS,
+        )
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=_skill_status_data(result),
+        partial=False,
+    )
+
+
+def handle_skill_status(client: SmithClient | None, args: argparse.Namespace) -> int:
+    del client
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data=_skill_status_data(),
         partial=False,
     )
 

@@ -707,6 +707,32 @@ def _render_config_show(data: Any) -> str:
     return "\n".join(lines)
 
 
+def _render_config_init(data: Any) -> str:
+    if not isinstance(data, dict):
+        return ""
+    lines = [f"Config saved to {data.get('path')}"]
+    skill = data.get("skill")
+    if isinstance(skill, dict) and skill.get("message"):
+        lines.append(str(skill["message"]))
+    return "\n".join(lines)
+
+
+def _render_skill_status(data: Any) -> str:
+    if not isinstance(data, dict):
+        return ""
+    lines = [
+        f"target: {data.get('target')}",
+        f"source: {data.get('source')}",
+        f"exists: {str(bool(data.get('exists'))).lower()}",
+        f"mode: {data.get('mode') or '-'}",
+        f"current: {str(bool(data.get('current'))).lower()}",
+    ]
+    sync = data.get("sync")
+    if isinstance(sync, dict) and sync.get("message"):
+        lines.append(str(sync["message"]))
+    return "\n".join(lines)
+
+
 def _render_pipelines_list(data: Any) -> str:
     pipelines = data.get("pipelines", []) if isinstance(data, dict) else []
     lines: list[str] = []
@@ -885,6 +911,9 @@ _RENDER_DISPATCH: dict[str, Any] = {
     "stories.mine": _render_story_table,
     "config.list": _render_config_list,
     "config.show": _render_config_show,
+    "config.init": _render_config_init,
+    "skill.sync": _render_skill_status,
+    "skill.status": _render_skill_status,
 }
 
 

@@ -180,18 +180,18 @@ class Smith < Formula
 
       rm -rf "$target_dir"
       mkdir -p "$(dirname "$target_dir")"
-      cp -R "$source_dir" "$target_dir"
-      echo "Smith skill installed to: $target_dir"
+      ln -s "$source_dir" "$target_dir"
+      echo "Smith skill linked to: $target_dir"
     BASH
     chmod 0555, bin/"smith-install-skill"
   end
 
   def caveats
     <<~EOS
-      To install or refresh the Smith skill:
+      To link or refresh the Smith skill:
         smith-install-skill
 
-      By default it writes to ~/.agents/skills/smith.
+      By default it links to ~/.agents/skills/smith.
       To choose another destination:
         SMITH_SKILL_DIR=/path/to/skills/smith smith-install-skill
     EOS
@@ -203,8 +203,9 @@ class Smith < Formula
 
     skill_dir = testpath/"skills/smith"
     with_env("SMITH_SKILL_DIR" => skill_dir.to_s) do
-      system bin/"smith-install-skill"
+      assert_match "Smith skill linked to:", shell_output(bin/"smith-install-skill")
     end
+    assert_predicate skill_dir, :symlink?
     assert_path_exists skill_dir/"SKILL.md"
   end
 end

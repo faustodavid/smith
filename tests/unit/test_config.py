@@ -573,7 +573,7 @@ def test_load_config_requires_existing_file(tmp_path: Path) -> None:
         load_config(config_path=missing_path)
 
 
-@pytest.mark.parametrize("remote_name", ["code", "prs"])
+@pytest.mark.parametrize("remote_name", ["code", "prs", "skill"])
 def test_load_config_rejects_reserved_top_level_remote_names(tmp_path: Path, remote_name: str) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
