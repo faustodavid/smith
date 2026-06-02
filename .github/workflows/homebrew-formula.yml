@@ -1,0 +1,137 @@
+name: Homebrew Tap Formula
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to pin"
+        required: true
+        type: string
+      revision:
+        description: "Optional release commit SHA to verify against the tag"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap-formula:
+    runs-on: macos-latest
+    steps:
+      - name: Resolve release pin
+        id: release
+        env:
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+          DISPATCH_REVISION: ${{ github.event.inputs.revision }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${DISPATCH_TAG}"
+            revision="${DISPATCH_REVISION}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            revision=""
+          fi
+          if [[ ! "${tag}" =~ ^v[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::Release tag must start with v and contain only letters, numbers, dots, underscores, and hyphens."
+            exit 1
+          fi
+          if [[ -n "${revision}" && ! "${revision}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Revision override must be a 40-character lowercase git SHA."
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "revision=${revision}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Fetch release tag
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+
+      - name: Resolve release metadata
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          REVISION_OVERRIDE: ${{ steps.release.outputs.revision }}
+        run: |
+          set -euo pipefail
+          resolved_revision="$(git rev-list -n 1 "${RELEASE_TAG}")"
+          if [[ -n "${REVISION_OVERRIDE}" && "${REVISION_OVERRIDE}" != "${resolved_revision}" ]]; then
+            echo "::error::Revision override ${REVISION_OVERRIDE} does not match ${RELEASE_TAG} at ${resolved_revision}."
+            exit 1
+          fi
+          git show "${RELEASE_TAG}:pyproject.toml" > release-pyproject.toml
+          echo "revision=${resolved_revision}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Clone Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is required to update faustodavid/homebrew-tap."
+            exit 1
+          fi
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/faustodavid/homebrew-tap.git" homebrew-tap
+
+      - name: Update tap formula pin
+        id: formula
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_REVISION: ${{ steps.metadata.outputs.revision }}
+        run: |
+          set -euo pipefail
+          python scripts/update_homebrew_formula.py \
+            --pyproject release-pyproject.toml \
+            --formula homebrew-tap/Formula/smith.rb \
+            --tag "${RELEASE_TAG}" \
+            --revision "${RELEASE_REVISION}"
+          if git -C homebrew-tap diff --quiet -- Formula/smith.rb; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate formula syntax
+        run: ruby -c homebrew-tap/Formula/smith.rb
+
+      - name: Validate formula with Homebrew
+        env:
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          set -euo pipefail
+          brew tap-new smith/ci
+          cp homebrew-tap/Formula/smith.rb "$(brew --repo smith/ci)/Formula/smith.rb"
+          brew audit --strict --formula smith/ci/smith
+          brew install --build-from-source smith/ci/smith
+          brew test smith/ci/smith
+
+      - name: Commit tap formula update
+        if: ${{ steps.formula.outputs.changed == 'true' }}
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/smith.rb
+          git commit -m "Update smith formula for ${RELEASE_TAG}"
+          git push origin HEAD:main
+
+      - name: Report current formula
+        if: ${{ steps.formula.outputs.changed == 'false' }}
+        run: echo "Tap formula is already current for ${{ steps.release.outputs.tag }}."
