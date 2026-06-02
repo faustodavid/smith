@@ -183,6 +183,7 @@ class Smith < Formula
       cp -R "$source_dir" "$target_dir"
       echo "Smith skill installed to: $target_dir"
     BASH
+    chmod 0555, bin/"smith-install-skill"
   end
 
   def caveats
