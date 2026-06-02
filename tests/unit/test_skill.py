@@ -54,6 +54,34 @@ def test_sync_skill_replaces_stale_directory_with_symlink(tmp_path: Path) -> Non
     assert not (target / "old.md").exists()
 
 
+def test_sync_skill_reports_current_when_copied_target_matches_source(tmp_path: Path) -> None:
+    source = _make_skill_source(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+
+    copied = skill.sync_skill(source_dir=source, target_dir=target, prefer_symlink=False)
+    current = skill.sync_skill(source_dir=source, target_dir=target, prefer_symlink=False)
+
+    assert copied.ok is True
+    assert copied.status == "copied"
+    assert current.ok is True
+    assert current.status == "current"
+    assert current.mode == "directory"
+    assert skill.skill_target_points_to_source(target, source) is True
+
+
+def test_sync_skill_refreshes_stale_copied_target(tmp_path: Path) -> None:
+    source = _make_skill_source(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+    skill.sync_skill(source_dir=source, target_dir=target, prefer_symlink=False)
+    (source / "SKILL.md").write_text("---\nname: smith\nupdated: true\n---\n", encoding="utf-8")
+
+    result = skill.sync_skill(source_dir=source, target_dir=target, prefer_symlink=False)
+
+    assert result.ok is True
+    assert result.status == "copied"
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == (source / "SKILL.md").read_text(encoding="utf-8")
+
+
 def test_sync_skill_reports_current_when_target_already_points_to_source(tmp_path: Path) -> None:
     source = _make_skill_source(tmp_path)
     target = tmp_path / ".agents" / "skills" / "smith"

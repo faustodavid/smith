@@ -573,7 +573,7 @@ def test_load_config_requires_existing_file(tmp_path: Path) -> None:
         load_config(config_path=missing_path)
 
 
-@pytest.mark.parametrize("remote_name", ["code", "prs", "skill"])
+@pytest.mark.parametrize("remote_name", ["code", "prs"])
 def test_load_config_rejects_reserved_top_level_remote_names(tmp_path: Path, remote_name: str) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -589,6 +589,26 @@ remotes:
 
     with pytest.raises(ValueError, match="name is reserved"):
         load_config(config_path=config_path)
+
+
+def test_load_config_allows_legacy_skill_remote_name(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  skill:
+    provider: github
+    org: octo-org
+    host: github.com
+defaults: {}
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["skill"].name == "skill"
+    assert config.remotes["skill"].provider == "github"
 
 
 def test_load_config_preserves_explicit_github_api_url_override(tmp_path: Path) -> None:

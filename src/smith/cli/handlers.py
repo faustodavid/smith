@@ -261,14 +261,6 @@ def handle_config_show(client: SmithClient | None, args: argparse.Namespace) -> 
 def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> int:
     del client
     path = _default_config_path()
-    skill_result = sync_skill()
-    if args.output_format != "json":
-        stream = sys.stdout if skill_result.ok else sys.stderr
-        print(skill_result.message, file=stream)
-        if skill_result.ok and skill_result.mode == "symlink":
-            print("The skill will stay current when Smith is upgraded.", file=stream)
-        print(file=stream)
-
     if path.exists():
         return _emit_error(
             args=args,
@@ -277,6 +269,14 @@ def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> 
             message=f"Config file already exists at {path}",
             exit_code=EXIT_INVALID_ARGS,
         )
+
+    skill_result = sync_skill()
+    if args.output_format != "json":
+        stream = sys.stdout if skill_result.ok else sys.stderr
+        print(skill_result.message, file=stream)
+        if skill_result.ok and skill_result.mode == "symlink":
+            print("The skill will stay current when Smith is upgraded.", file=stream)
+        print(file=stream)
 
     if args.output_format == "json":
         config = SmithConfig(remotes={}, defaults={})

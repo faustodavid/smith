@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import filecmp
 import os
 import shutil
 import sys
@@ -111,12 +112,44 @@ def _symlink_destination(target: Path) -> Path | None:
     return _absolute_path_without_resolving(target.parent / destination)
 
 
+def _directory_contents_match(target: Path, source: Path) -> bool:
+    if not target.is_dir() or not source.is_dir():
+        return False
+
+    target_entries = {path.relative_to(target) for path in target.rglob("*")}
+    source_entries = {path.relative_to(source) for path in source.rglob("*")}
+    if target_entries != source_entries:
+        return False
+
+    for relative_path in target_entries:
+        target_path = target / relative_path
+        source_path = source / relative_path
+        if target_path.is_symlink() or source_path.is_symlink():
+            if not target_path.is_symlink() or not source_path.is_symlink():
+                return False
+            if os.readlink(target_path) != os.readlink(source_path):
+                return False
+        elif target_path.is_dir() or source_path.is_dir():
+            if not target_path.is_dir() or not source_path.is_dir():
+                return False
+        elif target_path.is_file() or source_path.is_file():
+            if not target_path.is_file() or not source_path.is_file():
+                return False
+            if not filecmp.cmp(target_path, source_path, shallow=False):
+                return False
+        else:
+            return False
+    return True
+
+
 def skill_target_points_to_source(target: Path, source: Path) -> bool:
     source = _absolute_path_without_resolving(source)
     try:
         if target.is_symlink():
             return _symlink_destination(target) == source
-        return target.exists() and target.resolve() == source.resolve()
+        if not target.exists():
+            return False
+        return target.resolve() == source.resolve() or _directory_contents_match(target, source)
     except OSError:
         return False
 

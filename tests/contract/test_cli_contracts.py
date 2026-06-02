@@ -597,7 +597,7 @@ def test_handle_config_init_rejects_existing_config_file(monkeypatch: Any, tmp_p
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == handlers.EXIT_INVALID_ARGS
-    assert calls == 1
+    assert calls == 0
     assert payload["error"] == {
         "code": "already_exists",
         "message": f"Config file already exists at {path}",

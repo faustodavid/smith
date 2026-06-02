@@ -253,7 +253,8 @@ def _compute_api_url_for_remote(provider: str, host: str) -> str:
     return ""
 
 
-_RESERVED_REMOTE_NAMES = {"all", "cache", "code", "config", "help", "prs", "search", "skill"}
+_RESERVED_REMOTE_NAMES = {"all", "cache", "code", "config", "help", "prs", "search"}
+_NEW_REMOTE_RESERVED_NAMES = _RESERVED_REMOTE_NAMES | {"skill"}
 
 
 def _normalize_config_api_url(raw_api_url: Any) -> str:
