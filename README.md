@@ -153,10 +153,10 @@ smith github-public code grep my-repo "TODO" --format json
 
 ```bash
 brew install faustodavid/tap/smith
-smith-install-skill
+smith config init
 ```
 
-Homebrew installs the `smith` CLI and `ripgrep`. `smith-install-skill` installs the canonical Smith skill into `~/.agents/skills/smith`.
+Homebrew installs the `smith` CLI and `ripgrep`. `smith config init` creates your config file and links the canonical Smith skill into `~/.agents/skills/smith`.
 
 ### Install with the standalone script
 
@@ -184,8 +184,9 @@ The installer keeps a managed Smith repo checkout at `~/.local/share/smith`, mir
 
 ```bash
 brew upgrade faustodavid/tap/smith
-smith-install-skill
 ```
+
+The Homebrew skill link points at Homebrew's stable `opt/smith` path, so it stays current after `brew upgrade`. If you already have a config and only need to refresh the skill link, run `smith skill sync`.
 
 If you installed with the standalone script instead, rerun `python3 ~/.local/share/smith/scripts/install.py`.
 
@@ -342,7 +343,7 @@ Smith was built for AI agents from the ground up. `skills/smith/SKILL.md` is a s
 - **Failure recovery** — specific handlers for 401 / 403, 429, truncation, empty results, and wrong-repo misses.
 - **Answer contract** — evidence-first format with exact path citations and a `Sources` section.
 
-The Homebrew formula and standalone installer both mirror the canonical skill into `~/.agents/skills/smith`. The standalone installer also keeps a managed repo checkout at `~/.local/share/smith`.
+`smith config init` links the canonical skill into `~/.agents/skills/smith`. Homebrew installs use a symlink to Homebrew's stable `opt/smith` path, so the skill stays current after `brew upgrade`.
 
 ---
 
@@ -481,7 +482,7 @@ Provider MCPs expose a `get_file_contents`-style surface that downloads entire f
 
 ### Does Smith work with Claude Code, Cursor, Windsurf, GitHub Copilot, and Codex?
 
-Yes. Smith ships a structured skill document (`skills/smith/SKILL.md`) that any LLM-powered editor can load as a rule / instruction / skill. The Homebrew formula and standalone installer mirror the canonical skill into `~/.agents/skills/smith`. See [Use with your AI editor](#use-with-your-ai-editor) for per-editor hints.
+Yes. Smith ships a structured skill document (`skills/smith/SKILL.md`) that any LLM-powered editor can load as a rule / instruction / skill. `smith config init` links it into `~/.agents/skills/smith`. See [Use with your AI editor](#use-with-your-ai-editor) for per-editor hints.
 
 ### Is Smith read-only? Can an agent accidentally push or comment?
 

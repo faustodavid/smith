@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from argparse import Namespace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,6 +10,7 @@ import pytest
 
 from smith.cli import handlers
 from smith.config import RemoteConfig, SmithConfig
+from smith.skill import SkillSyncResult
 
 
 def _make_args(**overrides: Any) -> Namespace:
@@ -116,6 +118,19 @@ def _make_remote_config(
         enabled=enabled,
         api_url=default_api_url,
     )
+
+
+def _make_homebrew_opt_skill(tmp_path: Path) -> tuple[Path, Path]:
+    cellar_prefix = tmp_path / "Cellar" / "smith" / "1.0"
+    cellar_source = cellar_prefix / "share" / "smith" / "skills" / "smith"
+    cellar_source.mkdir(parents=True)
+    (cellar_source / "SKILL.md").write_text("---\nname: smith\n---\n", encoding="utf-8")
+
+    opt_dir = tmp_path / "opt"
+    opt_dir.mkdir()
+    (opt_dir / "smith").symlink_to(cellar_prefix, target_is_directory=True)
+    opt_source = opt_dir / "smith" / "share" / "smith" / "skills" / "smith"
+    return opt_source, cellar_source
 
 
 def test_csv_list_and_remote_helpers() -> None:
@@ -531,31 +546,113 @@ def test_handle_config_show_returns_not_found_error(monkeypatch: Any, capsys: An
 
 def test_handle_config_init_creates_empty_config_file(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
     path = tmp_path / "smith-config.yaml"
+    skill_target = tmp_path / "skills" / "smith"
+    skill_source = tmp_path / "source" / "skills" / "smith"
+    skill_result = SkillSyncResult(
+        ok=True,
+        status="linked",
+        target=skill_target,
+        source=skill_source,
+        mode="symlink",
+        message=f"Smith skill linked to: {skill_target}",
+    )
     monkeypatch.setattr(handlers, "_default_config_path", lambda: path)
+    monkeypatch.setattr(handlers, "sync_skill", lambda: skill_result)
     args = _make_args(command_id="config.init", output_format="json")
 
     exit_code = handlers.handle_config_init(None, args)
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == handlers.EXIT_OK
-    assert payload["data"] == {"path": str(path), "remotes_count": 0}
+    assert payload["data"] == {
+        "path": str(path),
+        "remotes_count": 0,
+        "skill": skill_result.to_dict(),
+    }
     assert handlers.load_config(config_path=path) == SmithConfig(remotes={}, defaults={})
 
 
 def test_handle_config_init_rejects_existing_config_file(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
     path = tmp_path / "smith-config.yaml"
     path.write_text("remotes: {}\ndefaults: {}\n", encoding="utf-8")
+    calls = 0
+
+    def _sync_skill() -> SkillSyncResult:
+        nonlocal calls
+        calls += 1
+        return SkillSyncResult(
+            ok=True,
+            status="linked",
+            target=Path("/tmp/smith-skill"),
+            source=Path("/tmp/smith-source"),
+            mode="symlink",
+            message="Smith skill linked to: /tmp/smith-skill",
+        )
+
     monkeypatch.setattr(handlers, "_default_config_path", lambda: path)
+    monkeypatch.setattr(handlers, "sync_skill", _sync_skill)
     args = _make_args(command_id="config.init", output_format="json")
 
     exit_code = handlers.handle_config_init(None, args)
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == handlers.EXIT_INVALID_ARGS
+    assert calls == 0
     assert payload["error"] == {
         "code": "already_exists",
         "message": f"Config file already exists at {path}",
     }
+
+
+def test_handle_skill_sync_reports_current_link(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
+    target = tmp_path / ".agents" / "skills" / "smith"
+    source = tmp_path / "opt" / "smith" / "share" / "smith" / "skills" / "smith"
+    source.mkdir(parents=True)
+    target.parent.mkdir(parents=True)
+    target.symlink_to(source, target_is_directory=True)
+    result = SkillSyncResult(
+        ok=True,
+        status="current",
+        target=target,
+        source=source,
+        mode="symlink",
+        message=f"Smith skill already points to: {source}",
+    )
+    monkeypatch.setattr(handlers, "sync_skill", lambda: result)
+    monkeypatch.setattr(handlers, "default_skill_target_dir", lambda: target)
+    monkeypatch.setattr(handlers, "resolve_skill_source_dir", lambda: source)
+    args = _make_args(command_id="skill.sync", output_format="json")
+
+    exit_code = handlers.handle_skill_sync(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["data"]["current"] is True
+    assert payload["data"]["mode"] == "symlink"
+    assert payload["data"]["sync"] == result.to_dict()
+
+
+def test_handle_skill_status_reports_cellar_link_stale(
+    monkeypatch: Any,
+    tmp_path: Any,
+    capsys: Any,
+) -> None:
+    opt_source, cellar_source = _make_homebrew_opt_skill(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+    target.parent.mkdir(parents=True)
+    target.symlink_to(cellar_source, target_is_directory=True)
+    monkeypatch.setattr(handlers, "default_skill_target_dir", lambda: target)
+    monkeypatch.setattr(handlers, "resolve_skill_source_dir", lambda: opt_source)
+    args = _make_args(command_id="skill.status", output_format="json")
+
+    exit_code = handlers.handle_skill_status(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["data"]["exists"] is True
+    assert payload["data"]["mode"] == "symlink"
+    assert payload["data"]["source"] == str(opt_source)
+    assert payload["data"]["current"] is False
 
 
 @pytest.mark.parametrize("exists", [False, True])

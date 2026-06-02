@@ -591,6 +591,26 @@ remotes:
         load_config(config_path=config_path)
 
 
+def test_load_config_allows_legacy_skill_remote_name(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  skill:
+    provider: github
+    org: octo-org
+    host: github.com
+defaults: {}
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_path)
+
+    assert config.remotes["skill"].name == "skill"
+    assert config.remotes["skill"].provider == "github"
+
+
 def test_load_config_preserves_explicit_github_api_url_override(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

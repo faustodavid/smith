@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from smith.config import (
-    _RESERVED_REMOTE_NAMES,
+    _NEW_REMOTE_RESERVED_NAMES,
     RemoteConfig,
     SmithConfig,
     _compute_api_url_for_remote,
@@ -116,8 +116,8 @@ def _prompt_yes_no(prompt: str, *, default: bool = True) -> bool:
 
 
 def _validate_remote_name(name: str) -> str | None:
-    if name.lower() in _RESERVED_REMOTE_NAMES:
-        reserved = ", ".join(sorted(_RESERVED_REMOTE_NAMES))
+    if name.lower() in _NEW_REMOTE_RESERVED_NAMES:
+        reserved = ", ".join(sorted(_NEW_REMOTE_RESERVED_NAMES))
         return f"'{name}' is reserved. Avoid: {reserved}"
     if not name.replace("-", "").replace("_", "").isalnum():
         return "Name must contain only letters, numbers, hyphens, and underscores."

@@ -27,6 +27,8 @@ from smith.cli.handlers import (
     handle_pr_list,
     handle_pr_search,
     handle_pr_threads,
+    handle_skill_status,
+    handle_skill_sync,
     handle_work_get,
     handle_work_mine,
     handle_work_search,
@@ -337,6 +339,31 @@ def _add_config_group(root_subparsers: Any) -> None:
         handle_config_disable,
         "config.disable",
         primary_path="config disable",
+        requires_client=False,
+    )
+
+
+def _add_skill_group(root_subparsers: Any) -> None:
+    skill = _add_parser(root_subparsers, "skill", help_text="Manage the Smith agent skill")
+    skill_sub = skill.add_subparsers(dest="skill_action", required=True)
+
+    skill_sync = _add_parser(skill_sub, "sync", help_text="Install or refresh the Smith agent skill")
+    _add_output_format(skill_sync)
+    _set_handler(
+        skill_sync,
+        handle_skill_sync,
+        "skill.sync",
+        primary_path="skill sync",
+        requires_client=False,
+    )
+
+    skill_status = _add_parser(skill_sub, "status", help_text="Show Smith agent skill sync status")
+    _add_output_format(skill_status)
+    _set_handler(
+        skill_status,
+        handle_skill_status,
+        "skill.status",
+        primary_path="skill status",
         requires_client=False,
     )
 
@@ -738,6 +765,7 @@ def build_parser(*, smith_config: SmithConfig | None = None) -> argparse.Argumen
     _add_global_code_group(root_subparsers)
     _add_global_prs_group(root_subparsers)
     _add_config_group(root_subparsers)
+    _add_skill_group(root_subparsers)
     _add_cache_group(root_subparsers, remotes=remotes)
     for remote in remotes:
         _add_remote_command_tree(root_subparsers, remote=remote)
