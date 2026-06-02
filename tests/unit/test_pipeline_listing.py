@@ -58,10 +58,7 @@ def test_valid_pipeline_statuses_contains_canonical_set() -> None:
 
 
 def test_build_pipeline_list_payload_flags_partial_on_truncation() -> None:
-    rows = [
-        build_pipeline_row(pipeline_id=i, project="p", status="running")
-        for i in range(5)
-    ]
+    rows = [build_pipeline_row(pipeline_id=i, project="p", status="running") for i in range(5)]
     query = PipelineListQuery.create(take=2)
 
     payload = build_pipeline_list_payload(rows=rows, query=query)
@@ -73,10 +70,7 @@ def test_build_pipeline_list_payload_flags_partial_on_truncation() -> None:
 
 
 def test_build_pipeline_list_payload_not_partial_when_full_window() -> None:
-    rows = [
-        build_pipeline_row(pipeline_id=i, project="p", status="success")
-        for i in range(3)
-    ]
+    rows = [build_pipeline_row(pipeline_id=i, project="p", status="success") for i in range(3)]
     query = PipelineListQuery.create(take=5)
 
     payload = build_pipeline_list_payload(rows=rows, query=query)
@@ -133,12 +127,10 @@ def test_short_status_map_is_consistent_with_helper() -> None:
         ("", "", None),
         ("test 0/3", "test 0/3", None),  # index must be >= 1
         ("test 4/3", "test 4/3", None),  # index must be <= total
-        ("[1/2]", "[1/2]", None),        # empty base -> no match
+        ("[1/2]", "[1/2]", None),  # empty base -> no match
     ],
 )
-def test_parse_matrix_from_name_extracts_or_preserves_name(
-    raw: str, expected_base: str, expected_matrix: tuple[int, int] | None
-) -> None:
+def test_parse_matrix_from_name_extracts_or_preserves_name(raw: str, expected_base: str, expected_matrix: tuple[int, int] | None) -> None:
     base, matrix = parse_matrix_from_name(raw)
     assert base == expected_base
     assert matrix == expected_matrix

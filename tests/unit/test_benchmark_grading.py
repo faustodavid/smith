@@ -44,10 +44,7 @@ GOOD_ANSWER = "\n".join(
         "- openai/openai-node:/src/resources/webhooks/webhooks.ts",
         "- openai/openai-go:/webhooks/webhook.go",
         "- openai/openai-ruby:/lib/openai/resources/webhooks.rb",
-        (
-            "- openai/openai-java:/openai-java-core/src/main/kotlin/com/openai/services/"
-            "blocking/WebhookServiceImpl.kt"
-        ),
+        ("- openai/openai-java:/openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt"),
     ]
 )
 
@@ -86,10 +83,7 @@ GOOD_ANSWER_WITH_BARE_REPO_SOURCES = "\n".join(
         "- openai-node:/src/resources/webhooks/webhooks.ts",
         "- openai-go:/webhooks/webhook.go",
         "- openai-ruby:/lib/openai/resources/webhooks.rb",
-        (
-            "- openai-java:/openai-java-core/src/main/kotlin/com/openai/services/blocking/"
-            "WebhookServiceImpl.kt"
-        ),
+        ("- openai-java:/openai-java-core/src/main/kotlin/com/openai/services/blocking/WebhookServiceImpl.kt"),
     ]
 )
 

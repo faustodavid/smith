@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smith"
-version = "0.1.0"
+version = "0.1.1"
 description = "Read-only Azure DevOps and GitHub investigation CLI"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,13 +24,13 @@ dependencies = [
 dev = [
   "coverage>=7.13.5",
   "mcp>=1.26.0",
-  "mypy>=1.19.1",
+  "mypy==1.19.1",
   "openai-agents>=0.13.2",
   "pytest>=9.0.2",
   "pytest-asyncio>=0.26.0",
   "pytest-cov>=7.1.0",
-  "ruff>=0.15.8",
-  "types-requests>=2.33.0.20260327"
+  "ruff==0.15.8",
+  "types-requests==2.33.0.20260327"
 ]
 bench = [
   "aiohttp>=3.13.4",
@@ -53,7 +53,6 @@ where = ["src"]
 target-version = "py312"
 line-length = 140
 src = ["src", "scripts", "tests"]
-extend-exclude = ["scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
@@ -77,4 +76,3 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["scripts.*"]
 ignore_errors = true
-

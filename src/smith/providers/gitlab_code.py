@@ -143,7 +143,7 @@ class GitLabCodeMixin:
         matched = [row for row in rows if GitLabCodeMixin._matches_discovery_name(row, pattern)]
         window_end = query.skip + query.take
         return build_discovery_payload(
-            rows=matched[query.skip:window_end],
+            rows=matched[query.skip : window_end],
             query=query,
             has_more=len(matched) > window_end,
             subject=subject,
@@ -201,7 +201,7 @@ class GitLabCodeMixin:
                             if len(matched_rows) >= query.required_matches:
                                 window_end = query.skip + query.take
                                 return build_discovery_payload(
-                                    rows=matched_rows[query.skip:window_end],
+                                    rows=matched_rows[query.skip : window_end],
                                     query=query,
                                     has_more=True,
                                     subject=subject,
@@ -225,7 +225,7 @@ class GitLabCodeMixin:
 
             window_end = query.skip + query.take
             return build_discovery_payload(
-                rows=matched_rows[query.skip:window_end],
+                rows=matched_rows[query.skip : window_end],
                 query=query,
                 has_more=False,
                 subject=subject,
@@ -412,9 +412,7 @@ class GitLabCodeMixin:
         try:
             data = response.json()
         except ValueError as exc:
-            raise SmithApiError(
-                f"Expected JSON response from {self._build_url(path)} but received invalid JSON"
-            ) from exc
+            raise SmithApiError(f"Expected JSON response from {self._build_url(path)} but received invalid JSON") from exc
 
         if not isinstance(data, list):
             return [], total_count, next_page
@@ -808,9 +806,15 @@ class GitLabCodeMixin:
         ]
 
     @staticmethod
-    def _git_noninteractive_env() -> dict[str, str]:
+    def _git_noninteractive_env(extra_configs: list[str] | None = None) -> dict[str, str]:
         env = dict(os.environ)
         env["GIT_TERMINAL_PROMPT"] = "0"
+        for index, config in enumerate(extra_configs or []):
+            key, _, value = config.partition("=")
+            env[f"GIT_CONFIG_KEY_{index}"] = key
+            env[f"GIT_CONFIG_VALUE_{index}"] = value
+        if extra_configs:
+            env["GIT_CONFIG_COUNT"] = str(len(extra_configs))
         return env
 
     def _git_subprocess(self: Any, args: list[str], *, cwd: str | None = None) -> None:
@@ -825,23 +829,23 @@ class GitLabCodeMixin:
     def _git_auth_subprocess(self: Any, args: list[str], *, cwd: str | None = None) -> None:
         extra_configs = self._git_http_auth_extra_configs()
         subprocess.run(
-            self._prepare_git_command(args, extra_configs=extra_configs),
+            self._prepare_git_command(args),
             cwd=cwd,
             check=True,
             capture_output=True,
             text=True,
-            env=self._git_noninteractive_env() if extra_configs else None,
+            env=self._git_noninteractive_env(extra_configs) if extra_configs else None,
         )
 
     def _git_auth_subprocess_output(self: Any, args: list[str], *, cwd: str | None = None) -> str:
         extra_configs = self._git_http_auth_extra_configs()
         result = subprocess.run(
-            self._prepare_git_command(args, extra_configs=extra_configs),
+            self._prepare_git_command(args),
             cwd=cwd,
             check=True,
             capture_output=True,
             text=True,
-            env=self._git_noninteractive_env() if extra_configs else None,
+            env=self._git_noninteractive_env(extra_configs) if extra_configs else None,
         )
         return result.stdout
 
@@ -890,11 +894,7 @@ class GitLabCodeMixin:
         full_project_path = self._full_project_path(repo)
         path_segments = [
             self._sanitize_cache_component(host),
-            *[
-                self._sanitize_cache_component(segment)
-                for segment in full_project_path.split("/")
-                if segment.strip()
-            ],
+            *[self._sanitize_cache_component(segment) for segment in full_project_path.split("/") if segment.strip()],
             self._sanitize_cache_component(branch),
         ]
         return os.path.join(root, *path_segments)
@@ -918,6 +918,18 @@ class GitLabCodeMixin:
     @staticmethod
     def _local_checkout_refresh_marker(checkout_dir: str) -> str:
         return os.path.join(checkout_dir, ".git", "smith-last-fetch")
+
+    @staticmethod
+    def _local_checkout_owner_marker(checkout_dir: str) -> str:
+        return os.path.join(checkout_dir, ".smith_gitlab_checkout")
+
+    def _mark_local_checkout_owned(self: Any, checkout_dir: str) -> None:
+        Path(self._local_checkout_owner_marker(checkout_dir)).write_text("smith gitlab checkout\n", encoding="utf-8")
+
+    def _local_checkout_is_owned(self: Any, checkout_dir: str) -> bool:
+        return os.path.isfile(self._local_checkout_owner_marker(checkout_dir)) or os.path.isfile(
+            self._local_checkout_refresh_marker(checkout_dir)
+        )
 
     def _reset_local_checkout(self: Any, checkout_dir: str) -> None:
         self._git_auth_subprocess(["git", "-C", checkout_dir, "reset", "--hard", "HEAD"])
@@ -967,8 +979,12 @@ class GitLabCodeMixin:
 
         with checkout_lock:
             try:
+                if os.path.isdir(git_dir) and not self._local_checkout_is_owned(checkout_dir):
+                    return None
                 if not os.path.isdir(git_dir):
                     if os.path.exists(checkout_dir):
+                        if not self._local_checkout_is_owned(checkout_dir):
+                            return None
                         shutil.rmtree(checkout_dir)
                     os.makedirs(os.path.dirname(checkout_dir), exist_ok=True)
 
@@ -991,6 +1007,7 @@ class GitLabCodeMixin:
                     self._checkout_local_ref(checkout_dir, f"origin/{branch}")
                     self._reset_local_checkout(checkout_dir)
                     self._apply_sparse_patterns(checkout_dir, sparse_patterns)
+                    self._mark_local_checkout_owned(checkout_dir)
                     self._mark_local_checkout_refreshed(checkout_dir)
                     return checkout_dir
 
@@ -1096,6 +1113,15 @@ class GitLabCodeMixin:
     @staticmethod
     def _is_internal_local_path(path: str) -> bool:
         return _local_checkout.is_internal_local_path(path)
+
+    @staticmethod
+    def _is_unsafe_grep_path(path: str | None) -> bool:
+        normalized = normalize_path(path).strip("/")
+        if not normalized:
+            return False
+        if _local_checkout.is_internal_local_path(normalized):
+            return True
+        return any(part == ".." for part in normalized.replace("\\", "/").split("/"))
 
     def _ripgrep_local_result(
         self: Any,
@@ -1242,6 +1268,15 @@ class GitLabCodeMixin:
 
         file_regex = glob_to_regex(glob) if glob else ".*"
         filename_filter = re.compile(file_regex)
+
+        if self._is_unsafe_grep_path(path):
+            return build_grep_result(
+                output_lines=[],
+                matched_count=0,
+                warnings=[],
+                max_output_chars=self.max_output_chars,
+                truncation_hint="Use from_line/to_line to read specific ranges, or narrow with path/glob/pattern.",
+            )
 
         resolved_branch = normalized_branch or self._get_project_default_branch(repo)
         grep_local_cache_enabled = parse_bool_env("GITLAB_GREP_USE_LOCAL_CACHE", default=True)

@@ -49,9 +49,7 @@ REPO_SPECS: dict[str, RepoSpec] = {
 }
 
 ALLOWED_REPOS = set(REPO_SPECS)
-SOURCES_HEADER_RE = re.compile(
-    r"^\s*(?:#{1,6}\s+)?(?:\*\*)?Sources(?:\*\*)?:?\s*$", re.IGNORECASE | re.MULTILINE
-)
+SOURCES_HEADER_RE = re.compile(r"^\s*(?:#{1,6}\s+)?(?:\*\*)?Sources(?:\*\*)?:?\s*$", re.IGNORECASE | re.MULTILINE)
 SOURCE_ENTRY_RE = re.compile(r"([A-Za-z0-9._/-]+):(/?[^`\s]+)")
 
 
@@ -121,9 +119,7 @@ def _check_repo_expectation(
         if remainder in REPO_SPECS:
             repo = remainder
             passed = repo in lowered or repo in source_repos
-            evidence = (
-                f"Found {repo} in the answer." if passed else f"{repo} is missing from the answer."
-            )
+            evidence = f"Found {repo} in the answer." if passed else f"{repo} is missing from the answer."
             return passed, evidence
 
         if " env path " in remainder:
@@ -131,11 +127,7 @@ def _check_repo_expectation(
             spec = REPO_SPECS.get(repo)
             if spec:
                 passed = _path_in_text(answer_text, path)
-                evidence = (
-                    f"Found the env file {path} for {repo}."
-                    if passed
-                    else f"Could not verify {path} for {repo}."
-                )
+                evidence = f"Found the env file {path} for {repo}." if passed else f"Could not verify {path} for {repo}."
                 return passed, evidence
 
         if " helper path " in remainder:
@@ -143,11 +135,7 @@ def _check_repo_expectation(
             spec = REPO_SPECS.get(repo)
             if spec:
                 passed = _path_in_text(answer_text, path)
-                evidence = (
-                    f"Found the helper file {path} for {repo}."
-                    if passed
-                    else f"Could not verify {path} for {repo}."
-                )
+                evidence = f"Found the helper file {path} for {repo}." if passed else f"Could not verify {path} for {repo}."
                 return passed, evidence
 
     if " helper names " in expectation:
@@ -165,11 +153,7 @@ def _check_repo_expectation(
     if expectation.startswith("Sources list "):
         repo = expectation[len("Sources list ") :]
         passed = repo in source_index
-        evidence = (
-            f"Found {repo} in the Sources section."
-            if passed
-            else f"{repo} is missing from the Sources section."
-        )
+        evidence = f"Found {repo} in the Sources section." if passed else f"{repo} is missing from the Sources section."
         return passed, evidence
 
     return None
@@ -194,11 +178,7 @@ def _build_expectation_results(answer_text: str, expectations: list[str]) -> lis
         outcome = _check_repo_expectation(expectation, answer_text, lowered, source_index, source_repos)
         if outcome is None and expectation == SOURCES_BLOCK_EXPECTATION:
             passed = bool(source_entries)
-            evidence = (
-                "Found repo:path entries under Sources."
-                if passed
-                else "No repo:path entries were found under a Sources section."
-            )
+            evidence = "Found repo:path entries under Sources." if passed else "No repo:path entries were found under a Sources section."
         elif outcome is None and expectation == SOURCES_ONLY_EXPECTATION:
             passed, evidence = _check_sources_only_expectation(source_repos)
         elif outcome is None:

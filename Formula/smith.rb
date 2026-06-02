@@ -7,8 +7,8 @@ class Smith < Formula
   desc "Read-only source-of-truth investigation CLI for AI agents"
   homepage "https://github.com/faustodavid/smith"
   url "https://github.com/faustodavid/smith.git",
-      tag:      "v0.1.0",
-      revision: "a36a75ea9b84e9bcd27d6308903cdb29776986f4"
+      tag:      "v0.1.1",
+      revision: "0a4bc1eadf0d0a20fb4af3ed20c3974d33fcc63d"
   license "MIT"
   head "https://github.com/faustodavid/smith.git", branch: "main"
 

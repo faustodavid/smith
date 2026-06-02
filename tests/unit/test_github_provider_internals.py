@@ -4,6 +4,7 @@ import base64
 import os
 import re
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -75,8 +76,7 @@ def test_github_token_rejects_empty_cli_token_and_exposes_auth_helpers(monkeypat
         provider._get_token()
 
     assert provider._auth_error_message() == (
-        "GitHub authentication rejected with HTTP 401/403. "
-        "Set GITHUB_TOKEN or run `gh auth login` and retry."
+        "GitHub authentication rejected with HTTP 401/403. Set GITHUB_TOKEN or run `gh auth login` and retry."
     )
     assert provider._build_url("https://example.test/repos/test") == "https://example.test/repos/test"
 
@@ -86,9 +86,7 @@ def test_github_requires_org_and_maps_project_repository_views(monkeypatch: Any)
     monkeypatch.setattr(
         provider,
         "_get_paginated_list",
-        lambda path, **kwargs: [
-            {"id": 1, "name": "repo-a", "default_branch": "main", "html_url": "https://github.com/octo-org/repo-a"}
-        ],
+        lambda path, **kwargs: [{"id": 1, "name": "repo-a", "default_branch": "main", "html_url": "https://github.com/octo-org/repo-a"}],
     )
 
     assert provider.list_projects() == [
@@ -274,6 +272,69 @@ def test_github_local_checkout_reuses_existing_clone(monkeypatch: Any, tmp_path:
     assert sum(1 for call in git_calls if call[:2] == ["git", "clone"]) == 1
 
 
+def test_github_local_checkout_path_avoids_branch_collisions() -> None:
+    provider = _provider()
+
+    first = provider._local_checkout_path(org="octo-org", repo="repo-a", branch="feature/a")
+    second = provider._local_checkout_path(org="octo-org", repo="repo-a", branch="feature_a")
+
+    assert first != second
+
+
+def test_github_local_checkout_replaces_mismatched_branch_marker(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
+    checkout_dir = provider._local_checkout_path(org="octo-org", repo="repo-a", branch="feature_a")
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    provider._mark_local_checkout_branch(checkout_dir, "feature/a")
+    clone_calls: list[list[str]] = []
+
+    def _fake_git(args: list[str], *, cwd: str | None = None) -> None:
+        if args[:2] == ["git", "clone"]:
+            clone_calls.append(args)
+            os.makedirs(os.path.join(args[-1], ".git"), exist_ok=True)
+
+    monkeypatch.setattr(provider, "_git_subprocess", _fake_git)
+
+    result = provider._ensure_local_checkout(repo="repo-a", branch="feature_a")
+
+    assert result == checkout_dir
+    assert clone_calls
+    assert provider._local_checkout_has_requested_branch(checkout_dir, "feature_a")
+
+
+def test_github_local_checkout_rejects_mismatched_recorded_head(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    checkout_dir = str(tmp_path / "checkout")
+    os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    Path(provider._local_checkout_branch_marker(checkout_dir)).write_text(
+        '{"branch": "main", "head": "old"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(provider, "_local_head_sha", lambda checkout: "new")
+
+    assert not provider._local_checkout_has_requested_branch(checkout_dir, "main")
+
+
+def test_github_local_checkout_does_not_delete_unowned_existing_path(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
+    checkout_dir = provider._local_checkout_path(org="octo-org", repo="repo-a", branch="main")
+    existing = Path(checkout_dir) / "keep.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("do not delete", encoding="utf-8")
+    monkeypatch.setattr(
+        provider,
+        "_git_subprocess",
+        lambda *args, **kwargs: pytest.fail("unowned cache path should not be cloned over"),
+    )
+
+    assert provider._ensure_local_checkout(repo="repo-a", branch="main") is None
+    assert existing.read_text(encoding="utf-8") == "do not delete"
+
+
 def test_github_local_checkout_falls_back_when_clone_fails(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
@@ -367,9 +428,7 @@ def test_github_repository_list_cache_returns_copies(monkeypatch: Any) -> None:
 
     def _fake_paginated_list(path: str, **kwargs: Any) -> list[dict[str, Any]]:
         repo_calls.append(path)
-        return [
-            {"id": 1, "name": "repo-a", "default_branch": "main", "html_url": "https://github.com/octo-org/repo-a"}
-        ]
+        return [{"id": 1, "name": "repo-a", "default_branch": "main", "html_url": "https://github.com/octo-org/repo-a"}]
 
     monkeypatch.setattr(provider, "_get_paginated_list", _fake_paginated_list)
 
@@ -602,9 +661,7 @@ def test_github_compute_sparse_patterns_narrows_by_path_and_simple_glob() -> Non
     assert GitHubProvider._compute_sparse_patterns(None, "{*.yml,*.yaml}") is None
 
 
-def test_github_partial_clone_adds_sparse_flag_when_patterns_given(
-    monkeypatch: Any, tmp_path: Any
-) -> None:
+def test_github_partial_clone_adds_sparse_flag_when_patterns_given(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
     monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
@@ -635,23 +692,20 @@ def test_github_partial_clone_adds_sparse_flag_when_patterns_given(
     assert sparse_calls[0][-2:] == ["/*", "**/*.yml"]
 
 
-def test_github_ls_remote_precheck_skips_fetch_when_head_matches(
-    monkeypatch: Any, tmp_path: Any
-) -> None:
+def test_github_ls_remote_precheck_skips_fetch_when_head_matches(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "true")
     monkeypatch.setenv("SMITH_GITHUB_GREP_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(provider, "_require_github_org", lambda: "octo")
     checkout_dir = provider._local_checkout_path(org="octo", repo="repo-a", branch="main")
     os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
+    provider._mark_local_checkout_branch(checkout_dir, "main")
     monkeypatch.setattr(provider, "_local_checkout_needs_refresh", lambda d: True)
     monkeypatch.setattr(provider, "_remote_head_sha", lambda *a, **k: "abc123")
     monkeypatch.setattr(provider, "_local_head_sha", lambda *a, **k: "abc123")
 
     mark_calls: list[str] = []
-    monkeypatch.setattr(
-        provider, "_mark_local_checkout_refreshed", lambda d: mark_calls.append(d)
-    )
+    monkeypatch.setattr(provider, "_mark_local_checkout_refreshed", lambda d: mark_calls.append(d))
     monkeypatch.setattr(
         provider,
         "_git_subprocess",
@@ -664,9 +718,7 @@ def test_github_ls_remote_precheck_skips_fetch_when_head_matches(
     assert mark_calls == [checkout_dir]
 
 
-def test_github_ripgrep_files_with_matches_uses_subprocess(
-    monkeypatch: Any, tmp_path: Any
-) -> None:
+def test_github_ripgrep_files_with_matches_uses_subprocess(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.yml").write_text("trigger: deploy\n", encoding="utf-8")
@@ -677,11 +729,12 @@ def test_github_ripgrep_files_with_matches_uses_subprocess(
         lambda name: "/usr/bin/rg" if name == "rg" else None,
     )
 
-    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+    def _fake_ripgrep(args: list[str], *, stdout_limit_chars: int) -> tuple[int, str, str, bool]:
+        del stdout_limit_chars
         rg_calls.append(args)
-        return SimpleNamespace(returncode=0, stdout=f"{tmp_path}/src/app.yml\n", stderr="")
+        return 0, f"{tmp_path}/src/app.yml\n", "", False
 
-    monkeypatch.setattr("smith.providers.local_checkout.subprocess.run", _fake_run)
+    monkeypatch.setattr("smith.providers.local_checkout._run_ripgrep_bounded", _fake_ripgrep)
 
     result = provider._ripgrep_local_result(
         checkout_dir=str(tmp_path),
@@ -706,26 +759,18 @@ def test_github_ripgrep_files_with_matches_uses_subprocess(
     assert "*.yml" in rg_args
 
 
-def test_github_ripgrep_parses_content_output_with_context(
-    monkeypatch: Any, tmp_path: Any
-) -> None:
+def test_github_ripgrep_parses_content_output_with_context(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "app.py").write_text(
-        "before\ntrigger: x\nafter\n", encoding="utf-8"
-    )
+    (tmp_path / "src" / "app.py").write_text("before\ntrigger: x\nafter\n", encoding="utf-8")
 
     monkeypatch.setattr(
         "smith.providers.local_checkout.shutil.which",
         lambda name: "/usr/bin/rg" if name == "rg" else None,
     )
     monkeypatch.setattr(
-        "smith.providers.local_checkout.subprocess.run",
-        lambda args, **kwargs: SimpleNamespace(
-            returncode=0,
-            stdout=f"{tmp_path}/src/app.py\n1-before\n2:trigger: x\n3-after\n",
-            stderr="",
-        ),
+        "smith.providers.local_checkout._run_ripgrep_bounded",
+        lambda args, stdout_limit_chars: (0, f"{tmp_path}/src/app.py\n1-before\n2:trigger: x\n3-after\n", "", False),
     )
 
     result = provider._ripgrep_local_result(

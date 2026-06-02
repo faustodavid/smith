@@ -32,10 +32,7 @@ def test_youtrack_token_helpers_and_build_url(monkeypatch: Any) -> None:
     assert provider._get_token() == "test-token"
     assert provider._build_url("/issues") == "https://youtrack.example.test/api/issues"
     assert provider._issue_url("RAD-1055") == "https://youtrack.example.test/issue/RAD-1055"
-    assert provider._auth_error_message() == (
-        "YouTrack authentication rejected with HTTP 401/403. "
-        "Set YOUTRACK_TOKEN and retry."
-    )
+    assert provider._auth_error_message() == ("YouTrack authentication rejected with HTTP 401/403. Set YOUTRACK_TOKEN and retry.")
 
 
 def test_youtrack_token_requires_env(monkeypatch: Any) -> None:
@@ -56,10 +53,7 @@ def test_youtrack_token_requires_custom_env(monkeypatch: Any) -> None:
     ):
         provider._get_token()
 
-    assert provider._auth_error_message() == (
-        "YouTrack authentication rejected with HTTP 401/403. "
-        "Set COMPANY_YOUTRACK_TOKEN and retry."
-    )
+    assert provider._auth_error_message() == ("YouTrack authentication rejected with HTTP 401/403. Set COMPANY_YOUTRACK_TOKEN and retry.")
 
 
 def test_youtrack_normalizes_custom_fields_and_comment_images() -> None:
@@ -103,6 +97,58 @@ def test_youtrack_normalizes_custom_fields_and_comment_images() -> None:
     assert comment["attachments"][0]["name"] == "image1.png"
     assert comment["attachments"][0]["url"] == "https://youtrack.example.test/api/files/1"
     assert comment["reactions"][0]["reaction"] == "thumbs-up"
+
+
+def test_youtrack_timestamp_and_missing_nested_names_do_not_leak_none() -> None:
+    provider = _provider()
+
+    assert provider._format_timestamp(10**100) is None
+
+    metadata = provider._build_metadata(
+        issue={
+            "project": {"name": None, "shortName": None},
+            "created": 10**100,
+            "updated": 10**100,
+            "resolved": 10**100,
+        },
+        custom_fields=provider._normalize_custom_fields([{"projectCustomField": {"field": {"name": None}}, "value": {"name": "ignored"}}]),
+    )
+    work_item = provider._search_result_to_work_item(
+        {
+            "idReadable": "RAD-1",
+            "project": {"name": None, "shortName": None},
+            "customFields": [],
+            "created": 10**100,
+            "updated": 10**100,
+            "tags": [],
+        }
+    )
+    link = provider._normalize_link({"id": "link-1", "linkType": {"name": None}, "issues": [{"idReadable": "RAD-2"}]})
+    activity = provider._normalize_activity(
+        {
+            "id": "act-1",
+            "category": {"id": None},
+            "field": {"name": None},
+            "targetMember": None,
+            "added": {"name": None},
+            "removed": {"summary": None},
+            "timestamp": 10**100,
+        }
+    )
+
+    assert metadata["Project"] == "-"
+    assert metadata["Created"] == "-"
+    assert work_item["project"] == ""
+    assert work_item["project_name"] is None
+    assert link is not None
+    assert link["type"] is None
+    assert activity is not None
+    assert activity["category"] is None
+    assert activity["field"] is None
+    assert activity["action"] == "updated field"
+    assert "None" not in str(metadata)
+    assert "None (" not in str(work_item)
+    assert "None" not in activity["action"]
 
 
 def test_youtrack_search_builds_query_and_reports_lower_bound_counts(monkeypatch: Any) -> None:

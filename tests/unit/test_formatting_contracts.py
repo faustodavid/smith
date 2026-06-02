@@ -152,11 +152,7 @@ def test_truncate_output_reports_character_and_line_counts() -> None:
 
     assert truncate_output(text, 0, "unused") == text
     truncated = truncate_output(text, 8, "narrow it")
-    assert truncated == (
-        "alpha\nbe\n"
-        "... (truncated: showing 8 of 22 characters, 2 of 4 lines)\n"
-        "narrow it"
-    )
+    assert truncated == ("alpha\nbe\n... (truncated: showing 8 of 22 characters, 2 of 4 lines)\nnarrow it")
 
 
 def test_render_text_renders_prs_pipeline_and_story_views() -> None:
@@ -221,26 +217,12 @@ def test_render_text_renders_prs_pipeline_and_story_views() -> None:
         },
     )
 
-    assert pr_list == (
-        "project | repo | pr_id | status | title\n"
-        "proj | repo | 17 | active | Fix\n"
-        "returned_count: 1\n"
-        "has_more: False"
-    )
+    assert pr_list == ("project | repo | pr_id | status | title\nproj | repo | 17 | active | Fix\nreturned_count: 1\nhas_more: False")
     assert pr_search == (
-        "project | repo | pr_id | status | title\n"
-        "proj | repo | 18 | completed | Search\n"
-        "returned_count: 1\n"
-        "has_more: False"
+        "project | repo | pr_id | status | title\nproj | repo | 18 | completed | Search\nreturned_count: 1\nhas_more: False"
     )
     assert pr_get == (
-        "id: 17\n"
-        "title: Fix it\n"
-        "status: active\n"
-        "creator: alice\n"
-        "source_branch: feature\n"
-        "target_branch: main\n"
-        "comments_threads: 2"
+        "id: 17\ntitle: Fix it\nstatus: active\ncreator: alice\nsource_branch: feature\ntarget_branch: main\ncomments_threads: 2"
     )
     assert pr_threads == (
         "pull_request_id: 17\n"
@@ -302,11 +284,7 @@ def test_render_text_code_search_shows_total_and_displayed_counts() -> None:
         },
     )
 
-    assert rendered == (
-        "matches: 5 (showing 2)\n"
-        "repo:/src/app.py\n"
-        "repo:/src/lib.py"
-    )
+    assert rendered == ("matches: 5 (showing 2)\nrepo:/src/app.py\nrepo:/src/lib.py")
 
 
 def test_render_text_renders_youtrack_story_views() -> None:
@@ -401,11 +379,7 @@ def test_render_text_code_search_shows_plus_for_lower_bound_totals() -> None:
         },
     )
 
-    assert rendered == (
-        "matches: 200+ (showing 2)\n"
-        "repo:/src/app.py\n"
-        "repo:/src/lib.py"
-    )
+    assert rendered == ("matches: 200+ (showing 2)\nrepo:/src/app.py\nrepo:/src/lib.py")
 
 
 def test_render_text_grouped_remote_output_preserves_order_warnings_and_errors() -> None:
@@ -429,13 +403,7 @@ def test_render_text_grouped_remote_output_preserves_order_warnings_and_errors()
         "summary": {"queried": ["github", "azdo"]},
     }
 
-    assert render_text("code.search", payload) == (
-        "[github] matches: 2 (showing 1)\n"
-        "repo:/src/app.py\n"
-        "\n"
-        "[azdo]\n"
-        "error: rate limited"
-    )
+    assert render_text("code.search", payload) == ("[github] matches: 2 (showing 1)\nrepo:/src/app.py\n\n[azdo]\nerror: rate limited")
 
 
 def test_render_text_grouped_code_search_hides_lower_bound_warning_and_shows_plus() -> None:
@@ -459,10 +427,7 @@ def test_render_text_grouped_code_search_hides_lower_bound_warning_and_shows_plu
         "summary": {"queried": ["gitlab"]},
     }
 
-    assert render_text("code.search", payload) == (
-        "matches: 200+ (showing 1)\n"
-        "repo:/src/app.py"
-    )
+    assert render_text("code.search", payload) == ("matches: 200+ (showing 1)\nrepo:/src/app.py")
 
 
 def test_render_text_flattens_single_remote_and_omits_duplicate_grep_warnings() -> None:
@@ -538,10 +503,7 @@ def test_render_text_grouped_discovery_output_surfaces_warning_and_partial() -> 
         "summary": {"queried": ["gitlab-infra"]},
     }
 
-    assert render_text("groups", payload) == (
-        "platform/api\n"
-        "warning: showing 1 matching groups; use --skip/--take to see more."
-    )
+    assert render_text("groups", payload) == ("platform/api\nwarning: showing 1 matching groups; use --skip/--take to see more.")
 
 
 def test_render_text_falls_back_to_json_for_unknown_commands() -> None:
@@ -763,10 +725,7 @@ def test_render_text_pipelines_list_header_includes_via_stage_and_job() -> None:
         },
     )
 
-    assert (
-        rendered.splitlines()[0]
-        == "@p:55|prj:repo-a|ref:main|st:err|nm:Main release pipeline|via:deploy/release-pipeline"
-    )
+    assert rendered.splitlines()[0] == "@p:55|prj:repo-a|ref:main|st:err|nm:Main release pipeline|via:deploy/release-pipeline"
 
 
 def test_render_text_pipelines_list_renders_stage_less_jobs_without_stage_header() -> None:
@@ -790,13 +749,7 @@ def test_render_text_pipelines_list_renders_stage_less_jobs_without_stage_header
         },
     )
 
-    assert rendered == (
-        "@p:900|prj:7|ref:main|st:run\n"
-        "*j1:build|ok|30s\n"
-        "*j2:test|run|-\n"
-        "returned_count: 1\n"
-        "total_count: 1"
-    )
+    assert rendered == ("@p:900|prj:7|ref:main|st:run\n*j1:build|ok|30s\n*j2:test|run|-\nreturned_count: 1\ntotal_count: 1")
 
 
 def test_render_text_pipelines_artifacts_list_emits_paths_only() -> None:

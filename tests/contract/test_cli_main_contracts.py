@@ -48,11 +48,7 @@ def test_configure_logging_is_idempotent(monkeypatch: Any) -> None:
         cli_main._configure_logging(verbose=True)
         cli_main._configure_logging(verbose=False)
 
-        managed_handlers = [
-            handler
-            for handler in logger.handlers
-            if getattr(handler, cli_main._SMITH_CLI_HANDLER_ATTR, False)
-        ]
+        managed_handlers = [handler for handler in logger.handlers if getattr(handler, cli_main._SMITH_CLI_HANDLER_ATTR, False)]
         assert len(managed_handlers) == 1
         assert managed_handlers[0].level == cli_main.logging.WARNING
     finally:

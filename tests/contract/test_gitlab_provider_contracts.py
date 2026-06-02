@@ -1859,6 +1859,7 @@ def test_gitlab_grep_job_artifacts_downloads_extracts_and_reuses_temp_checkout(
     with zipfile.ZipFile(archive_buffer, "w") as archive:
         archive.writestr("reports/sonar.log", "ok\nerror\nok\n")
         archive.writestr("coverage/index.html", "<html>ok</html>\n")
+        archive.writestr(".github/workflows/ci.yml", "before\nneedle\n")
     archive_bytes = archive_buffer.getvalue()
     download_calls: list[str] = []
 
@@ -1906,6 +1907,15 @@ def test_gitlab_grep_job_artifacts_downloads_extracts_and_reuses_temp_checkout(
         from_line=2,
         to_line=2,
     )
+    hidden_count_result = provider.grep_job_artifacts(
+        repo=_FULL_REPO,
+        pipeline_id=77,
+        job_id=88,
+        pattern="needle",
+        output_mode="count",
+        context_lines=0,
+        path=".github/workflows/ci.yml",
+    )
 
     checkout_dir = (
         tmp_path
@@ -1924,6 +1934,12 @@ def test_gitlab_grep_job_artifacts_downloads_extracts_and_reuses_temp_checkout(
     }
     assert count_result == {
         "text": "/reports/sonar.log:1",
+        "files_matched": 1,
+        "warnings": [],
+        "partial": False,
+    }
+    assert hidden_count_result == {
+        "text": "/.github/workflows/ci.yml:1",
         "files_matched": 1,
         "warnings": [],
         "partial": False,
@@ -1953,12 +1969,16 @@ def test_gitlab_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
         ]
 
     monkeypatch.setattr(provider, "_get_paginated_list", _fake_paginated_list)
-    monkeypatch.setattr(provider, "_request_json", lambda method, path, **kwargs: {
-        "iid": 10,
-        "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/10",
-        "state": "closed",
-        "title": "Incident",
-    })
+    monkeypatch.setattr(
+        provider,
+        "_request_json",
+        lambda method, path, **kwargs: {
+            "iid": 10,
+            "web_url": "https://gitlab.com/gitlab-org/repo-a/-/issues/10",
+            "state": "closed",
+            "title": "Incident",
+        },
+    )
     monkeypatch.setattr(provider, "_project_path_from_id", lambda project_id: "gitlab-org/repo-a")
 
     search = provider.search_work_items(
@@ -2253,9 +2273,7 @@ def test_gitlab_list_pipelines_traverses_bridges_and_normalizes_downstream(monke
     # GraphQL path fails because the test only stubs REST GETs; we exercise
     # the REST fallback which adds a partial flag + warning.
     assert result["partial"] is True
-    assert any(
-        "GraphQL unavailable" in warning for warning in result["warnings"]
-    )
+    assert any("GraphQL unavailable" in warning for warning in result["warnings"])
 
 
 def test_gitlab_list_pipelines_applies_grep_status_and_max_depth(monkeypatch: Any) -> None:
@@ -2505,9 +2523,7 @@ def _graphql_job_node(
         "manualJob": manual,
         "webPath": f"/project/-/jobs/{job_id}",
         "environment": {"name": environment} if environment else None,
-        "previousStageJobsOrNeeds": {
-            "nodes": [{"name": need} for need in (needs or [])]
-        },
+        "previousStageJobsOrNeeds": {"nodes": [{"name": need} for need in (needs or [])]},
         "downstreamPipeline": downstream,
     }
 

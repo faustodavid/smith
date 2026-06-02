@@ -234,9 +234,7 @@ def test_gitlab_groups_parser_uses_canonical_command_id() -> None:
 
 def test_gitlab_groups_parser_accepts_discovery_flags() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(
-        ["gitlab-infra", "groups", "--grep", "^platform", "--skip", "5", "--take", "15"]
-    )
+    args = parser.parse_args(["gitlab-infra", "groups", "--grep", "^platform", "--skip", "5", "--take", "15"])
 
     assert args.command_id == "groups"
     assert args.remote == "gitlab-infra"
@@ -676,9 +674,7 @@ def test_code_search_parser_rejects_removed_global_filters() -> None:
 
 def test_remote_code_search_parser_uses_named_remote() -> None:
     parser = _build_test_parser()
-    args = parser.parse_args(
-        ["gitlab-infra", "code", "search", "grafana", "--repo", "engineering-tools/repo-a", "--glob", "src/**/*.py"]
-    )
+    args = parser.parse_args(["gitlab-infra", "code", "search", "grafana", "--repo", "engineering-tools/repo-a", "--glob", "src/**/*.py"])
 
     assert args.command_id == "code.search"
     assert args.remote == "gitlab-infra"

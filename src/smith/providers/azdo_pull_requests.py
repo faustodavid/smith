@@ -38,10 +38,12 @@ class AzdoPullRequestMixin:
         tokens = cls._query_tokens(query)
         if not tokens:
             return True
-        searchable = " ".join([
-            str(item.get("title") or ""),
-            str(item.get("description") or ""),
-        ]).lower()
+        searchable = " ".join(
+            [
+                str(item.get("title") or ""),
+                str(item.get("description") or ""),
+            ]
+        ).lower()
         return all(token in searchable for token in tokens)
 
     def _pull_request_row(
@@ -74,11 +76,7 @@ class AzdoPullRequestMixin:
             "project_name": project_name,
             "repository_name": str(repository.get("name") or ""),
             "repository_id": str(repository.get("id") or ""),
-            "closed_date": (
-                closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
-                if closed_dt
-                else None
-            ),
+            "closed_date": (closed_dt.astimezone(UTC).strftime("%Y-%m-%d") if closed_dt else None),
             "source_branch": normalize_branch_name(item.get("sourceRefName")),
             "target_branch": normalize_branch_name(item.get("targetRefName")),
             "target_ref": item.get("targetRefName"),
@@ -122,10 +120,7 @@ class AzdoPullRequestMixin:
                     page_size = min(max(take, 1), 100)
                     local_skip = 0
                     if repo_scope:
-                        url = (
-                            f"{self.org_url}/{project_name}/_apis/git/repositories/"
-                            f"{quote(str(repo_scope), safe='')}/pullrequests"
-                        )
+                        url = f"{self.org_url}/{project_name}/_apis/git/repositories/{quote(str(repo_scope), safe='')}/pullrequests"
                     else:
                         url = f"{self.org_url}/{project_name}/_apis/git/pullrequests"
                     while True:
@@ -137,17 +132,11 @@ class AzdoPullRequestMixin:
                         }
                         if include_labels:
                             params["searchCriteria.includeLabels"] = "true"
-                        params["searchCriteria.queryTimeRangeType"] = (
-                            "closed" if status in {"completed", "abandoned"} else "created"
-                        )
+                        params["searchCriteria.queryTimeRangeType"] = "closed" if status in {"completed", "abandoned"} else "created"
                         if from_dt:
-                            params["searchCriteria.minTime"] = from_dt.astimezone(UTC).strftime(
-                                "%Y-%m-%dT%H:%M:%SZ"
-                            )
+                            params["searchCriteria.minTime"] = from_dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                         if to_dt:
-                            params["searchCriteria.maxTime"] = to_dt.astimezone(UTC).strftime(
-                                "%Y-%m-%dT%H:%M:%SZ"
-                            )
+                            params["searchCriteria.maxTime"] = to_dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
                         data = self._request_json("GET", url, params=params)
                         items = data.get("value", [])
@@ -165,10 +154,7 @@ class AzdoPullRequestMixin:
                             repository_name = str(repository.get("name") or "")
                             repository_id = str(repository.get("id") or "")
                             if repo_scope is None and repo_filter:
-                                if (
-                                    repository_name.lower() not in repo_filter
-                                    and repository_id.lower() not in repo_filter
-                                ):
+                                if repository_name.lower() not in repo_filter and repository_id.lower() not in repo_filter:
                                     continue
 
                             created_by = item.get("createdBy") or {}
@@ -250,10 +236,7 @@ class AzdoPullRequestMixin:
                     page_size = min(max(take, 1), 100)
                     local_skip = 0
                     if repo_scope:
-                        url = (
-                            f"{self.org_url}/{project_name}/_apis/git/repositories/"
-                            f"{quote(str(repo_scope), safe='')}/pullrequests"
-                        )
+                        url = f"{self.org_url}/{project_name}/_apis/git/repositories/{quote(str(repo_scope), safe='')}/pullrequests"
                     else:
                         url = f"{self.org_url}/{project_name}/_apis/git/pullrequests"
                     while True:
@@ -265,17 +248,11 @@ class AzdoPullRequestMixin:
                         }
                         if include_labels:
                             params["searchCriteria.includeLabels"] = "true"
-                        params["searchCriteria.queryTimeRangeType"] = (
-                            "closed" if status in {"completed", "abandoned"} else "created"
-                        )
+                        params["searchCriteria.queryTimeRangeType"] = "closed" if status in {"completed", "abandoned"} else "created"
                         if from_dt:
-                            params["searchCriteria.minTime"] = from_dt.astimezone(UTC).strftime(
-                                "%Y-%m-%dT%H:%M:%SZ"
-                            )
+                            params["searchCriteria.minTime"] = from_dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                         if to_dt:
-                            params["searchCriteria.maxTime"] = to_dt.astimezone(UTC).strftime(
-                                "%Y-%m-%dT%H:%M:%SZ"
-                            )
+                            params["searchCriteria.maxTime"] = to_dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
                         data = self._request_json("GET", url, params=params)
                         items = data.get("value", [])
@@ -294,10 +271,7 @@ class AzdoPullRequestMixin:
                             repository_name = str(repository.get("name") or "")
                             repository_id = str(repository.get("id") or "")
                             if repo_scope is None and repo_filter:
-                                if (
-                                    repository_name.lower() not in repo_filter
-                                    and repository_id.lower() not in repo_filter
-                                ):
+                                if repository_name.lower() not in repo_filter and repository_id.lower() not in repo_filter:
                                     continue
 
                             created_by = item.get("createdBy") or {}
@@ -345,18 +319,9 @@ class AzdoPullRequestMixin:
         repo: str,
         pull_request_id: int,
     ) -> dict[str, Any]:
-        pr_url = (
-            f"{self.org_url}/{project}/_apis/git/repositories/{repo}/pullrequests/"
-            f"{pull_request_id}"
-        )
-        threads_url = (
-            f"{self.org_url}/{project}/_apis/git/repositories/{repo}/pullrequests/"
-            f"{pull_request_id}/threads"
-        )
-        iterations_url = (
-            f"{self.org_url}/{project}/_apis/git/repositories/{repo}/pullrequests/"
-            f"{pull_request_id}/iterations"
-        )
+        pr_url = f"{self.org_url}/{project}/_apis/git/repositories/{repo}/pullrequests/{pull_request_id}"
+        threads_url = f"{self.org_url}/{project}/_apis/git/repositories/{repo}/pullrequests/{pull_request_id}/threads"
+        iterations_url = f"{self.org_url}/{project}/_apis/git/repositories/{repo}/pullrequests/{pull_request_id}/iterations"
 
         params = {"api-version": self.api_version}
         pr = self._request_json("GET", pr_url, params=params)
@@ -364,6 +329,7 @@ class AzdoPullRequestMixin:
         threads = threads_response.get("value", []) if isinstance(threads_response, dict) else []
 
         changed_files: list[str] = []
+        warnings: list[str] = []
         try:
             iterations = self._request_json("GET", iterations_url, params=params).get("value", [])
             if iterations:
@@ -391,12 +357,15 @@ class AzdoPullRequestMixin:
         except Exception as exc:
             logger.debug("Failed to fetch PR iteration changes for PR %d: %s", pull_request_id, exc)
             changed_files = []
+            warnings.append(f"Failed to fetch pull request changed files: {exc}")
 
         return {
             "pull_request": pr,
             "threads": threads,
             "changed_files": changed_files,
             "diffs": {},
+            "partial": bool(warnings),
+            "warnings": warnings,
         }
 
     def get_pull_request_threads(
@@ -407,10 +376,7 @@ class AzdoPullRequestMixin:
         pull_request_id: int,
         include_deleted: bool = False,
     ) -> dict[str, Any]:
-        threads_url = (
-            f"{self.org_url}/{project}/_apis/git/repositories/{repo}/pullrequests/"
-            f"{pull_request_id}/threads"
-        )
+        threads_url = f"{self.org_url}/{project}/_apis/git/repositories/{repo}/pullrequests/{pull_request_id}/threads"
         params = {"api-version": self.api_version}
         threads_response = self._request_json("GET", threads_url, params=params)
         raw_threads = threads_response.get("value", []) if isinstance(threads_response, dict) else []

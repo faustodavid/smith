@@ -20,9 +20,7 @@ def test_github_maps_project_repository_views(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         provider,
         "_get_paginated_list",
-        lambda path, **kwargs: [
-            {"id": 1, "name": "repo-a", "default_branch": "main", "html_url": "https://github.com/octo-org/repo-a"}
-        ],
+        lambda path, **kwargs: [{"id": 1, "name": "repo-a", "default_branch": "main", "html_url": "https://github.com/octo-org/repo-a"}],
     )
 
     assert provider.list_projects() == [
@@ -252,10 +250,7 @@ def test_github_grep_respects_global_concurrency_limit_when_parallel_enabled(mon
     monkeypatch.setenv("GITHUB_GREP_MAX_WORKERS", "12")
     monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "false")
 
-    file_entries = [
-        {"path": f"/file-{index}.txt", "sha": f"sha-{index}"}
-        for index in range(1, 5)
-    ]
+    file_entries = [{"path": f"/file-{index}.txt", "sha": f"sha-{index}"} for index in range(1, 5)]
 
     def fake_repository_files(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return file_entries
@@ -310,10 +305,7 @@ def test_github_grep_honors_grep_worker_limit_when_lower(monkeypatch: Any) -> No
     monkeypatch.setenv("GITHUB_GREP_USE_LOCAL_CACHE", "false")
 
     def fake_repository_files(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return [
-            {"path": f"/error-{index}.txt", "sha": f"sha-error-{index}"}
-            for index in range(1, 5)
-        ]
+        return [{"path": f"/error-{index}.txt", "sha": f"sha-error-{index}"} for index in range(1, 5)]
 
     def fake_file_text(*args: Any, **kwargs: Any) -> str:
         return "error\nmatch"
@@ -432,6 +424,7 @@ def test_github_grep_uses_local_checkout_cache_when_available(monkeypatch: Any, 
     os.makedirs(checkout_dir, exist_ok=True)
     os.makedirs(os.path.join(checkout_dir, ".git"), exist_ok=True)
     Path(os.path.join(checkout_dir, ".smith_last_fetch")).touch()
+    provider._mark_local_checkout_branch(checkout_dir, "main")
     os.makedirs(os.path.join(checkout_dir, "src"), exist_ok=True)
     Path(os.path.join(checkout_dir, "src", "app.py")).write_text("ok\nerror\nerror\n", encoding="utf-8")
 
@@ -761,6 +754,44 @@ def test_github_list_pull_requests_fetches_closed_state_when_open_page_is_full(m
 
     assert [call["params"]["state"] for call in calls] == ["open", "closed"]
     assert result["results"][0]["pr_id"] == 99
+
+
+def test_github_list_pull_requests_reports_more_when_page_window_is_full(monkeypatch: Any) -> None:
+    provider = _provider()
+    pulls = [
+        {
+            "number": index,
+            "title": f"Open {index}",
+            "state": "open",
+            "draft": False,
+            "user": {"login": "alice"},
+            "created_at": f"2025-01-{index:02d}T00:00:00Z",
+            "closed_at": None,
+            "merged_at": None,
+            "head": {"ref": f"feature/open-{index}"},
+            "base": {"ref": "main"},
+            "labels": [],
+            "id": 1000 + index,
+        }
+        for index in range(1, 3)
+    ]
+
+    monkeypatch.setattr(provider, "_request", lambda *args, **kwargs: pulls)
+
+    result = provider.list_pull_requests(
+        repos=["repo-a"],
+        statuses=["active"],
+        creators=None,
+        date_from=None,
+        date_to=None,
+        skip=0,
+        take=1,
+        exclude_drafts=False,
+        include_labels=False,
+    )
+
+    assert result["returned_count"] == 1
+    assert result["has_more"] is True
 
 
 def test_github_search_pull_requests_uses_issue_search_and_maps_results(monkeypatch: Any) -> None:
@@ -1192,6 +1223,31 @@ def test_github_build_log_and_build_grep(monkeypatch: Any) -> None:
     }
 
 
+def test_github_build_log_paginates_jobs(monkeypatch: Any) -> None:
+    provider = _provider()
+    calls: list[dict[str, Any]] = []
+
+    def _fake_request_json(method: str, path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        calls.append({"path": path, "params": params})
+        if path.endswith("/actions/runs/55") and not path.endswith("/jobs"):
+            return {"run_number": 12, "status": "completed", "conclusion": "success", "name": "CI"}
+        if path.endswith("/actions/runs/55/jobs"):
+            page = (params or {}).get("page")
+            if page == 1:
+                return {"total_count": 101, "jobs": [{"id": index, "name": f"job-{index}"} for index in range(1, 101)]}
+            if page == 2:
+                return {"total_count": 101, "jobs": [{"id": 101, "name": "job-101"}]}
+        raise AssertionError(f"unexpected request: {path} {params}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json)
+
+    build_log = provider.get_build_log(repo="repo-a", build_id=55)
+
+    assert len(build_log["logs"]) == 101
+    assert build_log["logs"][-1]["id"] == 101
+    assert [call["params"]["page"] for call in calls if call["path"].endswith("/jobs")] == [1, 2]
+
+
 def test_github_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) -> None:
     provider = _provider()
     captured_params: list[dict[str, Any]] = []
@@ -1226,7 +1282,7 @@ def test_github_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
 
     search = provider.search_work_items(
         query="incident",
-        project="repo-a",
+        project="octo-org",
         repo=None,
         state="open",
         assigned_to="alice",
@@ -1237,7 +1293,7 @@ def test_github_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
     ticket = provider.get_ticket_by_id(repo="repo-a", work_item_id=10)
 
     assert "org:octo-org" in captured_params[0]["params"]["q"]
-    assert "repo:octo-org/repo-a" in captured_params[0]["params"]["q"]
+    assert "repo:octo-org/repo-a" not in captured_params[0]["params"]["q"]
     assert "is:open" in captured_params[0]["params"]["q"]
     assert "assignee:alice" in captured_params[0]["params"]["q"]
     assert search["results"][0]["tags"] == ["sev1"]
@@ -1251,6 +1307,17 @@ def test_github_issue_search_ticket_mapping_and_my_work_items(monkeypatch: Any) 
             "System.Title": "Incident",
         },
     }
+
+    captured_params.clear()
+    provider.search_work_items(
+        query="incident",
+        project="repo-a",
+        repo=None,
+        skip=0,
+        take=1,
+    )
+
+    assert "repo:octo-org/repo-a" in captured_params[0]["params"]["q"]
 
     forwarded: dict[str, Any] = {}
     monkeypatch.setattr(

@@ -62,6 +62,7 @@ def parse_matrix_from_name(name: Any) -> tuple[str, tuple[int, int] | None]:
         return base, (index, total)
     return clean, None
 
+
 VALID_PIPELINE_STATUSES: frozenset[str] = frozenset(
     {
         "created",
@@ -235,9 +236,7 @@ def _normalize_job_parts(
 ]:
     base_name, parsed_matrix = parse_matrix_from_name(name)
     effective_matrix = matrix if matrix is not None else parsed_matrix
-    normalized_needs = tuple(
-        str(item).strip() for item in (needs or ()) if str(item).strip()
-    )
+    normalized_needs = tuple(str(item).strip() for item in (needs or ()) if str(item).strip())
     return (
         _normalize_id(job_id),
         base_name,
@@ -357,9 +356,7 @@ def build_job_dict(
         "manual": normalized_manual,
         "environment": normalized_environment,
         "needs": list(normalized_needs),
-        "downstream": normalized_downstream.to_dict()
-        if normalized_downstream is not None
-        else None,
+        "downstream": normalized_downstream.to_dict() if normalized_downstream is not None else None,
     }
 
 
@@ -372,9 +369,7 @@ class PipelineListQuery:
     requested_take: int = DEFAULT_PIPELINE_LIST_TAKE
     max_depth: int = 0
     warnings: tuple[str, ...] = ()
-    _compiled_pattern: re.Pattern[str] | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
+    _compiled_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False, compare=False)
 
     @classmethod
     def create(
@@ -437,10 +432,7 @@ class PipelineListQuery:
         if self.statuses and str(row.get("status") or "").strip().lower() not in self.statuses:
             return False
         if self._compiled_pattern is not None:
-            haystack = " ".join(
-                str(row.get(key) or "").strip()
-                for key in ("project", "name", "ref", "status", "source")
-            )
+            haystack = " ".join(str(row.get(key) or "").strip() for key in ("project", "name", "ref", "status", "source"))
             if not self._compiled_pattern.search(haystack):
                 return False
         return True
@@ -643,11 +635,7 @@ def build_pipeline_list_payload(
     paged = _paginate(filtered, skip=query.skip, take=query.take)
     rendered_rows = paged
     if query.statuses:
-        selected_pipeline_keys = {
-            _pipeline_identity_key(row)
-            for row in filtered
-            if isinstance(row, dict)
-        }
+        selected_pipeline_keys = {_pipeline_identity_key(row) for row in filtered if isinstance(row, dict)}
         rendered_rows = [
             _slice_pipeline_jobs_for_query(
                 row,
@@ -661,9 +649,7 @@ def build_pipeline_list_payload(
     if extra_warnings:
         warnings.extend(extra_warnings)
     if total_count > query.skip + len(paged):
-        warnings.append(
-            f"showing {len(paged)} of {total_count} matching pipelines; use --skip/--take to see more."
-        )
+        warnings.append(f"showing {len(paged)} of {total_count} matching pipelines; use --skip/--take to see more.")
 
     return {
         "pipelines": rendered_rows,

@@ -44,15 +44,8 @@ def _github_job_row(item: dict[str, Any]) -> JobRow:
 class GitHubBuildMixin:
     def get_build_log(self: Any, *, repo: str, build_id: int) -> dict[str, Any]:
         run = self._request_json("GET", f"{self._repo_prefix(repo)}/actions/runs/{build_id}")
-        jobs_data = self._request_json(
-            "GET",
-            f"{self._repo_prefix(repo)}/actions/runs/{build_id}/jobs",
-            params={"per_page": 100, "page": 1},
-        )
         jobs = []
-        for item in jobs_data.get("jobs", []):
-            if not isinstance(item, dict):
-                continue
+        for item in self._list_github_run_job_payloads(repo=repo, run_id=build_id):
             jobs.append(
                 {
                     "id": item.get("id"),
@@ -110,9 +103,7 @@ class GitHubBuildMixin:
         else:
             build_logs = self.get_build_log(repo=repo, build_id=build_id)
             resolved_log_ids = [
-                int(item["id"])
-                for item in build_logs.get("logs", [])
-                if isinstance(item, dict) and item.get("id") is not None
+                int(item["id"]) for item in build_logs.get("logs", []) if isinstance(item, dict) and item.get("id") is not None
             ]
 
         def _get_content(lid: int) -> str:
@@ -138,9 +129,7 @@ class GitHubBuildMixin:
         pipeline_id: int,
         query: PipelineListQuery,
     ) -> dict[str, Any]:
-        run = self._request_json(
-            "GET", f"{self._repo_prefix(repo)}/actions/runs/{pipeline_id}"
-        )
+        run = self._request_json("GET", f"{self._repo_prefix(repo)}/actions/runs/{pipeline_id}")
         jobs = self._list_github_run_jobs(repo=repo, run_id=pipeline_id)
         row = build_pipeline_row(
             pipeline_id=run.get("id") or pipeline_id,
@@ -161,10 +150,8 @@ class GitHubBuildMixin:
         )
         return build_pipeline_list_payload(rows=[row], query=query)
 
-    def _list_github_run_jobs(
-        self: Any, *, repo: str, run_id: int
-    ) -> list[JobRow]:
-        collected: list[JobRow] = []
+    def _list_github_run_job_payloads(self: Any, *, repo: str, run_id: int) -> list[dict[str, Any]]:
+        collected: list[dict[str, Any]] = []
         page = 1
         per_page = 100
         while True:
@@ -193,7 +180,7 @@ class GitHubBuildMixin:
             for item in batch:
                 if not isinstance(item, dict):
                     continue
-                collected.append(_github_job_row(item))
+                collected.append(item)
 
             total = payload.get("total_count")
             if isinstance(total, int) and len(collected) >= total:
@@ -203,3 +190,6 @@ class GitHubBuildMixin:
             page += 1
 
         return collected
+
+    def _list_github_run_jobs(self: Any, *, repo: str, run_id: int) -> list[JobRow]:
+        return [_github_job_row(item) for item in self._list_github_run_job_payloads(repo=repo, run_id=run_id)]

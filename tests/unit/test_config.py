@@ -399,11 +399,7 @@ def test_parse_runtime_config_gitlab_glab_host_fallback_supports_single_label_ho
             raise subprocess.CalledProcessError(
                 1,
                 args,
-                output=(
-                    "gitlab:\n"
-                    "  ✓ Logged in to https://gitlab as fausto\n"
-                    "  ✓ Token found: **************************\n"
-                ),
+                output=("gitlab:\n  ✓ Logged in to https://gitlab as fausto\n  ✓ Token found: **************************\n"),
             )
         if args == ["glab", "config", "get", "api_protocol", "--host", "gitlab"]:
             return subprocess.CompletedProcess(args, 0, stdout="ftp\n")

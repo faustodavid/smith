@@ -91,24 +91,36 @@ def _make_remote_config(
     api_url: str | None = None,
 ) -> RemoteConfig:
     default_org = {"github": "octo-org", "gitlab": "", "azdo": "acme", "youtrack": ""}[provider] if org is None else org
-    default_host = {
-        "github": "github.com",
-        "gitlab": "gitlab.com",
-        "azdo": "dev.azure.com",
-        "youtrack": "youtrack.example.test",
-    }[provider] if host is None else host
-    default_token_env = {
-        "github": "GITHUB_TOKEN",
-        "gitlab": "GITLAB_TOKEN",
-        "azdo": "AZURE_DEVOPS_PAT",
-        "youtrack": "YOUTRACK_TOKEN",
-    }[provider] if token_env is None else token_env
-    default_api_url = {
-        "github": "https://api.github.com",
-        "gitlab": "https://gitlab.com/api/v4",
-        "azdo": "https://dev.azure.com",
-        "youtrack": "https://youtrack.example.test/api",
-    }[provider] if api_url is None else api_url
+    default_host = (
+        {
+            "github": "github.com",
+            "gitlab": "gitlab.com",
+            "azdo": "dev.azure.com",
+            "youtrack": "youtrack.example.test",
+        }[provider]
+        if host is None
+        else host
+    )
+    default_token_env = (
+        {
+            "github": "GITHUB_TOKEN",
+            "gitlab": "GITLAB_TOKEN",
+            "azdo": "AZURE_DEVOPS_PAT",
+            "youtrack": "YOUTRACK_TOKEN",
+        }[provider]
+        if token_env is None
+        else token_env
+    )
+    default_api_url = (
+        {
+            "github": "https://api.github.com",
+            "gitlab": "https://gitlab.com/api/v4",
+            "azdo": "https://dev.azure.com",
+            "youtrack": "https://youtrack.example.test/api",
+        }[provider]
+        if api_url is None
+        else api_url
+    )
     return RemoteConfig(
         name=name,
         provider=provider,
@@ -168,27 +180,47 @@ def test_is_partial_result_detects_grouped_and_flat_payloads() -> None:
     [
         (_make_args(command_id="repos", remote="all", remote_provider=""), "does not support remote 'all'"),
         (_make_args(command_id="code.search", query="   "), "code search requires a query"),
-        (_make_args(command_id="code.search", remote="all", remote_provider="", project="proj-a", repos=None),
-         "does not support `--project`"),
-        (_make_args(command_id="code.search", remote="all", remote_provider="", project=None, repos=["repo-a"]),
-         "does not support `--repo`"),
+        (
+            _make_args(command_id="code.search", remote="all", remote_provider="", project="proj-a", repos=None),
+            "does not support `--project`",
+        ),
+        (
+            _make_args(command_id="code.search", remote="all", remote_provider="", project=None, repos=["repo-a"]),
+            "does not support `--repo`",
+        ),
         (_make_args(command_id="prs.search", query="   ", repo=None, repos=None), "prs search requires a query"),
-        (_make_args(command_id="prs.search", remote="all", remote_provider="", project="proj-a", repo=None, repos=None),
-         "does not support `--project`"),
-        (_make_args(command_id="prs.search", remote="all", remote_provider="", project=None, repo=None, repos=["repo-a"]),
-         "does not support `--repo`"),
-        (_make_args(command_id="prs.search", remote="all", remote_provider="", project=None, status=["stale"], repo=None, repos=None),
-         "status must be one of"),
-        (_make_args(command_id="code.search", remote="github", remote_provider="github", project="proj-a"),
-         "GitHub code search does not support `--project`"),
-        (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project="proj-a"),
-         "GitLab code search does not support `--project`"),
-        (_make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project=None, repos=["repo-a"]),
-         "GitLab repositories must use full `group/project` paths"),
-        (_make_args(command_id="code.grep", remote="gitlab", remote_provider="gitlab", project=None, repo="repo-a"),
-         "GitLab repositories must use full `group/project` paths"),
-        (_make_args(command_id="prs.search", remote="gitlab", remote_provider="gitlab", project=None, repo=None, repos=["repo-a"]),
-         "GitLab repositories must use full `group/project` paths"),
+        (
+            _make_args(command_id="prs.search", remote="all", remote_provider="", project="proj-a", repo=None, repos=None),
+            "does not support `--project`",
+        ),
+        (
+            _make_args(command_id="prs.search", remote="all", remote_provider="", project=None, repo=None, repos=["repo-a"]),
+            "does not support `--repo`",
+        ),
+        (
+            _make_args(command_id="prs.search", remote="all", remote_provider="", project=None, status=["stale"], repo=None, repos=None),
+            "status must be one of",
+        ),
+        (
+            _make_args(command_id="code.search", remote="github", remote_provider="github", project="proj-a"),
+            "GitHub code search does not support `--project`",
+        ),
+        (
+            _make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project="proj-a"),
+            "GitLab code search does not support `--project`",
+        ),
+        (
+            _make_args(command_id="code.search", remote="gitlab", remote_provider="gitlab", project=None, repos=["repo-a"]),
+            "GitLab repositories must use full `group/project` paths",
+        ),
+        (
+            _make_args(command_id="code.grep", remote="gitlab", remote_provider="gitlab", project=None, repo="repo-a"),
+            "GitLab repositories must use full `group/project` paths",
+        ),
+        (
+            _make_args(command_id="prs.search", remote="gitlab", remote_provider="gitlab", project=None, repo=None, repos=["repo-a"]),
+            "GitLab repositories must use full `group/project` paths",
+        ),
     ],
 )
 def test_validate_args_for_remote_rejects_invalid_inputs(
@@ -955,10 +987,12 @@ def test_handle_list_groups_forwards_selected_remote(monkeypatch: Any, capsys: A
 
     assert exit_code == handlers.EXIT_OK
     assert output.out.strip() == "groups:groups"
-    assert client.calls == [(
-        "execute_list_groups",
-        {"remote_or_provider": "gitlab-infra", "grep": "^platform", "skip": 5, "take": 17},
-    )]
+    assert client.calls == [
+        (
+            "execute_list_groups",
+            {"remote_or_provider": "gitlab-infra", "grep": "^platform", "skip": 5, "take": 17},
+        )
+    ]
 
 
 def test_handle_youtrack_work_get(monkeypatch: Any, capsys: Any) -> None:

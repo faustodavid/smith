@@ -50,10 +50,7 @@ class SmithArgumentParser(argparse.ArgumentParser):
 
     def error(self, message: str) -> Never:
         if self._remote_hint and (
-            "argument remote" in message
-            or "argument --remote" in message
-            or "required: remote" in message
-            or "invalid choice" in message
+            "argument remote" in message or "argument --remote" in message or "required: remote" in message or "invalid choice" in message
         ):
             message = f"{message}\n{self._remote_hint}"
         super().error(message)
@@ -193,8 +190,7 @@ def _add_artifact_grep_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "pattern",
         help=(
-            'Regex pattern. Use ".*" to match all. '
-            'Form: smith <remote> pipelines artifacts grep <scope> <pipeline_id> <job_id> "<regex>"'
+            'Regex pattern. Use ".*" to match all. Form: smith <remote> pipelines artifacts grep <scope> <pipeline_id> <job_id> "<regex>"'
         ),
     )
     parser.add_argument(
@@ -558,9 +554,7 @@ def _add_pipeline_positional_args(parser: argparse.ArgumentParser, *, remote: Re
 
 
 def _add_remote_pipelines_group(remote_subparsers: Any, *, remote: RemoteConfig) -> None:
-    pipelines = _add_parser(
-        remote_subparsers, "pipelines", help_text="List, read, and grep pipelines"
-    )
+    pipelines = _add_parser(remote_subparsers, "pipelines", help_text="List, read, and grep pipelines")
     pipelines_sub = pipelines.add_subparsers(dest="pipelines_action", required=True)
 
     id_label = _PIPELINE_ID_LABELS.get(remote.provider, "Pipeline ID")

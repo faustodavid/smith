@@ -70,24 +70,17 @@ class GitHubProvider(
                 text=True,
             )
         except Exception as exc:
-            raise SmithAuthError(
-                "Failed to acquire GitHub token. Set GITHUB_TOKEN or run `gh auth login`."
-            ) from exc
+            raise SmithAuthError("Failed to acquire GitHub token. Set GITHUB_TOKEN or run `gh auth login`.") from exc
 
         token = result.stdout.strip()
         if not token:
-            raise SmithAuthError(
-                "GitHub token is empty. Set GITHUB_TOKEN or run `gh auth login`."
-            )
+            raise SmithAuthError("GitHub token is empty. Set GITHUB_TOKEN or run `gh auth login`.")
 
         self._github_token = token
         return self._github_token
 
     def _auth_error_message(self) -> str:
-        return (
-            "GitHub authentication rejected with HTTP 401/403. "
-            "Set GITHUB_TOKEN or run `gh auth login` and retry."
-        )
+        return "GitHub authentication rejected with HTTP 401/403. Set GITHUB_TOKEN or run `gh auth login` and retry."
 
     def _default_accept_header(self) -> str:
         return "application/vnd.github+json"

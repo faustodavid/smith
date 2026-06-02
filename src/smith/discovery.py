@@ -58,7 +58,7 @@ class DiscoveryQuery:
     def is_simple_substring(self) -> bool:
         if not self.grep:
             return False
-        return not bool(re.search(r'[.^$*+?{}\[\]\\|()]', self.grep))
+        return not bool(re.search(r"[.^$*+?{}\[\]\\|()]", self.grep))
 
     def server_search_term(self) -> str | None:
         if not self.is_simple_substring() or self.grep is None:

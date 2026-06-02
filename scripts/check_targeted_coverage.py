@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
+# ruff: noqa: I001
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
 from coverage import Coverage
-
 
 MODULE_FLOORS: dict[str, float] = {
     "smith.cli.main": 95.0,

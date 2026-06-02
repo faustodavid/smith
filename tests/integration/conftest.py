@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -33,19 +34,20 @@ def github_smoke_env() -> dict[str, Any]:
         ],
         label="GitHub",
     )
-    values["SMITH_TEST_GITHUB_SEARCH_QUERY"] = (
-        os.getenv("SMITH_TEST_GITHUB_SEARCH_QUERY", "").strip()
-        or values["SMITH_TEST_GITHUB_REPO"]
-    )
+    values["SMITH_TEST_GITHUB_SEARCH_QUERY"] = os.getenv("SMITH_TEST_GITHUB_SEARCH_QUERY", "").strip() or values["SMITH_TEST_GITHUB_REPO"]
     return values
 
 
 @pytest.fixture
-def github_provider(github_smoke_env: dict[str, Any]) -> GitHubProvider:
-    return GitHubProvider(
-        config=make_runtime_config(github_org=github_smoke_env["GITHUB_ORG"]),
-        session=requests.Session(),
-    )
+def github_provider(github_smoke_env: dict[str, Any]) -> Iterator[GitHubProvider]:
+    session = requests.Session()
+    try:
+        yield GitHubProvider(
+            config=make_runtime_config(github_org=github_smoke_env["GITHUB_ORG"]),
+            session=session,
+        )
+    finally:
+        session.close()
 
 
 @pytest.fixture
@@ -60,21 +62,22 @@ def gitlab_smoke_env() -> dict[str, Any]:
         ],
         label="GitLab",
     )
-    values["SMITH_TEST_GITLAB_SEARCH_QUERY"] = (
-        os.getenv("SMITH_TEST_GITLAB_SEARCH_QUERY", "").strip()
-        or values["SMITH_TEST_GITLAB_REPO"]
-    )
+    values["SMITH_TEST_GITLAB_SEARCH_QUERY"] = os.getenv("SMITH_TEST_GITLAB_SEARCH_QUERY", "").strip() or values["SMITH_TEST_GITLAB_REPO"]
     return values
 
 
 @pytest.fixture
-def gitlab_provider(gitlab_smoke_env: dict[str, Any]) -> GitLabProvider:
+def gitlab_provider(gitlab_smoke_env: dict[str, Any]) -> Iterator[GitLabProvider]:
     gitlab_org = gitlab_smoke_env["SMITH_TEST_GITLAB_REPO"].rsplit("/", 1)[0]
-    return GitLabProvider(
-        config=make_runtime_config(),
-        session=requests.Session(),
-        gitlab_org=gitlab_org,
-    )
+    session = requests.Session()
+    try:
+        yield GitLabProvider(
+            config=make_runtime_config(),
+            session=session,
+            gitlab_org=gitlab_org,
+        )
+    finally:
+        session.close()
 
 
 @pytest.fixture
@@ -82,6 +85,7 @@ def azdo_smoke_env() -> dict[str, Any]:
     values = _required_env(
         [
             "AZURE_DEVOPS_ORG",
+            "AZURE_DEVOPS_PAT",
             "SMITH_TEST_AZDO_PROJECT",
             "SMITH_TEST_AZDO_REPO",
             "SMITH_TEST_AZDO_PR_ID",
@@ -90,16 +94,18 @@ def azdo_smoke_env() -> dict[str, Any]:
         ],
         label="Azure DevOps",
     )
-    values["SMITH_TEST_AZDO_SEARCH_QUERY"] = (
-        os.getenv("SMITH_TEST_AZDO_SEARCH_QUERY", "").strip()
-        or values["SMITH_TEST_AZDO_REPO"]
-    )
+    values["SMITH_TEST_AZDO_SEARCH_QUERY"] = os.getenv("SMITH_TEST_AZDO_SEARCH_QUERY", "").strip() or values["SMITH_TEST_AZDO_REPO"]
     return values
 
 
 @pytest.fixture
-def azdo_provider(azdo_smoke_env: dict[str, Any]) -> AzdoProvider:
-    return AzdoProvider(
-        config=make_runtime_config(azdo_org=azdo_smoke_env["AZURE_DEVOPS_ORG"]),
-        session=requests.Session(),
-    )
+def azdo_provider(azdo_smoke_env: dict[str, Any]) -> Iterator[AzdoProvider]:
+    session = requests.Session()
+    try:
+        yield AzdoProvider(
+            config=make_runtime_config(azdo_org=azdo_smoke_env["AZURE_DEVOPS_ORG"]),
+            session=session,
+            token_env="AZURE_DEVOPS_PAT",
+        )
+    finally:
+        session.close()

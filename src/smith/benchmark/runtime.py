@@ -115,10 +115,7 @@ def compare_runtime_results(
             f"improvement={improvement_pct:.2f}% target={scenario.target_improvement_pct:.2f}% -> {status}"
         )
         if status == "FAIL":
-            failures.append(
-                f"{scenario.key}: expected >= {scenario.target_improvement_pct:.2f}% "
-                f"got {improvement_pct:.2f}%"
-            )
+            failures.append(f"{scenario.key}: expected >= {scenario.target_improvement_pct:.2f}% got {improvement_pct:.2f}%")
 
     return lines, failures
 

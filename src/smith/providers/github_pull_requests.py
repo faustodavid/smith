@@ -49,11 +49,7 @@ class GitHubPullRequestMixin:
         include_labels: bool,
     ) -> dict[str, Any]:
         closed_dt = parse_iso_datetime(item.get("closed_at"))
-        repository = (
-            (item.get("base") or {}).get("repo")
-            or (item.get("head") or {}).get("repo")
-            or {}
-        )
+        repository = (item.get("base") or {}).get("repo") or (item.get("head") or {}).get("repo") or {}
         labels: list[str] = []
         if include_labels:
             for label in item.get("labels") or []:
@@ -71,11 +67,7 @@ class GitHubPullRequestMixin:
             "project_name": self._require_github_org(),
             "repository_name": repo_name,
             "repository_id": repository.get("id") or item.get("id"),
-            "closed_date": (
-                closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
-                if closed_dt
-                else None
-            ),
+            "closed_date": (closed_dt.astimezone(UTC).strftime("%Y-%m-%d") if closed_dt else None),
             "source_branch": item.get("head", {}).get("ref"),
             "target_branch": item.get("base", {}).get("ref"),
             "target_ref": item.get("base", {}).get("ref"),
@@ -104,7 +96,7 @@ class GitHubPullRequestMixin:
         creator_filter = [item.lower() for item in creators or []]
         from_dt = parse_iso_datetime(date_from)
         to_dt = parse_iso_datetime(date_to)
-        desired_count = max(1, max(0, skip) + max(1, take))
+        desired_count = max(1, max(0, skip) + max(1, take) + 1)
         single_repo_mode = len(repo_names) == 1
 
         states_to_fetch: list[str] = []
@@ -170,12 +162,7 @@ class GitHubPullRequestMixin:
                         break
                     if single_repo_mode and len(states_to_fetch) > 1 and state_output_count >= desired_count:
                         break
-                    if (
-                        github_state == "open"
-                        and from_dt
-                        and page_oldest_created
-                        and page_oldest_created < from_dt
-                    ):
+                    if github_state == "open" and from_dt and page_oldest_created and page_oldest_created < from_dt:
                         break
                     if len(pulls) < per_page:
                         break
@@ -337,11 +324,7 @@ class GitHubPullRequestMixin:
             limit=2000,
         )
         changed_files = [str(item.get("filename")) for item in files if item.get("filename")]
-        diffs = {
-            str(item.get("filename")): str(item.get("patch") or "")
-            for item in files
-            if item.get("filename")
-        }
+        diffs = {str(item.get("filename")): str(item.get("patch") or "") for item in files if item.get("filename")}
         threads_data = self.get_pull_request_threads(repo=repo, pull_request_id=pull_request_id)
         mapped_pr = {
             "pullRequestId": pr.get("number"),
@@ -365,12 +348,8 @@ class GitHubPullRequestMixin:
         pull_request_id: int,
         include_deleted: bool = False,
     ) -> dict[str, Any]:
-        issue_comments = self._get_paginated_list(
-            f"{self._repo_prefix(repo)}/issues/{pull_request_id}/comments"
-        )
-        review_comments = self._get_paginated_list(
-            f"{self._repo_prefix(repo)}/pulls/{pull_request_id}/comments"
-        )
+        issue_comments = self._get_paginated_list(f"{self._repo_prefix(repo)}/issues/{pull_request_id}/comments")
+        review_comments = self._get_paginated_list(f"{self._repo_prefix(repo)}/pulls/{pull_request_id}/comments")
 
         threads: list[dict[str, Any]] = []
         total_comments = 0

@@ -52,8 +52,7 @@ class SmithClient:
 
         if not self._config.remotes:
             raise ValueError(
-                f"No remotes configured in {_default_config_path()}. "
-                "Add at least one remote under `remotes:` or run `smith config init`."
+                f"No remotes configured in {_default_config_path()}. Add at least one remote under `remotes:` or run `smith config init`."
             )
 
         main_session = session or requests.Session()
@@ -277,15 +276,9 @@ class SmithClient:
 
         roots: list[str] = []
         if "github" in providers:
-            roots.append(
-                os.getenv("SMITH_GITHUB_GREP_CACHE_DIR", "").strip()
-                or str(Path.home() / ".cache" / "smith" / "github-grep")
-            )
+            roots.append(os.getenv("SMITH_GITHUB_GREP_CACHE_DIR", "").strip() or str(Path.home() / ".cache" / "smith" / "github-grep"))
         if "gitlab" in providers:
-            roots.append(
-                os.getenv("SMITH_GITLAB_GREP_CACHE_DIR", "").strip()
-                or str(Path.home() / ".cache" / "smith" / "gitlab-grep")
-            )
+            roots.append(os.getenv("SMITH_GITLAB_GREP_CACHE_DIR", "").strip() or str(Path.home() / ".cache" / "smith" / "gitlab-grep"))
         return roots
 
     @staticmethod

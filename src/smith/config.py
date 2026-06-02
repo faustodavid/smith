@@ -170,10 +170,14 @@ def _glab_api_protocol(host: str) -> str:
     normalized_host = _normalize_gitlab_host(host)
     if not normalized_host:
         return "https"
-    protocol = _run_glab_command(
-        ["glab", "config", "get", "api_protocol", "--host", normalized_host],
-        allow_failure_output=True,
-    ).strip().lower()
+    protocol = (
+        _run_glab_command(
+            ["glab", "config", "get", "api_protocol", "--host", normalized_host],
+            allow_failure_output=True,
+        )
+        .strip()
+        .lower()
+    )
     return protocol if protocol in {"http", "https"} else "https"
 
 
@@ -284,9 +288,7 @@ def _validate_remote_dict(name: str, remote: dict[str, Any]) -> None:
 
     provider = remote.get("provider", "").strip().lower()
     if provider not in {"github", "gitlab", "azdo", "youtrack"}:
-        raise ValueError(
-            f"Remote '{name}': provider must be one of github, gitlab, azdo, youtrack (got '{provider}')"
-        )
+        raise ValueError(f"Remote '{name}': provider must be one of github, gitlab, azdo, youtrack (got '{provider}')")
     if provider == "gitlab" and "group" in remote:
         raise ValueError(f"Remote '{name}': invalid GitLab config field 'group'; use 'org'")
 
@@ -335,7 +337,7 @@ def load_config(*, config_path: Path | None = None) -> SmithConfig:
                 host = "gitlab.com"
             elif provider == "azdo":
                 host = "dev.azure.com"
-        
+
         token_env = remote.get("token_env", "").strip() or None
         enabled = bool(remote.get("enabled", True))
         api_url = _load_remote_api_url(provider=provider, remote=remote, host=host)

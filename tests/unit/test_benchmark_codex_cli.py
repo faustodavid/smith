@@ -37,14 +37,12 @@ def test_resolve_codex_cli_path_honors_provided_path_env(monkeypatch):
     monkeypatch.setattr("smith.benchmark.codex_cli.MACOS_CODEX_CLI_CANDIDATES", ())
     monkeypatch.setattr(
         "smith.benchmark.codex_cli.shutil.which",
-        lambda cmd, path=None: "/mock/bin/codex"
-        if cmd == "codex" and path == "/Applications/Codex.app/Contents/Resources:/usr/bin:/bin"
-        else None,
+        lambda cmd, path=None: (
+            "/mock/bin/codex" if cmd == "codex" and path == "/Applications/Codex.app/Contents/Resources:/usr/bin:/bin" else None
+        ),
     )
 
-    resolved = resolve_codex_cli_path(
-        env={"PATH": "/Applications/Codex.app/Contents/Resources:/usr/bin:/bin"}
-    )
+    resolved = resolve_codex_cli_path(env={"PATH": "/Applications/Codex.app/Contents/Resources:/usr/bin:/bin"})
 
     assert resolved == "/mock/bin/codex"
 

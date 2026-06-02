@@ -21,7 +21,7 @@ def test_load_runtime_scenarios_reads_json_payload(tmp_path: Path) -> None:
                 "scenarios": [
                     {
                         "key": "code_search",
-                        "description": "smith code search \"needle\"",
+                        "description": 'smith code search "needle"',
                         "command": ["smith", "code", "search", "needle"],
                         "target_improvement_pct": 10,
                     }

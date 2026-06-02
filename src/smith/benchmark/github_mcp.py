@@ -75,8 +75,7 @@ def resolve_github_mcp_token(env: Mapping[str, str] | None = None) -> str:
         return fallback
 
     raise RuntimeError(
-        "GitHub MCP authentication is unavailable. Set GITHUB_TOKEN, GH_TOKEN, or "
-        "COPILOT_GITHUB_TOKEN, or run `gh auth login`."
+        "GitHub MCP authentication is unavailable. Set GITHUB_TOKEN, GH_TOKEN, or COPILOT_GITHUB_TOKEN, or run `gh auth login`."
     )
 
 

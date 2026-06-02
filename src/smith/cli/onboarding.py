@@ -188,10 +188,13 @@ def _collect_remote(existing_names: set[str]) -> RemoteConfig:
         _print_azdo_auth_instructions()
     else:
         default_token = _DEFAULT_TOKEN_ENVS.get(provider, "")
-        token_env = _prompt_text(
-            "Token environment variable",
-            default=default_token,
-        ) or None
+        token_env = (
+            _prompt_text(
+                "Token environment variable",
+                default=default_token,
+            )
+            or None
+        )
         if token_env:
             _print_keychain_instructions(token_env)
 

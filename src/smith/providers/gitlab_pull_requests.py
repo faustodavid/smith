@@ -84,11 +84,7 @@ class GitLabPullRequestMixin:
         status: str,
         include_labels: bool,
     ) -> dict[str, Any]:
-        labels = [
-            str(label).strip()
-            for label in (item.get("labels") or [])
-            if str(label).strip()
-        ] if include_labels else []
+        labels = [str(label).strip() for label in (item.get("labels") or []) if str(label).strip()] if include_labels else []
         merged_dt = parse_iso_datetime(item.get("merged_at"))
         closed_dt = parse_iso_datetime(item.get("closed_at"))
         resolved_closed_dt = merged_dt or closed_dt
@@ -102,11 +98,7 @@ class GitLabPullRequestMixin:
             "project_name": self._project_namespace(repo_name),
             "repository_name": self._project_short_name(repo_name),
             "repository_id": item.get("project_id"),
-            "closed_date": (
-                resolved_closed_dt.astimezone(UTC).strftime("%Y-%m-%d")
-                if resolved_closed_dt is not None
-                else None
-            ),
+            "closed_date": (resolved_closed_dt.astimezone(UTC).strftime("%Y-%m-%d") if resolved_closed_dt is not None else None),
             "source_branch": item.get("source_branch"),
             "target_branch": item.get("target_branch"),
             "target_ref": item.get("target_branch"),
@@ -203,12 +195,7 @@ class GitLabPullRequestMixin:
 
                     if single_repo_mode and len(output) >= desired_count:
                         break
-                    if (
-                        gitlab_state == "opened"
-                        and from_dt
-                        and page_oldest_created
-                        and page_oldest_created < from_dt
-                    ):
+                    if gitlab_state == "opened" and from_dt and page_oldest_created and page_oldest_created < from_dt:
                         break
                     if len(merge_requests) < per_page:
                         break
@@ -378,8 +365,7 @@ class GitLabPullRequestMixin:
             "title": merge_request.get("title"),
             "status": self._mr_status(merge_request),
             "createdBy": {
-                "displayName": (merge_request.get("author") or {}).get("username")
-                or (merge_request.get("author") or {}).get("name", "")
+                "displayName": (merge_request.get("author") or {}).get("username") or (merge_request.get("author") or {}).get("name", "")
             },
             "sourceRefName": f"refs/heads/{merge_request.get('source_branch', '')}",
             "targetRefName": f"refs/heads/{merge_request.get('target_branch', '')}",
@@ -398,9 +384,7 @@ class GitLabPullRequestMixin:
         pull_request_id: int,
         include_deleted: bool = False,
     ) -> dict[str, Any]:
-        discussions = self._get_paginated_list(
-            f"/projects/{self._project_id(repo)}/merge_requests/{pull_request_id}/discussions"
-        )
+        discussions = self._get_paginated_list(f"/projects/{self._project_id(repo)}/merge_requests/{pull_request_id}/discussions")
 
         threads: list[dict[str, Any]] = []
         total_comments = 0
@@ -432,11 +416,7 @@ class GitLabPullRequestMixin:
                 continue
 
             raw_position = discussion.get("position") or next(
-                (
-                    note.get("position")
-                    for note in notes
-                    if isinstance(note, dict) and isinstance(note.get("position"), dict)
-                ),
+                (note.get("position") for note in notes if isinstance(note, dict) and isinstance(note.get("position"), dict)),
                 None,
             )
             position: dict[str, Any] = raw_position if isinstance(raw_position, dict) else {}

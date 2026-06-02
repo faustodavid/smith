@@ -52,10 +52,7 @@ def run_fanout(
 
     if len(remotes) > 1:
         with ThreadPoolExecutor(max_workers=len(remotes)) as executor:
-            futures = {
-                remote_name: executor.submit(run_remote_operation, remote_name)
-                for remote_name in remotes
-            }
+            futures = {remote_name: executor.submit(run_remote_operation, remote_name) for remote_name in remotes}
             for remote_name in remotes:
                 remote_entry, ok = futures[remote_name].result()
                 remote_results[remote_name] = remote_entry
@@ -73,16 +70,8 @@ def run_fanout(
                 failed.append(remote_name)
 
     if not succeeded:
-        error_codes = [
-            remote_results[name]["error"]["code"]
-            for name in failed
-            if remote_results.get(name, {}).get("error")
-        ]
-        messages = [
-            f"{name}: {remote_results[name]['error']['message']}"
-            for name in failed
-            if remote_results.get(name, {}).get("error")
-        ]
+        error_codes = [remote_results[name]["error"]["code"] for name in failed if remote_results.get(name, {}).get("error")]
+        messages = [f"{name}: {remote_results[name]['error']['message']}" for name in failed if remote_results.get(name, {}).get("error")]
         combined = "; ".join(messages) if messages else "All remote requests failed."
 
         if error_codes and all(code == "auth_failure" for code in error_codes):
