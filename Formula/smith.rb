@@ -6,15 +6,23 @@ class Smith < Formula
 
   desc "Read-only source-of-truth investigation CLI for AI agents"
   homepage "https://github.com/faustodavid/smith"
-  url "https://github.com/faustodavid/smith.git", tag: "v0.1.0"
+  url "https://github.com/faustodavid/smith.git",
+      tag:      "v0.1.0",
+      revision: "a36a75ea9b84e9bcd27d6308903cdb29776986f4"
   license "MIT"
   head "https://github.com/faustodavid/smith.git", branch: "main"
 
-  depends_on "python-setuptools" => :build
+  depends_on "pkgconf" => :build
   depends_on "rust" => :build
+  depends_on "libffi"
   depends_on "libyaml"
   depends_on "python@3.14"
   depends_on "ripgrep"
+
+  resource "setuptools" do
+    url "https://files.pythonhosted.org/packages/9d/76/f789f7a86709c6b087c5a2f52f911838cad707cc613162401badc665acfe/setuptools-82.0.1-py3-none-any.whl"
+    sha256 "a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb"
+  end
 
   resource "packaging" do
     url "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl"
@@ -128,7 +136,11 @@ class Smith < Formula
 
   def install
     venv = virtualenv_create(libexec, "python3.14")
-    venv.pip_install resources, build_isolation: false
+    bootstrap_resources = %w[setuptools packaging wheel semantic-version setuptools-rust maturin]
+    bootstrap_resources.each do |resource_name|
+      venv.pip_install resource(resource_name), build_isolation: false
+    end
+    venv.pip_install resources.reject { |r| bootstrap_resources.include?(r.name) }, build_isolation: false
     venv.pip_install_and_link buildpath, build_isolation: false
     pkgshare.install "skills"
   end
