@@ -12,12 +12,10 @@ class Smith < Formula
   license "MIT"
   head "https://github.com/faustodavid/smith.git", branch: "main"
 
-  depends_on "maturin" => :build
   depends_on "pkgconf" => :build
-  depends_on "rust" => :build
+  depends_on "cryptography"
   depends_on "libffi"
   depends_on "libyaml"
-  depends_on "openssl@3"
   depends_on "python@3.14"
   depends_on "ripgrep"
 
@@ -34,16 +32,6 @@ class Smith < Formula
   resource "wheel" do
     url "https://files.pythonhosted.org/packages/87/22/b76d483683216dde3d67cba61fb2444be8d5be289bf628c13fc0fd90e5f9/wheel-0.46.3-py3-none-any.whl"
     sha256 "4b399d56c9d9338230118d705d9737a2a468ccca63d5e813e2a4fc7815d8bc4d"
-  end
-
-  resource "semantic-version" do
-    url "https://files.pythonhosted.org/packages/6a/23/8146aad7d88f4fcb3a6218f41a60f6c2d4e3a72de72da1825dc7c8f7877c/semantic_version-2.10.0-py2.py3-none-any.whl"
-    sha256 "de78a3b8e0feda74cabc54aab2da702113e33ac9d9eb9d2389bcf1f58b7d9177"
-  end
-
-  resource "setuptools-rust" do
-    url "https://files.pythonhosted.org/packages/f9/7b/d05b1778f2d4e354d103e3421c6267d923032fefcc5ca5b7df0cb21cefd0/setuptools_rust-1.12.0-py3-none-any.whl"
-    sha256 "7e7db90547f224a835b45f5ad90c983340828a345554a9a660bdb2de8605dcdd"
   end
 
   resource "flit-core" do
@@ -101,19 +89,9 @@ class Smith < Formula
     sha256 "69dea482ab64caa7b9f6aba1c6bf48bb6a5448d1c0f1b17ab42ad8c763a5344d"
   end
 
-  resource "cffi" do
-    url "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz"
-    sha256 "44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529"
-  end
-
   resource "charset-normalizer" do
     url "https://files.pythonhosted.org/packages/e7/a1/67fe25fac3c7642725500a3f6cfe5821ad557c3abb11c9d20d12c7008d3e/charset_normalizer-3.4.7.tar.gz"
     sha256 "ae89db9e5f98a11a4bf50407d4363e7b09b31e55bc117b4f7d80aab97ba009e5"
-  end
-
-  resource "cryptography" do
-    url "https://files.pythonhosted.org/packages/9f/a9/db8f313fdcd85d767d4973515e1db101f9c71f95fced83233de224673757/cryptography-48.0.0.tar.gz"
-    sha256 "5c3932f4436d1cccb036cb0eaef46e6e2db91035166f1ad6505c3c9d5a635920"
   end
 
   resource "idna" do
@@ -129,11 +107,6 @@ class Smith < Formula
   resource "msal-extensions" do
     url "https://files.pythonhosted.org/packages/01/99/5d239b6156eddf761a636bded1118414d161bd6b7b37a9335549ed159396/msal_extensions-1.3.1.tar.gz"
     sha256 "c5b0fd10f65ef62b5f1d62f4251d51cbcaf003fcedae8c91b040a488614be1a4"
-  end
-
-  resource "pycparser" do
-    url "https://files.pythonhosted.org/packages/1b/7d/92392ff7815c21062bea51aa7b87d45576f649f16458d78b7cf94b9ab2e6/pycparser-3.0.tar.gz"
-    sha256 "600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29"
   end
 
   resource "pyjwt" do
@@ -173,15 +146,10 @@ class Smith < Formula
 
   def install
     venv = virtualenv_create(libexec, "python3.14")
-    ENV.prepend_path "PYTHONPATH", Formula["maturin"].opt_lib/"python3.14/site-packages"
     bootstrap_resources = %w[
       setuptools
       packaging
       wheel
-      semantic-version
-      setuptools-rust
-      pycparser
-      cffi
       flit-core
       cython
       pathspec
@@ -197,35 +165,46 @@ class Smith < Formula
     venv.pip_install resources.reject { |r| bootstrap_resources.include?(r.name) }, build_isolation: false
     venv.pip_install_and_link buildpath, build_isolation: false
     pkgshare.install "skills"
-  end
 
-  def post_install
-    skill_dir = Pathname.new(ENV.fetch("SMITH_SKILL_DIR", "#{Dir.home}/.agents/skills/smith"))
+    (bin/"smith-install-skill").write <<~BASH
+      #!/bin/bash
+      set -euo pipefail
 
-    if skill_dir.symlink? || skill_dir.file?
-      rm skill_dir
-    elsif skill_dir.directory?
-      rm_r skill_dir
-    end
+      source_dir="#{opt_pkgshare}/skills/smith"
+      target_dir="${SMITH_SKILL_DIR:-$HOME/.agents/skills/smith}"
 
-    skill_dir.dirname.mkpath
-    cp_r pkgshare/"skills/smith", skill_dir
+      if [[ ! -d "$source_dir" ]]; then
+        echo "Smith skill source not found: $source_dir" >&2
+        exit 1
+      fi
+
+      rm -rf "$target_dir"
+      mkdir -p "$(dirname "$target_dir")"
+      cp -R "$source_dir" "$target_dir"
+      echo "Smith skill installed to: $target_dir"
+    BASH
+    chmod 0555, bin/"smith-install-skill"
   end
 
   def caveats
-    skill_dir = ENV.fetch("SMITH_SKILL_DIR", "#{Dir.home}/.agents/skills/smith")
-
     <<~EOS
-      Smith mirrored its skill to:
-        #{skill_dir}
+      To install or refresh the Smith skill:
+        smith-install-skill
 
-      To mirror the skill to another location, run:
-        SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/tap/smith
+      By default it writes to ~/.agents/skills/smith.
+      To choose another destination:
+        SMITH_SKILL_DIR=/path/to/skills/smith smith-install-skill
     EOS
   end
 
   test do
     assert_match "usage:", shell_output("#{bin}/smith --help")
     assert_path_exists pkgshare/"skills/smith/SKILL.md"
+
+    skill_dir = testpath/"skills/smith"
+    with_env("SMITH_SKILL_DIR" => skill_dir.to_s) do
+      system bin/"smith-install-skill"
+    end
+    assert_path_exists skill_dir/"SKILL.md"
   end
 end
