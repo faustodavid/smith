@@ -12,10 +12,12 @@ class Smith < Formula
   license "MIT"
   head "https://github.com/faustodavid/smith.git", branch: "main"
 
+  depends_on "maturin" => :build
   depends_on "pkgconf" => :build
   depends_on "rust" => :build
   depends_on "libffi"
   depends_on "libyaml"
+  depends_on "openssl@3"
   depends_on "python@3.14"
   depends_on "ripgrep"
 
@@ -44,9 +46,44 @@ class Smith < Formula
     sha256 "7e7db90547f224a835b45f5ad90c983340828a345554a9a660bdb2de8605dcdd"
   end
 
-  resource "maturin" do
-    url "https://files.pythonhosted.org/packages/9c/1c/612d23d33ec21b9ae7ece7b3f0dd5f9dfd57b4009e9d2938165869ebd6ae/maturin-1.13.3.tar.gz"
-    sha256 "771e1e9e71a278e56db01552e0d1acfd1464259f9575b6e72842f893cd299079"
+  resource "flit-core" do
+    url "https://files.pythonhosted.org/packages/f2/65/b6ba90634c984a4fcc02c7e3afe523fef500c4980fec67cc27536ee50acf/flit_core-3.12.0-py3-none-any.whl"
+    sha256 "e7a0304069ea895172e3c7bb703292e992c5d1555dd1233ab7b5621b5b69e62c"
+  end
+
+  resource "cython" do
+    url "https://files.pythonhosted.org/packages/e5/41/54fd429ff8147475fc24ca43246f85d78fb4e747c27f227e68f1594648f1/cython-3.2.3-py3-none-any.whl"
+    sha256 "06a1317097f540d3bb6c7b81ed58a0d8b9dbfa97abf39dfd4c22ee87a6c7241e"
+  end
+
+  resource "pathspec" do
+    url "https://files.pythonhosted.org/packages/cc/20/ff623b09d963f88bfde16306a54e12ee5ea43e9b597108672ff3a408aad6/pathspec-0.12.1-py3-none-any.whl"
+    sha256 "a0d503e138a4c123b27490a4f7beda6a01c6f288df0e4a8b79c7eb0dc7b4cc08"
+  end
+
+  resource "pluggy" do
+    url "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl"
+    sha256 "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"
+  end
+
+  resource "trove-classifiers" do
+    url "https://files.pythonhosted.org/packages/7c/a4/81502f486f01db95bc8320646a8a12511f5e556cb63d5e224d91816605c4/trove_classifiers-2026.6.1.19-py3-none-any.whl"
+    sha256 "ab4c4ec93cc4a4e7815fa759906e05e6bb3f2fbd92ea0f897288c6a43efd15b3"
+  end
+
+  resource "hatchling" do
+    url "https://files.pythonhosted.org/packages/08/e7/ae38d7a6dfba0533684e0b2136817d667588ae3ec984c1a4e5df5eb88482/hatchling-1.27.0-py3-none-any.whl"
+    sha256 "d3a2f3567c4f926ea39849cdf924c7e99e6686c9c8e288ae1037c8fa2a5d937b"
+  end
+
+  resource "setuptools-scm" do
+    url "https://files.pythonhosted.org/packages/ab/ac/8f96ba9b4cfe3e4ea201f23f4f97165862395e9331a424ed325ae37024a8/setuptools_scm-8.3.1-py3-none-any.whl"
+    sha256 "332ca0d43791b818b841213e76b1971b7711a960761c5bea5fc5cdb5196fbce3"
+  end
+
+  resource "hatch-vcs" do
+    url "https://files.pythonhosted.org/packages/82/0f/6cbd9976160bc334add63bc2e7a58b1433a31b34b7cda6c5de6dd983d9a7/hatch_vcs-0.4.0-py3-none-any.whl"
+    sha256 "b8a2b6bee54cf6f9fc93762db73890017ae59c9081d1038a41f16235ceaf8b2c"
   end
 
   resource "azure-core" do
@@ -136,7 +173,24 @@ class Smith < Formula
 
   def install
     venv = virtualenv_create(libexec, "python3.14")
-    bootstrap_resources = %w[setuptools packaging wheel semantic-version setuptools-rust maturin]
+    ENV.prepend_path "PYTHONPATH", Formula["maturin"].opt_lib/"python3.14/site-packages"
+    bootstrap_resources = %w[
+      setuptools
+      packaging
+      wheel
+      semantic-version
+      setuptools-rust
+      pycparser
+      cffi
+      flit-core
+      cython
+      pathspec
+      pluggy
+      trove-classifiers
+      hatchling
+      setuptools-scm
+      hatch-vcs
+    ]
     bootstrap_resources.each do |resource_name|
       venv.pip_install resource(resource_name), build_isolation: false
     end
