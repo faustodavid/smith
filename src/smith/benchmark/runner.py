@@ -308,9 +308,7 @@ def build_copilot_tool_trace(events: list[dict[str, Any]]) -> list[dict[str, Any
                 "server": server,
                 "tool": tool,
                 "status": "started",
-                "arguments": _normalize_tool_arguments(
-                    data.get("arguments", data.get("input", data.get("params")))
-                ),
+                "arguments": _normalize_tool_arguments(data.get("arguments", data.get("input", data.get("params")))),
             }
             trace.append(entry)
             pending[key] = entry
@@ -324,17 +322,13 @@ def build_copilot_tool_trace(events: list[dict[str, Any]]) -> list[dict[str, Any
                 "server": server,
                 "tool": tool,
                 "status": event_type.removeprefix("tool.execution_"),
-                "arguments": _normalize_tool_arguments(
-                    data.get("arguments", data.get("input", data.get("params")))
-                ),
+                "arguments": _normalize_tool_arguments(data.get("arguments", data.get("input", data.get("params")))),
             }
             trace.append(execution_entry)
         else:
             execution_entry["status"] = event_type.removeprefix("tool.execution_")
             if execution_entry.get("arguments") is None:
-                execution_entry["arguments"] = _normalize_tool_arguments(
-                    data.get("arguments", data.get("input", data.get("params")))
-                )
+                execution_entry["arguments"] = _normalize_tool_arguments(data.get("arguments", data.get("input", data.get("params"))))
 
         if data.get("error") is not None:
             execution_entry["error"] = _jsonable(data["error"])
@@ -568,9 +562,7 @@ async def run_openai_agent_once(
         if config_name == "smith_skill":
             agent = build_smith_agent(model)
         elif config_name == "github_mcp":
-            server = build_github_mcp_server(
-                url=os.getenv("GITHUB_MCP_SERVER_URL", DEFAULT_GITHUB_MCP_URL)
-            )
+            server = build_github_mcp_server(url=os.getenv("GITHUB_MCP_SERVER_URL", DEFAULT_GITHUB_MCP_URL))
             await server.connect()
             agent = Agent(
                 name="github_mcp_benchmark",
@@ -969,9 +961,7 @@ def aggregate_workspace(
         mcp_tokens = run_summary["github_mcp"]["tokens"]["mean"]
         if smith_tokens or mcp_tokens:
             direction = "lower" if smith_tokens < mcp_tokens else "higher"
-            notes.append(
-                f"Smith token usage is {direction} than GitHub MCP on average ({smith_tokens:.0f} vs {mcp_tokens:.0f})."
-            )
+            notes.append(f"Smith token usage is {direction} than GitHub MCP on average ({smith_tokens:.0f} vs {mcp_tokens:.0f}).")
     elif len(configs_to_summarize) == 1:
         notes.append(f"Only `{configs_to_summarize[0]}` runs are included in this workspace.")
 
@@ -986,10 +976,7 @@ def aggregate_workspace(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "evals_run": [eval_case.id for eval_case in evals_run],
             "runs_per_configuration": max(
-                (
-                    max((len(entries) for entries in by_config.values()), default=0)
-                    // max(1, len(evals_run))
-                ),
+                (max((len(entries) for entries in by_config.values()), default=0) // max(1, len(evals_run))),
                 0,
             ),
         },

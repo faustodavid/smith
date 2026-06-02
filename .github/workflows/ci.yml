@@ -29,6 +29,8 @@ jobs:
           python -m pip install -e .[dev]
       - name: Lint
         run: ruff check .
+      - name: Format
+        run: ruff format --check .
       - name: Typecheck
         run: mypy src
       - name: Unit tests

@@ -44,12 +44,8 @@ _YOUTRACK_COMMENT_FIELDS = (
     "reactions(id,reaction,author(id,login,fullName)),"
     "attachments(id,name,created,size,mimeType,url,thumbnailURL,author(id,login,fullName))"
 )
-_YOUTRACK_ATTACHMENT_FIELDS = (
-    "id,name,created,updated,size,mimeType,url,thumbnailURL,author(id,login,fullName)"
-)
-_YOUTRACK_LINK_FIELDS = (
-    "id,direction,linkType(id,name),issues(id,idReadable,summary)"
-)
+_YOUTRACK_ATTACHMENT_FIELDS = "id,name,created,updated,size,mimeType,url,thumbnailURL,author(id,login,fullName)"
+_YOUTRACK_LINK_FIELDS = "id,direction,linkType(id,name),issues(id,idReadable,summary)"
 _YOUTRACK_ACTIVITY_FIELDS = (
     "afterCursor,hasAfter,"
     "activities(id,$type,timestamp,"
@@ -74,7 +70,16 @@ class YouTrackIssueMixin:
             milliseconds = int(value)
         except (TypeError, ValueError):
             return None
-        return datetime.fromtimestamp(milliseconds / 1000, tz=UTC).isoformat().replace("+00:00", "Z")
+        try:
+            return datetime.fromtimestamp(milliseconds / 1000, tz=UTC).isoformat().replace("+00:00", "Z")
+        except (OSError, OverflowError, ValueError):
+            return None
+
+    @staticmethod
+    def _string_field(mapping: Any, key: str) -> str:
+        if not isinstance(mapping, dict):
+            return ""
+        return str(mapping.get(key) or "").strip()
 
     @staticmethod
     def _user_payload(user: Any) -> dict[str, Any] | None:
@@ -136,11 +141,7 @@ class YouTrackIssueMixin:
         if value is None:
             return None
         if isinstance(value, list):
-            entries = [
-                entry
-                for entry in (self._field_value_to_text(item) for item in value)
-                if entry
-            ]
+            entries = [entry for entry in (self._field_value_to_text(item) for item in value) if entry]
             return ", ".join(entries) if entries else None
         if isinstance(value, dict):
             if value.get("$type") == "FieldStyle":
@@ -178,7 +179,7 @@ class YouTrackIssueMixin:
             if not name:
                 project_custom_field = custom_field.get("projectCustomField") or {}
                 field = project_custom_field.get("field") if isinstance(project_custom_field, dict) else {}
-                name = str(field.get("name") if isinstance(field, dict) else "" or "").strip()
+                name = self._string_field(field, "name")
             if not name:
                 continue
 
@@ -226,9 +227,7 @@ class YouTrackIssueMixin:
         if not isinstance(comment, dict):
             return None
         attachments = [
-            normalized
-            for normalized in (self._normalize_attachment(entry) for entry in comment.get("attachments") or [])
-            if normalized
+            normalized for normalized in (self._normalize_attachment(entry) for entry in comment.get("attachments") or []) if normalized
         ]
         text = str(comment.get("text") or comment.get("textPreview") or "").strip()
 
@@ -280,7 +279,7 @@ class YouTrackIssueMixin:
         link_type = link.get("linkType") or {}
         return {
             "id": link.get("id"),
-            "type": str(link_type.get("name") if isinstance(link_type, dict) else "" or "").strip() or None,
+            "type": self._string_field(link_type, "name") or None,
             "direction": str(link.get("direction") or "").strip() or None,
             "issues": issues,
         }
@@ -308,8 +307,8 @@ class YouTrackIssueMixin:
             return None
         category = activity.get("category") or {}
         field = activity.get("field") or {}
-        category_id = str(category.get("id") if isinstance(category, dict) else "" or "").strip()
-        field_name = str(field.get("name") if isinstance(field, dict) else "" or "").strip()
+        category_id = self._string_field(category, "id")
+        field_name = self._string_field(field, "name")
         target_member = str(activity.get("targetMember") or "").strip() or None
         added = self._activity_value_to_text(activity.get("added"))
         removed = self._activity_value_to_text(activity.get("removed"))
@@ -407,33 +406,21 @@ class YouTrackIssueMixin:
             f"/issues/{quote(issue_id, safe='')}/comments",
             fields=_YOUTRACK_COMMENT_FIELDS,
         )
-        return [
-            normalized
-            for normalized in (self._normalize_comment(comment) for comment in comments)
-            if normalized
-        ]
+        return [normalized for normalized in (self._normalize_comment(comment) for comment in comments) if normalized]
 
     def _fetch_issue_attachments(self: Any, issue_id: str) -> list[dict[str, Any]]:
         attachments = self._fetch_paginated_collection(
             f"/issues/{quote(issue_id, safe='')}/attachments",
             fields=_YOUTRACK_ATTACHMENT_FIELDS,
         )
-        return [
-            attachment
-            for attachment in (self._normalize_attachment(entry) for entry in attachments)
-            if attachment
-        ]
+        return [attachment for attachment in (self._normalize_attachment(entry) for entry in attachments) if attachment]
 
     def _fetch_issue_links(self: Any, issue_id: str) -> list[dict[str, Any]]:
         links = self._fetch_paginated_collection(
             f"/issues/{quote(issue_id, safe='')}/links",
             fields=_YOUTRACK_LINK_FIELDS,
         )
-        return [
-            normalized
-            for normalized in (self._normalize_link(link) for link in links)
-            if normalized
-        ]
+        return [normalized for normalized in (self._normalize_link(link) for link in links) if normalized]
 
     def _fetch_issue_timeline(self: Any, issue_id: str) -> list[dict[str, Any]]:
         activities: list[dict[str, Any]] = []
@@ -452,9 +439,7 @@ class YouTrackIssueMixin:
                 params=params,
             )
             normalized_page = [
-                activity
-                for activity in (self._normalize_activity(entry) for entry in page.get("activities") or [])
-                if activity
+                activity for activity in (self._normalize_activity(entry) for entry in page.get("activities") or []) if activity
             ]
             activities.extend(normalized_page)
             if not bool(page.get("hasAfter")):
@@ -472,8 +457,8 @@ class YouTrackIssueMixin:
     ) -> dict[str, str]:
         field_map = self._custom_field_map(custom_fields)
         project = issue.get("project") or {}
-        project_name = str(project.get("name") if isinstance(project, dict) else "" or "").strip()
-        project_short_name = str(project.get("shortName") if isinstance(project, dict) else "" or "").strip()
+        project_name = self._string_field(project, "name")
+        project_short_name = self._string_field(project, "shortName")
         project_display = project_name
         if project_name and project_short_name:
             project_display = f"{project_name} ({project_short_name})"
@@ -496,11 +481,7 @@ class YouTrackIssueMixin:
 
         tags = issue.get("tags") or []
         if isinstance(tags, list):
-            tag_names = [
-                str(tag.get("name") or "").strip()
-                for tag in tags
-                if isinstance(tag, dict) and str(tag.get("name") or "").strip()
-            ]
+            tag_names = [str(tag.get("name") or "").strip() for tag in tags if isinstance(tag, dict) and str(tag.get("name") or "").strip()]
             if tag_names:
                 metadata["Tags"] = ", ".join(tag_names)
 
@@ -539,15 +520,11 @@ class YouTrackIssueMixin:
         custom_fields = self._normalize_custom_fields(issue.get("customFields"))
         field_map = self._custom_field_map(custom_fields)
         project = issue.get("project") or {}
-        project_short_name = str(project.get("shortName") if isinstance(project, dict) else "" or "").strip()
-        project_name = str(project.get("name") if isinstance(project, dict) else "" or "").strip()
+        project_short_name = self._string_field(project, "shortName")
+        project_name = self._string_field(project, "name")
         issue_id = str(issue.get("idReadable") or issue.get("id") or "").strip()
         tags = issue.get("tags") or []
-        tag_names = [
-            str(tag.get("name") or "").strip()
-            for tag in tags
-            if isinstance(tag, dict) and str(tag.get("name") or "").strip()
-        ]
+        tag_names = [str(tag.get("name") or "").strip() for tag in tags if isinstance(tag, dict) and str(tag.get("name") or "").strip()]
 
         return {
             "id": issue_id or issue.get("id"),
@@ -597,10 +574,7 @@ class YouTrackIssueMixin:
         }
 
         with ThreadPoolExecutor(max_workers=len(operations)) as executor:
-            futures = {
-                executor.submit(operation): name
-                for name, operation in operations.items()
-            }
+            futures = {executor.submit(operation): name for name, operation in operations.items()}
             for future in as_completed(futures):
                 name = futures[future]
                 try:

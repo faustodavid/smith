@@ -52,9 +52,7 @@ def resolve_copilot_sdk_path(env: dict[str, str] | None = None) -> str:
 
     candidates = list(Path.home().glob(COPILOT_SDK_GLOB))
     if not candidates:
-        raise FileNotFoundError(
-            "Could not locate the Copilot SDK. Set COPILOT_SDK_PATH to a copilot-sdk/index.js file."
-        )
+        raise FileNotFoundError("Could not locate the Copilot SDK. Set COPILOT_SDK_PATH to a copilot-sdk/index.js file.")
     latest = max(candidates, key=lambda path: path.stat().st_mtime)
     return str(latest)
 
@@ -122,9 +120,7 @@ def build_github_copilot_payload(
 ) -> dict[str, Any]:
     return {
         "cliArgs": list(COPILOT_DEFAULT_CLI_ARGS),
-        "availableTools": [
-            copilot_tool_name(GITHUB_MCP_SERVER_NAME, tool_name) for tool_name in GITHUB_MCP_TOOL_NAMES
-        ],
+        "availableTools": [copilot_tool_name(GITHUB_MCP_SERVER_NAME, tool_name) for tool_name in GITHUB_MCP_TOOL_NAMES],
         "mcpServers": {
             GITHUB_MCP_SERVER_NAME: {
                 "type": "http",

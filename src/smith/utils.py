@@ -55,5 +55,3 @@ def compile_search_pattern(
         return re.compile(pattern, flags), None
     except re.error as exc:
         return None, f"Error: Invalid regex pattern - {exc}"
-
-

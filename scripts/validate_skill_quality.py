@@ -16,6 +16,13 @@ AUTH_TROUBLE = SKILL_DIR / "references" / "auth-troubleshooting.md"
 TRIGGER_CASES_DOC = SKILL_DIR / "references" / "trigger-cases.md"
 BEHAVIOR_GATES_DOC = SKILL_DIR / "references" / "behavioral-quality-gates.md"
 FAILURE_PLAYBOOK_DOC = SKILL_DIR / "references" / "failure-playbook.md"
+TOKEN_ENV_VARS = (
+    "GITHUB_TOKEN",
+    "GITLAB_TOKEN",
+    "AZURE_DEVOPS_PAT",
+    "YOUTRACK_TOKEN",
+)
+
 
 def _candidate_roots() -> list[Path]:
     candidates: list[Path] = []
@@ -96,6 +103,17 @@ def _extract_frontmatter(skill_text: str) -> dict[str, str]:
 def classify_trigger(prompt: str) -> str:
     text = prompt.lower()
 
+    write_targets = r"(?:work\s+item|github\s+issue|issue|ticket|story|pr|pull\s+request|merge\s+request)"
+    write_patterns = [
+        rf"\bcreate\b.+\b{write_targets}\b",
+        rf"\bupdate\b.+\b{write_targets}\b",
+        r"\bapprove\b.+\b(?:pr|pull\s+request|merge\s+request)\b",
+        rf"\bcomment\s+on\b.+\b{write_targets}\b",
+        rf"\bclose\b.+\b{write_targets}\b",
+    ]
+    if any(re.search(pattern, text) for pattern in write_patterns):
+        return "negative"
+
     negative_terms = [
         "create work item",
         "create a work item",
@@ -173,6 +191,37 @@ def _missing_required_artifact_errors(paths: list[Path], label: str) -> list[str
 
 def _missing_marker_errors(text: str, markers: list[str], template: str) -> list[str]:
     return [template.format(marker=marker) for marker in markers if marker not in text]
+
+
+def _strip_markdown_command_prefix(line: str) -> str:
+    stripped = line.strip()
+    while stripped.startswith(">"):
+        stripped = stripped[1:].lstrip()
+    while len(stripped) >= 2 and stripped[:2] in {"- ", "* ", "+ "}:
+        stripped = stripped[2:].lstrip()
+    if stripped.startswith("$ "):
+        stripped = stripped[2:].lstrip()
+    return stripped
+
+
+def _validate_auth_troubleshooting_token_safety(auth_text: str) -> list[str]:
+    token_names = "|".join(re.escape(token) for token in TOKEN_ENV_VARS)
+    unsafe_patterns = [
+        re.compile(r"^\s*(?:env|printenv|set)(?:\s*(?:\||>|$))"),
+        re.compile(rf"^\s*printenv\s+({token_names})(?:\s|$)"),
+        re.compile(rf"^\s*echo\b.*\$(?:{{)?({token_names})(?::-[^}}]*)?(?:}})?"),
+        re.compile(rf"^\s*printf\b.*\$(?:{{)?({token_names})(?::-[^}}]*)?(?:}})?"),
+        re.compile(rf"^\s*(?:env|printenv)\b.*\|\s*grep\b.*(?:{token_names})"),
+    ]
+
+    errors: list[str] = []
+    for line_no, line in enumerate(auth_text.splitlines(), start=1):
+        command = _strip_markdown_command_prefix(line)
+        if command.startswith("#"):
+            continue
+        if any(pattern.search(command) for pattern in unsafe_patterns):
+            errors.append(f"Auth troubleshooting must not print token values: line {line_no}")
+    return errors
 
 
 def _validate_trigger_frontmatter(skill_text: str, description: str) -> list[str]:
@@ -338,23 +387,19 @@ def run_behavior_checks() -> list[str]:
 
     skill_text = _read(SKILL_MD)
     recipes_text = _read(USAGE_RECIPES)
+    auth_text = _read(AUTH_TROUBLE)
     failure_text = _read(FAILURE_PLAYBOOK_DOC)
+    errors.extend(_validate_auth_troubleshooting_token_safety(auth_text))
 
     required_skill_sections = [
         "## Investigation Algorithm",
         "## Stop Conditions",
         "## Failure Handling",
     ]
-    errors.extend(
-        _missing_marker_errors(skill_text, required_skill_sections, "SKILL.md missing behavioral section: {marker}")
-    )
+    errors.extend(_missing_marker_errors(skill_text, required_skill_sections, "SKILL.md missing behavioral section: {marker}"))
 
     recovery_terms = ["401 or 403", "429", "Truncation", "Empty results", "Wrong repository"]
-    errors.extend(
-        f"Recovery flow missing term: {term}"
-        for term in recovery_terms
-        if term not in skill_text and term not in failure_text
-    )
+    errors.extend(f"Recovery flow missing term: {term}" for term in recovery_terms if term not in skill_text and term not in failure_text)
 
     command_markers = [
         "smith <azdo-remote-name> orgs",

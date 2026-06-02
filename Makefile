@@ -1,7 +1,10 @@
-.PHONY: lint typecheck test-unit test-contract test-integration test skill-validate check install install-global
+.PHONY: lint format typecheck test-unit test-contract test-integration test skill-validate check install install-global
 
 lint:
 	uv run --extra dev ruff check .
+
+format:
+	uv run --extra dev ruff format --check .
 
 typecheck:
 	uv run --extra dev mypy src
@@ -22,7 +25,7 @@ test:
 skill-validate:
 	uv run --extra dev python scripts/validate_skill_quality.py --mode all
 
-check: lint typecheck test skill-validate
+check: lint format typecheck test skill-validate
 
 install:
 	uv pip install -e ".[dev]"

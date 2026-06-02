@@ -47,3 +47,44 @@ def test_install_require_tool_passes_when_tool_present(monkeypatch: Any) -> None
     monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/rg")
 
     install.require_tool("rg", "unused hint")
+
+
+def test_sync_skill_preserves_existing_target_when_copy_fails(monkeypatch: Any, tmp_path: Path) -> None:
+    install = _load_install_module()
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.mkdir()
+    target.mkdir()
+    (source / "SKILL.md").write_text("replacement", encoding="utf-8")
+    existing = target / "SKILL.md"
+    existing.write_text("existing", encoding="utf-8")
+
+    def _failing_copytree(src: Path, dst: Path) -> None:
+        raise RuntimeError("copy failed")
+
+    monkeypatch.setattr(install.shutil, "copytree", _failing_copytree)
+
+    with pytest.raises(RuntimeError, match="copy failed"):
+        install.sync_skill(source, target)
+
+    assert existing.read_text(encoding="utf-8") == "existing"
+
+
+def test_install_refuses_existing_non_git_directory(monkeypatch: Any, tmp_path: Path, capsys: Any) -> None:
+    install = _load_install_module()
+    repo_dir = tmp_path / "smith"
+    repo_dir.mkdir()
+    sentinel = repo_dir / "keep.txt"
+    sentinel.write_text("do not delete", encoding="utf-8")
+    monkeypatch.setattr(install, "REPO_DIR", repo_dir)
+    monkeypatch.setattr(install, "SKILL_SOURCE", repo_dir / "skills" / "smith")
+    monkeypatch.setattr(install, "TARGET_SKILL_DIR", tmp_path / "skill")
+    monkeypatch.setattr(install, "require_tool", lambda *args, **kwargs: None)
+    monkeypatch.setattr(install, "run", lambda *args, **kwargs: None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        install.main()
+
+    assert excinfo.value.code == 1
+    assert sentinel.read_text(encoding="utf-8") == "do not delete"
+    assert "refusing to replace non-git directory" in capsys.readouterr().err

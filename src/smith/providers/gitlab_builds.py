@@ -166,12 +166,9 @@ query($fullPath: ID!, $id: CiPipelineID!) {
 }
 """
 
+
 def _pipeline_query_by_iid(query_text: str) -> str:
-    return (
-        query_text.replace("$id: CiPipelineID!", "$iid: ID!", 1).replace(
-            "pipeline(id: $id)", "pipeline(iid: $iid)", 1
-        )
-    )
+    return query_text.replace("$id: CiPipelineID!", "$iid: ID!", 1).replace("pipeline(id: $id)", "pipeline(iid: $iid)", 1)
 
 
 _PIPELINE_GQL_QUERY_RICH_BY_IID = _pipeline_query_by_iid(_PIPELINE_GQL_QUERY_RICH)
@@ -254,9 +251,7 @@ def _absolute_gitlab_url(base_url: str, path: Any) -> str | None:
 class GitLabBuildMixin:
     def get_build_log(self: Any, *, repo: str, build_id: int) -> dict[str, Any]:
         pipeline = self._request_json("GET", f"/projects/{self._project_id(repo)}/pipelines/{build_id}")
-        jobs = self._get_paginated_list(
-            f"/projects/{self._project_id(repo)}/pipelines/{build_id}/jobs"
-        )
+        jobs = self._get_paginated_list(f"/projects/{self._project_id(repo)}/pipelines/{build_id}/jobs")
 
         mapped_jobs = []
         for item in jobs:
@@ -318,9 +313,7 @@ class GitLabBuildMixin:
         else:
             build_logs = self.get_build_log(repo=repo, build_id=build_id)
             resolved_log_ids = [
-                int(item["id"])
-                for item in build_logs.get("logs", [])
-                if isinstance(item, dict) and item.get("id") is not None
+                int(item["id"]) for item in build_logs.get("logs", []) if isinstance(item, dict) and item.get("id") is not None
             ]
 
         def _get_content(lid: int) -> str:
@@ -347,9 +340,7 @@ class GitLabBuildMixin:
     ) -> list[dict[str, Any]]:
         return [
             item
-            for item in self._get_paginated_list(
-                f"/projects/{self._project_id(repo)}/pipelines/{pipeline_id}/jobs"
-            )
+            for item in self._get_paginated_list(f"/projects/{self._project_id(repo)}/pipelines/{pipeline_id}/jobs")
             if isinstance(item, dict)
         ]
 
@@ -361,11 +352,7 @@ class GitLabBuildMixin:
         artifacts = job.get("artifacts")
         if not isinstance(artifacts, list):
             return False
-        return any(
-            isinstance(item, dict)
-            and str(item.get("file_type") or "").strip().lower() == "archive"
-            for item in artifacts
-        )
+        return any(isinstance(item, dict) and str(item.get("file_type") or "").strip().lower() == "archive" for item in artifacts)
 
     def _pipeline_job_with_artifacts(
         self: Any,
@@ -378,9 +365,7 @@ class GitLabBuildMixin:
             if _ids_match(job.get("id"), job_id):
                 if self._job_has_downloadable_artifacts(job):
                     return job
-                raise ValueError(
-                    f"Job {job_id} in pipeline {pipeline_id} has no downloadable artifacts."
-                )
+                raise ValueError(f"Job {job_id} in pipeline {pipeline_id} has no downloadable artifacts.")
         raise ValueError(f"Job {job_id} not found in pipeline {pipeline_id}.")
 
     @staticmethod
@@ -589,9 +574,7 @@ class GitLabBuildMixin:
         return_code = int(getattr(result, "returncode", 2))
         if return_code not in (0, 1):
             stderr = str(getattr(result, "stderr", "") or "").strip()
-            raise SmithApiError(
-                f"ripgrep exited with status {return_code} for {checkout_dir}: {stderr or 'unknown error'}"
-            )
+            raise SmithApiError(f"ripgrep exited with status {return_code} for {checkout_dir}: {stderr or 'unknown error'}")
 
         matches: list[str] = []
         seen: set[str] = set()
@@ -606,7 +589,9 @@ class GitLabBuildMixin:
                     continue
             else:
                 rel_path = raw_path
-            rel_path = rel_path.replace(os.sep, "/").lstrip("./")
+            rel_path = rel_path.replace(os.sep, "/")
+            if rel_path.startswith("./"):
+                rel_path = rel_path[2:]
             if not rel_path or rel_path.startswith("../") or _local_checkout.is_internal_local_path(rel_path):
                 continue
             if rel_path in seen:
@@ -749,20 +734,14 @@ class GitLabBuildMixin:
         query: PipelineListQuery,
     ) -> dict[str, Any]:
         try:
-            return self._list_pipelines_graphql(
-                repo=repo, pipeline_id=pipeline_id, query=query
-            )
+            return self._list_pipelines_graphql(repo=repo, pipeline_id=pipeline_id, query=query)
         except Exception as exc:  # noqa: BLE001 - intentional broad fallback guard
             logger.info(
                 "GitLab GraphQL pipeline traversal failed, falling back to REST: %s",
                 exc,
             )
-            payload = self._list_pipelines_rest(
-                repo=repo, pipeline_id=pipeline_id, query=query
-            )
-            fallback_warning = (
-                "GitLab GraphQL unavailable; using REST fallback with limited per-job metadata."
-            )
+            payload = self._list_pipelines_rest(repo=repo, pipeline_id=pipeline_id, query=query)
+            fallback_warning = "GitLab GraphQL unavailable; using REST fallback with limited per-job metadata."
             existing = list(payload.get("warnings") or [])
             if fallback_warning not in existing:
                 existing.append(fallback_warning)
@@ -894,9 +873,7 @@ class GitLabBuildMixin:
             depth += 1
 
         if max_depth_hit and query.max_depth > 0:
-            warnings.append(
-                f"max depth {query.max_depth} reached; deeper downstream pipelines not traversed."
-            )
+            warnings.append(f"max depth {query.max_depth} reached; deeper downstream pipelines not traversed.")
 
         return build_pipeline_list_payload(rows=rows, query=query, extra_warnings=warnings)
 
@@ -909,7 +886,7 @@ class GitLabBuildMixin:
         repo_hint: str,
     ) -> list[tuple[dict[str, Any], list[tuple[str, str | None, str | None, str | None, str | None]]]]:
         def _fetch(
-            entry: tuple[str, str | None, int | None, str | None, str | None, str | None]
+            entry: tuple[str, str | None, int | None, str | None, str | None, str | None],
         ) -> tuple[dict[str, Any], list[tuple[str, str | None, str | None, str | None, str | None]]] | None:
             gid, project_path, parent_id, trigger_job, pipeline_iid, trigger_stage = entry
             node = self._graphql_pipeline_node(
@@ -949,9 +926,7 @@ class GitLabBuildMixin:
             return [result] if result is not None else []
 
         max_workers = min(_BRIDGE_MAX_WORKERS, len(current_level))
-        outputs: list[
-            tuple[dict[str, Any], list[tuple[str, str | None, str | None, str | None, str | None]]] | None
-        ] = []
+        outputs: list[tuple[dict[str, Any], list[tuple[str, str | None, str | None, str | None, str | None]]] | None] = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(_fetch, entry) for entry in current_level]
             for future in futures:
@@ -966,9 +941,7 @@ class GitLabBuildMixin:
         query: PipelineListQuery,
     ) -> dict[str, Any]:
         root_project_path = self._full_project_path(repo)
-        root_raw = self._request_json(
-            "GET", f"/projects/{self._project_id(repo)}/pipelines/{pipeline_id}"
-        )
+        root_raw = self._request_json("GET", f"/projects/{self._project_id(repo)}/pipelines/{pipeline_id}")
         self._cache_project(
             project_id=str(root_raw.get("project_id") or "") or None,
             full_path=root_project_path,
@@ -1004,9 +977,7 @@ class GitLabBuildMixin:
             depth += 1
 
         if max_depth_hit and query.max_depth > 0:
-            warnings.append(
-                f"max depth {query.max_depth} reached; deeper downstream pipelines not traversed."
-            )
+            warnings.append(f"max depth {query.max_depth} reached; deeper downstream pipelines not traversed.")
 
         return build_pipeline_list_payload(rows=rows, query=query, extra_warnings=warnings)
 
@@ -1059,9 +1030,7 @@ class GitLabBuildMixin:
             if not project_path or pipeline_id is None:
                 return parent_row, []
             try:
-                bridges = self._get_paginated_list(
-                    f"/projects/{self._project_id(str(project_path))}/pipelines/{pipeline_id}/bridges"
-                )
+                bridges = self._get_paginated_list(f"/projects/{self._project_id(str(project_path))}/pipelines/{pipeline_id}/bridges")
             except Exception:
                 bridges = []
             return parent_row, list(bridges) if isinstance(bridges, list) else []
@@ -1091,9 +1060,7 @@ class GitLabBuildMixin:
             project_id_counts[project_id_text] = project_id_counts.get(project_id_text, 0) + 1
 
         shared_project_paths = {
-            project_id: self._project_path_from_id(project_id)
-            for project_id, count in project_id_counts.items()
-            if count > 1
+            project_id: self._project_path_from_id(project_id) for project_id, count in project_id_counts.items() if count > 1
         }
 
         def _resolve(
@@ -1302,13 +1269,9 @@ def _build_row_from_graphql(
                 (
                     gid_text,
                     str(downstream_project.get("fullPath") or "").strip() or None,
-                    str(source_job.get("name") or "").strip() or None
-                    if isinstance(source_job, dict)
-                    else None,
+                    str(source_job.get("name") or "").strip() or None if isinstance(source_job, dict) else None,
                     downstream_iid,
-                    str(source_stage.get("name") or "").strip() or None
-                    if isinstance(source_stage, dict)
-                    else None,
+                    str(source_stage.get("name") or "").strip() or None if isinstance(source_stage, dict) else None,
                 )
             )
 

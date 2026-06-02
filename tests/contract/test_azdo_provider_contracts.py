@@ -30,7 +30,16 @@ def test_azdo_list_project_repository_and_search_code_views(monkeypatch: Any) ->
         if url.endswith("/_apis/projects"):
             return {"value": [{"id": "1", "name": "proj-a", "state": "wellFormed", "url": "https://dev.azure.com/acme/_apis/projects/1"}]}
         if url.endswith("/proj-a/_apis/git/repositories"):
-            return {"value": [{"id": "2", "name": "repo-a", "defaultBranch": "refs/heads/main", "webUrl": "https://dev.azure.com/acme/proj-a/_git/repo-a"}]}
+            return {
+                "value": [
+                    {
+                        "id": "2",
+                        "name": "repo-a",
+                        "defaultBranch": "refs/heads/main",
+                        "webUrl": "https://dev.azure.com/acme/proj-a/_git/repo-a",
+                    }
+                ]
+            }
         return {
             "count": 1,
             "results": [{"project": {"name": "proj-a"}, "repository": {"name": "repo-a"}, "path": "/src/app.py"}],
@@ -545,6 +554,8 @@ def test_azdo_pull_request_views_build_logs_and_grep(monkeypatch: Any) -> None:
     assert pr["pull_request"] == {"pullRequestId": 17, "title": "Fix", "status": "active"}
     assert pr["changed_files"] == ["/src/app.py", "/src/util.py"]
     assert pr["diffs"] == {}
+    assert pr["partial"] is False
+    assert pr["warnings"] == []
     assert pr["threads"][0]["id"] == 1
     assert pr["threads"][0]["comments"][0]["author"] == {"displayName": "alice"}
     assert threads["returned_count"] == 1
@@ -575,6 +586,28 @@ def test_azdo_pull_request_views_build_logs_and_grep(monkeypatch: Any) -> None:
         "warnings": [],
         "partial": False,
     }
+
+    def _fake_request_json_changed_file_failure(
+        method: str,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if url.endswith("/pullrequests/18"):
+            return {"pullRequestId": 18, "title": "Fix", "status": "active"}
+        if url.endswith("/pullrequests/18/threads"):
+            return {"value": []}
+        if url.endswith("/pullrequests/18/iterations"):
+            raise RuntimeError("changes unavailable")
+        raise AssertionError(f"unexpected request: {url} {params}")
+
+    monkeypatch.setattr(provider, "_request_json", _fake_request_json_changed_file_failure)
+    partial_pr = provider.get_pull_request(project="proj-a", repo="repo-a", pull_request_id=18)
+
+    assert partial_pr["changed_files"] == []
+    assert partial_pr["partial"] is True
+    assert partial_pr["warnings"] == ["Failed to fetch pull request changed files: changes unavailable"]
 
 
 def test_azdo_work_item_views_and_cross_project_mine_aggregation(monkeypatch: Any) -> None:
@@ -696,6 +729,15 @@ def test_azdo_work_item_views_and_cross_project_mine_aggregation(monkeypatch: An
         "results": [{"id": 7}],
         "warnings": ["proj-b: API unavailable"],
     }
+
+    def _list_work_items_with_more(**kwargs: Any) -> Any:
+        return {"results": [{"id": 8}], "has_more": True}
+
+    monkeypatch.setattr(provider, "list_work_items", _list_work_items_with_more)
+    aggregate_more = provider.get_my_work_items(project=None, include_closed=True, skip=0, take=5)
+
+    assert aggregate_more["has_more"] is True
+    assert aggregate_more["warnings"] == []
 
 
 def test_azdo_list_pipelines_normalizes_build_status_and_duration(monkeypatch: Any) -> None:

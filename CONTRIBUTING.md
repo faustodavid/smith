@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-python3 -m pip install -e .[dev]
+python3 -m pip install -e '.[dev]'
 ```
 
 ## Quality Gates
@@ -11,9 +11,7 @@ python3 -m pip install -e .[dev]
 Run before opening a PR:
 
 ```bash
-ruff check .
-mypy src
-pytest -q
+make check
 ```
 
 ## Contract Stability

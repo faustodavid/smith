@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -259,7 +260,8 @@ class AzdoCodeMixin:
     @staticmethod
     def _sanitize_cache_component(value: str) -> str:
         sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
-        return sanitized or "_"
+        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+        return f"{sanitized or '_'}__{digest}"
 
     @staticmethod
     def _cache_lock(path: str) -> threading.Lock:
@@ -282,7 +284,7 @@ class AzdoCodeMixin:
 
     def _git_http_auth_extra_configs(self: Any) -> list[str]:
         try:
-            token = self._get_token()
+            self._get_token()
         except Exception as exc:
             logger.debug(
                 "Azure DevOps token unavailable for local checkout auth: %s",
@@ -292,13 +294,19 @@ class AzdoCodeMixin:
 
         return [
             "credential.interactive=never",
-            f"http.extraHeader=Authorization: Bearer {token}",
+            f"http.extraHeader=Authorization: {self._authorization_header()}",
         ]
 
     @staticmethod
-    def _git_noninteractive_env() -> dict[str, str]:
+    def _git_noninteractive_env(extra_configs: list[str] | None = None) -> dict[str, str]:
         env = dict(os.environ)
         env["GIT_TERMINAL_PROMPT"] = "0"
+        for index, config in enumerate(extra_configs or []):
+            key, _, value = config.partition("=")
+            env[f"GIT_CONFIG_KEY_{index}"] = key
+            env[f"GIT_CONFIG_VALUE_{index}"] = value
+        if extra_configs:
+            env["GIT_CONFIG_COUNT"] = str(len(extra_configs))
         return env
 
     def _git_subprocess(self: Any, args: list[str], *, cwd: str | None = None) -> None:
@@ -313,23 +321,23 @@ class AzdoCodeMixin:
     def _git_auth_subprocess(self: Any, args: list[str], *, cwd: str | None = None) -> None:
         extra_configs = self._git_http_auth_extra_configs()
         subprocess.run(
-            self._prepare_git_command(args, extra_configs=extra_configs),
+            self._prepare_git_command(args),
             cwd=cwd,
             check=True,
             capture_output=True,
             text=True,
-            env=self._git_noninteractive_env() if extra_configs else None,
+            env=self._git_noninteractive_env(extra_configs) if extra_configs else None,
         )
 
     def _git_auth_subprocess_output(self: Any, args: list[str], *, cwd: str | None = None) -> str:
         extra_configs = self._git_http_auth_extra_configs()
         result = subprocess.run(
-            self._prepare_git_command(args, extra_configs=extra_configs),
+            self._prepare_git_command(args),
             cwd=cwd,
             check=True,
             capture_output=True,
             text=True,
-            env=self._git_noninteractive_env() if extra_configs else None,
+            env=self._git_noninteractive_env(extra_configs) if extra_configs else None,
         )
         return result.stdout
 
@@ -404,20 +412,28 @@ class AzdoCodeMixin:
     def _local_checkout_refresh_marker(checkout_dir: str) -> str:
         return os.path.join(checkout_dir, ".git", "smith-last-fetch")
 
+    @staticmethod
+    def _local_checkout_owner_marker(checkout_dir: str) -> str:
+        return os.path.join(checkout_dir, ".smith_azdo_checkout")
+
+    def _mark_local_checkout_owned(self: Any, checkout_dir: str) -> None:
+        Path(self._local_checkout_owner_marker(checkout_dir)).write_text("smith azdo checkout\n", encoding="utf-8")
+
+    def _local_checkout_is_owned(self: Any, checkout_dir: str) -> bool:
+        return os.path.isfile(self._local_checkout_owner_marker(checkout_dir)) or os.path.isfile(
+            self._local_checkout_refresh_marker(checkout_dir)
+        )
+
     def _reset_local_checkout(self: Any, checkout_dir: str) -> None:
         self._git_auth_subprocess(["git", "-C", checkout_dir, "reset", "--hard", "HEAD"])
         self._git_auth_subprocess(["git", "-C", checkout_dir, "clean", "-fd"])
 
     def _checkout_local_ref(self: Any, checkout_dir: str, ref: str) -> None:
-        self._git_auth_subprocess(
-            ["git", "-C", checkout_dir, "checkout", "--force", "--detach", ref]
-        )
+        self._git_auth_subprocess(["git", "-C", checkout_dir, "checkout", "--force", "--detach", ref])
 
     def _local_checkout_has_expected_origin(self: Any, checkout_dir: str, remote_url: str) -> bool:
         try:
-            origin_url = self._git_subprocess_output(
-                ["git", "-C", checkout_dir, "remote", "get-url", "origin"]
-            ).strip()
+            origin_url = self._git_subprocess_output(["git", "-C", checkout_dir, "remote", "get-url", "origin"]).strip()
         except Exception:
             return False
         return origin_url == remote_url
@@ -457,8 +473,12 @@ class AzdoCodeMixin:
 
         with checkout_lock:
             try:
+                if os.path.isdir(git_dir) and not self._local_checkout_is_owned(checkout_dir):
+                    return None
                 if not os.path.isdir(git_dir):
                     if os.path.exists(checkout_dir):
+                        if not self._local_checkout_is_owned(checkout_dir):
+                            return None
                         shutil.rmtree(checkout_dir)
                     os.makedirs(os.path.dirname(checkout_dir), exist_ok=True)
 
@@ -481,6 +501,7 @@ class AzdoCodeMixin:
                     self._checkout_local_ref(checkout_dir, f"origin/{branch}")
                     self._reset_local_checkout(checkout_dir)
                     self._apply_sparse_patterns(checkout_dir, sparse_patterns)
+                    self._mark_local_checkout_owned(checkout_dir)
                     self._mark_local_checkout_refreshed(checkout_dir)
                     return checkout_dir
 
@@ -654,9 +675,7 @@ class AzdoCodeMixin:
 
         grep_local_cache_enabled = parse_bool_env("AZDO_GREP_USE_LOCAL_CACHE", default=True)
         use_local_cache = grep_local_cache_enabled and not no_clone
-        resolved_branch = normalized_branch or (
-            self._get_repository_default_branch(project, repo) if use_local_cache else None
-        )
+        resolved_branch = normalized_branch or (self._get_repository_default_branch(project, repo) if use_local_cache else None)
         sparse_patterns = self._compute_sparse_patterns(path, glob) if use_local_cache else None
         checkout_dir: str | None = None
         if use_local_cache and resolved_branch:
@@ -701,9 +720,7 @@ class AzdoCodeMixin:
             {
                 "path": str(file_item.get("path", "")),
                 "is_binary": bool(
-                    file_item.get("isBinary")
-                    or file_item.get("is_binary")
-                    or (file_item.get("contentMetadata") or {}).get("isBinary")
+                    file_item.get("isBinary") or file_item.get("is_binary") or (file_item.get("contentMetadata") or {}).get("isBinary")
                 ),
                 "local_path": file_item.get("local_path"),
             }
@@ -785,28 +802,16 @@ class AzdoCodeMixin:
                 return [], 0, None
             return matched_lines, count, None
 
-        file_entries = [
-            (item["path"], item.get("local_path"))
-            for item in matching
-            if item["path"] and not item["is_binary"]
-        ]
+        file_entries = [(item["path"], item.get("local_path")) for item in matching if item["path"] and not item["is_binary"]]
         if reverse:
             file_entries.reverse()
 
         effective_workers = min(grep_max_workers, len(file_entries) or 1)
-        use_parallel = (
-            not checkout_dir
-            and grep_parallel_enabled
-            and effective_workers > 1
-            and len(file_entries) > 1
-        )
+        use_parallel = not checkout_dir and grep_parallel_enabled and effective_workers > 1 and len(file_entries) > 1
 
         if use_parallel:
             with ThreadPoolExecutor(max_workers=max(1, effective_workers)) as executor:
-                futures = [
-                    executor.submit(_process_file, file_path, local_path)
-                    for file_path, local_path in file_entries
-                ]
+                futures = [executor.submit(_process_file, file_path, local_path) for file_path, local_path in file_entries]
                 for (file_path, _local_path), future in zip(file_entries, futures):
                     try:
                         lines_out, matched_count, warning = future.result()

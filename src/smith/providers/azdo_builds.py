@@ -38,11 +38,7 @@ def _order_value(record: dict[str, Any]) -> int:
 
 
 def _azdo_jobs_from_timeline(records: list[dict[str, Any]]) -> list[JobRow]:
-    by_id = {
-        rec.get("id"): rec
-        for rec in records
-        if isinstance(rec, dict) and rec.get("id")
-    }
+    by_id = {rec.get("id"): rec for rec in records if isinstance(rec, dict) and rec.get("id")}
 
     def _stage_record(record: dict[str, Any]) -> dict[str, Any] | None:
         current: dict[str, Any] | None = record
@@ -130,12 +126,8 @@ class AzdoBuildMixin:
             "project_name": project,
             "build_id": build_id,
             "build_number": build_data.get("buildNumber"),
-            "status": str(build_data.get("status")).lower()
-            if build_data.get("status") is not None
-            else None,
-            "result": str(build_data.get("result")).lower()
-            if build_data.get("result") is not None
-            else None,
+            "status": str(build_data.get("status")).lower() if build_data.get("status") is not None else None,
+            "result": str(build_data.get("result")).lower() if build_data.get("result") is not None else None,
             "definition_name": (build_data.get("definition") or {}).get("name"),
             "repository_name": (build_data.get("repository") or {}).get("name"),
             "branch": normalize_branch_name(build_data.get("sourceBranch")),
@@ -180,9 +172,7 @@ class AzdoBuildMixin:
         else:
             build_logs = self.get_build_log(project=project, build_id=build_id)
             resolved_log_ids = [
-                int(entry["id"])
-                for entry in build_logs.get("logs", [])
-                if isinstance(entry, dict) and entry.get("id") is not None
+                int(entry["id"]) for entry in build_logs.get("logs", []) if isinstance(entry, dict) and entry.get("id") is not None
             ]
 
         def _get_content(lid: int) -> str | tuple[str, int]:
@@ -261,9 +251,7 @@ class AzdoBuildMixin:
         )
         return build_pipeline_list_payload(rows=[row], query=query)
 
-    def _list_azdo_build_jobs(
-        self: Any, *, project: str, build_id: int
-    ) -> list[JobRow]:
+    def _list_azdo_build_jobs(self: Any, *, project: str, build_id: int) -> list[JobRow]:
         try:
             payload = self._request_json(
                 "GET",

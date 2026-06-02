@@ -47,9 +47,7 @@ def test_build_github_copilot_payload_uses_remote_mcp_and_expected_tools():
         copilot_tool_name(GITHUB_MCP_SERVER_NAME, "get_file_contents"),
     ]
     assert payload["mcpServers"][GITHUB_MCP_SERVER_NAME]["tools"] == ["search_code", "get_file_contents"]
-    assert payload["mcpServers"][GITHUB_MCP_SERVER_NAME]["headers"]["Authorization"] == (
-        f"__ENV__:{GITHUB_AUTH_HEADER_ENV}"
-    )
+    assert payload["mcpServers"][GITHUB_MCP_SERVER_NAME]["headers"]["Authorization"] == (f"__ENV__:{GITHUB_AUTH_HEADER_ENV}")
 
 
 def test_build_github_copilot_env_adds_bearer_header_from_gh_token():

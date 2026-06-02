@@ -15,13 +15,13 @@ If the needed remote is missing, add it to the active config or point `SMITH_CON
 ## Missing token env var
 
 ```bash
-printenv GITHUB_TOKEN
-printenv GITLAB_TOKEN
-printenv AZURE_DEVOPS_PAT
-printenv YOUTRACK_TOKEN
+test -n "${GITHUB_TOKEN:-}" && echo GITHUB_TOKEN=set || echo GITHUB_TOKEN=missing
+test -n "${GITLAB_TOKEN:-}" && echo GITLAB_TOKEN=set || echo GITLAB_TOKEN=missing
+test -n "${AZURE_DEVOPS_PAT:-}" && echo AZURE_DEVOPS_PAT=set || echo AZURE_DEVOPS_PAT=missing
+test -n "${YOUTRACK_TOKEN:-}" && echo YOUTRACK_TOKEN=set || echo YOUTRACK_TOKEN=missing
 ```
 
-Set the env var named by the remote's `token_env` field.
+Do not print token values. Set the env var named by the remote's `token_env` field.
 
 ## Provider-specific login
 

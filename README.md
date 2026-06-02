@@ -147,7 +147,7 @@ smith github-public code grep my-repo "TODO" --format json
 ### Prerequisites
 
 - **[Homebrew](https://brew.sh/)** for the recommended macOS / Linux install
-- **git** and **[uv](https://docs.astral.sh/uv/)** for the standalone installer
+- **git**, **ripgrep** (`rg`), and **[uv](https://docs.astral.sh/uv/)** for the standalone installer
 
 ### Install with Homebrew
 

@@ -65,11 +65,7 @@ class GitLabProvider(
             return self._gitlab_token
 
         host = self._gitlab_host()
-        token_commands = (
-            [["glab", "config", "get", "token", "--host", host]]
-            if host
-            else [["glab", "config", "get", "token"]]
-        )
+        token_commands = [["glab", "config", "get", "token", "--host", host]] if host else [["glab", "config", "get", "token"]]
         last_error: Exception | None = None
         saw_command_success = False
         token = ""
@@ -93,27 +89,18 @@ class GitLabProvider(
         if not token:
             message = "Failed to acquire GitLab token. Set GITLAB_TOKEN or run `glab auth login`."
             if host:
-                message = (
-                    f"Failed to acquire GitLab token for {host}. "
-                    f"Set GITLAB_TOKEN or run `glab auth login --hostname {host}`."
-                )
+                message = f"Failed to acquire GitLab token for {host}. Set GITLAB_TOKEN or run `glab auth login --hostname {host}`."
             if saw_command_success:
                 message = "GitLab token is empty. Set GITLAB_TOKEN or run `glab auth login`."
                 if host:
-                    message = (
-                        f"GitLab token is empty for {host}. "
-                        f"Set GITLAB_TOKEN or run `glab auth login --hostname {host}`."
-                    )
+                    message = f"GitLab token is empty for {host}. Set GITLAB_TOKEN or run `glab auth login --hostname {host}`."
             raise SmithAuthError(message) from last_error
 
         self._gitlab_token = token
         return self._gitlab_token
 
     def _auth_error_message(self) -> str:
-        return (
-            "GitLab authentication rejected with HTTP 401/403. "
-            "Set GITLAB_TOKEN or run `glab auth login` and retry."
-        )
+        return "GitLab authentication rejected with HTTP 401/403. Set GITLAB_TOKEN or run `glab auth login` and retry."
 
     def _timeout(self) -> int:
         return self._config.gitlab_timeout_seconds
@@ -144,9 +131,7 @@ class GitLabProvider(
         )
         errors = response.get("errors") if isinstance(response, dict) else None
         if errors:
-            message = "; ".join(
-                str((err or {}).get("message") or "") for err in errors if err
-            ).strip() or "unknown GraphQL error"
+            message = "; ".join(str((err or {}).get("message") or "") for err in errors if err).strip() or "unknown GraphQL error"
             raise SmithApiError(f"GitLab GraphQL error: {message}")
         data = response.get("data") if isinstance(response, dict) else None
         if not isinstance(data, dict):
@@ -285,9 +270,7 @@ class GitLabProvider(
         try:
             data = response.json()
         except ValueError as exc:
-            raise SmithApiError(
-                f"Expected JSON response from {self._build_url(path)} but received invalid JSON"
-            ) from exc
+            raise SmithApiError(f"Expected JSON response from {self._build_url(path)} but received invalid JSON") from exc
 
         if not isinstance(data, list):
             return [], total_pages

@@ -151,9 +151,7 @@ def grep_build_logs_core(
             matched_key="logs_matched",
         )
 
-    search_pattern, compile_error = compile_search_pattern(
-        regex_pattern, case_insensitive=case_insensitive
-    )
+    search_pattern, compile_error = compile_search_pattern(regex_pattern, case_insensitive=case_insensitive)
     if compile_error or search_pattern is None:
         return grep_compile_error_result(compile_error or "Invalid pattern", matched_key="logs_matched")
 

@@ -58,9 +58,7 @@ def copy_codex_auth_into_home(
     source_home = resolve_codex_auth_home(env)
     source_auth = source_home / CODEX_AUTH_FILENAME
     if not source_auth.exists():
-        raise FileNotFoundError(
-            f"Could not find Codex auth at {source_auth}. Run `codex login` before using --executor codex."
-        )
+        raise FileNotFoundError(f"Could not find Codex auth at {source_auth}. Run `codex login` before using --executor codex.")
     codex_home.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_auth, codex_home / CODEX_AUTH_FILENAME)
 

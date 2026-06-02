@@ -149,18 +149,10 @@ def test_in_process_runner_client_cache_keys_on_api_url_and_smith_config(monkeyp
     monkeypatch.setattr("smith.benchmark.smith_cli.SmithClient", _fake_client)
     runner = InProcessSmithCliRunner()
 
-    first = runner._get_or_create_client(
-        {"GITHUB_API_URL": "http://127.0.0.1:4010/api/github", "SMITH_CONFIG": "/tmp/config-a.yaml"}
-    )
-    second = runner._get_or_create_client(
-        {"GITHUB_API_URL": "http://127.0.0.1:4010/api/github/", "SMITH_CONFIG": "/tmp/config-a.yaml"}
-    )
-    third = runner._get_or_create_client(
-        {"GITHUB_API_URL": "http://127.0.0.1:4020/api/github", "SMITH_CONFIG": "/tmp/config-a.yaml"}
-    )
-    fourth = runner._get_or_create_client(
-        {"GITHUB_API_URL": "http://127.0.0.1:4020/api/github", "SMITH_CONFIG": "/tmp/config-b.yaml"}
-    )
+    first = runner._get_or_create_client({"GITHUB_API_URL": "http://127.0.0.1:4010/api/github", "SMITH_CONFIG": "/tmp/config-a.yaml"})
+    second = runner._get_or_create_client({"GITHUB_API_URL": "http://127.0.0.1:4010/api/github/", "SMITH_CONFIG": "/tmp/config-a.yaml"})
+    third = runner._get_or_create_client({"GITHUB_API_URL": "http://127.0.0.1:4020/api/github", "SMITH_CONFIG": "/tmp/config-a.yaml"})
+    fourth = runner._get_or_create_client({"GITHUB_API_URL": "http://127.0.0.1:4020/api/github", "SMITH_CONFIG": "/tmp/config-b.yaml"})
 
     assert first is second
     assert third is not second

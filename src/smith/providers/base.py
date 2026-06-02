@@ -34,6 +34,9 @@ class BaseProvider(ABC):
     def _default_headers(self) -> dict[str, str]:
         return {}
 
+    def _authorization_header(self, *, force_refresh: bool = False) -> str:
+        return f"Bearer {self._get_token(force_refresh=force_refresh)}"
+
     def _timeout(self) -> int:
         return self._config.timeout_seconds
 
@@ -131,9 +134,7 @@ class BaseProvider(ABC):
         try:
             return response.json()
         except ValueError as exc:
-            raise SmithApiError(
-                f"Expected JSON response from {self._build_url(url)} but received invalid JSON"
-            ) from exc
+            raise SmithApiError(f"Expected JSON response from {self._build_url(url)} but received invalid JSON") from exc
 
     def _request_response(
         self,
@@ -160,7 +161,7 @@ class BaseProvider(ABC):
         response: Any = None
         for retry_index in range(max_attempts):
             attempt_headers = dict(request_headers)
-            attempt_headers["Authorization"] = f"Bearer {self._get_token()}"
+            attempt_headers["Authorization"] = self._authorization_header()
             logger.debug("%s %s (attempt %d/%d)", method_upper, resolved_url, retry_index + 1, max_attempts)
             try:
                 response = self._perform_http_request(
@@ -185,7 +186,7 @@ class BaseProvider(ABC):
             if self._should_refresh_auth_response(response):
                 logger.debug("HTTP %d, refreshing token and retrying", response.status_code)
                 retry_headers = dict(request_headers)
-                retry_headers["Authorization"] = f"Bearer {self._get_token(force_refresh=True)}"
+                retry_headers["Authorization"] = self._authorization_header(force_refresh=True)
                 try:
                     response = self._perform_http_request(
                         http_session,
@@ -200,11 +201,7 @@ class BaseProvider(ABC):
                     raise SmithApiError(f"Request error during auth retry for {resolved_url}: {exc}") from exc
                 logger.debug("Auth retry -> HTTP %d", response.status_code)
 
-            if (
-                is_retryable_get
-                and self._is_retryable_response(response)
-                and retry_index < max_attempts - 1
-            ):
+            if is_retryable_get and self._is_retryable_response(response) and retry_index < max_attempts - 1:
                 sleep_secs = self._retry_sleep_seconds(response=response, retry_index=retry_index)
                 self._record_retry_cooldown(response, retry_index, sleep_secs)
                 logger.debug("HTTP %d is retryable, sleeping %.1fs", response.status_code, sleep_secs)

@@ -9,11 +9,7 @@ if TYPE_CHECKING:
 class GitHubIssueMixin:
     def _issue_to_work_item(self: Any, issue: dict[str, Any], repo: str) -> dict[str, Any]:
         labels = issue.get("labels") or []
-        tag_names = [
-            str(label.get("name"))
-            for label in labels
-            if isinstance(label, dict) and label.get("name")
-        ]
+        tag_names = [str(label.get("name")) for label in labels if isinstance(label, dict) and label.get("name")]
         state = "Closed" if str(issue.get("state") or "").lower() == "closed" else "Open"
         return {
             "id": issue.get("number"),
@@ -61,7 +57,10 @@ class GitHubIssueMixin:
         include_closed: bool = True,
     ) -> dict[str, Any]:
         org = self._require_github_org()
-        repo_name = (repo or project or "").strip()
+        repo_name = (repo or "").strip()
+        project_name = (project or "").strip()
+        if not repo_name and project_name and project_name != org:
+            repo_name = project_name
 
         qualifiers: list[str] = [query or "", f"org:{org}", "is:issue"]
         if repo_name:

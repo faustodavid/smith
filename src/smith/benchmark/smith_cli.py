@@ -102,13 +102,15 @@ def validate_smith_cli_command(command: str, *, env: dict[str, str] | None = Non
     if tokens[:2] == [github_remote, "orgs"]:
         return tokens
 
-    allowed = ", ".join([
-        "`code search`",
-        f"`{github_remote} code search`",
-        f"`{github_remote} code grep`",
-        f"`{github_remote} repos`",
-        f"`{github_remote} orgs`",
-    ])
+    allowed = ", ".join(
+        [
+            "`code search`",
+            f"`{github_remote} code search`",
+            f"`{github_remote} code grep`",
+            f"`{github_remote} repos`",
+            f"`{github_remote} orgs`",
+        ]
+    )
     raise ValueError(f"smith_cli only allows: {allowed}.")
 
 

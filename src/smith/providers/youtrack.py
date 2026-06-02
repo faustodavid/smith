@@ -45,19 +45,14 @@ class YouTrackProvider(
         token_env_var = self._resolved_token_env_var()
         env_token = os.getenv(token_env_var, "").strip()
         if not env_token:
-            raise SmithAuthError(
-                f"Failed to acquire YouTrack token. Set {token_env_var} and retry."
-            )
+            raise SmithAuthError(f"Failed to acquire YouTrack token. Set {token_env_var} and retry.")
 
         self._youtrack_token = env_token
         return self._youtrack_token
 
     def _auth_error_message(self) -> str:
         token_env_var = self._resolved_token_env_var()
-        return (
-            "YouTrack authentication rejected with HTTP 401/403. "
-            f"Set {token_env_var} and retry."
-        )
+        return f"YouTrack authentication rejected with HTTP 401/403. Set {token_env_var} and retry."
 
     def _build_url(self, path: str) -> str:
         if path.startswith("http"):

@@ -253,12 +253,7 @@ def truncate_output(text: str, max_chars: int, hint: str) -> str:
     shown = text[:max_chars]
     total_lines = text.count("\n") + 1
     shown_lines = shown.count("\n") + 1
-    return (
-        f"{shown}\n"
-        f"... (truncated: showing {max_chars} of {len(text)} characters, "
-        f"{shown_lines} of {total_lines} lines)\n"
-        f"{hint}"
-    )
+    return f"{shown}\n... (truncated: showing {max_chars} of {len(text)} characters, {shown_lines} of {total_lines} lines)\n{hint}"
 
 
 def _fmt_table_line(columns: list[str]) -> str:
@@ -266,8 +261,7 @@ def _fmt_table_line(columns: list[str]) -> str:
 
 
 _GITLAB_CODE_SEARCH_LOWER_BOUND_WARNING = (
-    "GitLab search did not provide an exact total; `matchesCount` is a lower bound. "
-    "Narrow with `--repo group/project` for exact counts."
+    "GitLab search did not provide an exact total; `matchesCount` is a lower bound. Narrow with `--repo group/project` for exact counts."
 )
 
 
@@ -276,11 +270,7 @@ def _render_name_list(data: Any) -> str:
         rows = data.get("results", [])
     else:
         rows = data if isinstance(data, list) else []
-    return "\n".join(
-        str(row.get("name", ""))
-        for row in rows
-        if str(row.get("name", "")).strip()
-    )
+    return "\n".join(str(row.get("name", "")) for row in rows if str(row.get("name", "")).strip())
 
 
 def _render_discover_repos(data: Any) -> str:
@@ -289,9 +279,7 @@ def _render_discover_repos(data: Any) -> str:
     else:
         rows = data if isinstance(data, list) else []
     project_names = {
-        str(row.get("projectName", "")).strip()
-        for row in rows
-        if isinstance(row, dict) and str(row.get("projectName", "")).strip()
+        str(row.get("projectName", "")).strip() for row in rows if isinstance(row, dict) and str(row.get("projectName", "")).strip()
     }
     if not project_names:
         return _render_name_list(data)
@@ -301,10 +289,12 @@ def _render_discover_repos(data: Any) -> str:
 
     lines = [_fmt_table_line(["project", "repo"])]
     lines.extend(
-        _fmt_table_line([
-            str(row.get("projectName", "")),
-            str(row.get("name", "")),
-        ])
+        _fmt_table_line(
+            [
+                str(row.get("projectName", "")),
+                str(row.get("name", "")),
+            ]
+        )
         for row in rows
         if isinstance(row, dict)
     )
@@ -375,13 +365,15 @@ def _render_pr_list(data: Any) -> str:
     rows = data.get("results", []) if isinstance(data, dict) else []
     lines = [_fmt_table_line(["project", "repo", "pr_id", "status", "title"])]
     lines.extend(
-        _fmt_table_line([
-            str(row.get("project_name", "")),
-            str(row.get("repository_name", "")),
-            str(row.get("pr_id", "")),
-            str(row.get("status", "")),
-            str(row.get("title", "")),
-        ])
+        _fmt_table_line(
+            [
+                str(row.get("project_name", "")),
+                str(row.get("repository_name", "")),
+                str(row.get("pr_id", "")),
+                str(row.get("status", "")),
+                str(row.get("title", "")),
+            ]
+        )
         for row in rows
     )
     lines.append(f"returned_count: {data.get('returned_count', len(rows))}")
@@ -427,10 +419,7 @@ def _render_pr_threads(data: Any) -> str:
     for thread in threads:
         if not isinstance(thread, dict):
             continue
-        header = (
-            f"thread {thread.get('id')} status={thread.get('status')} "
-            f"comments={thread.get('comment_count', 0)}"
-        )
+        header = f"thread {thread.get('id')} status={thread.get('status')} comments={thread.get('comment_count', 0)}"
         file_path = thread.get("file_path")
         line_start = thread.get("line_start")
         if file_path and line_start:
@@ -451,12 +440,14 @@ def _render_pr_threads(data: Any) -> str:
 
 def _render_board_ticket(data: Any) -> str:
     fields = (data.get("fields") or {}) if isinstance(data, dict) else {}
-    return "\n".join([
-        f"id: {data.get('id')}",
-        f"type: {fields.get('System.WorkItemType', '')}",
-        f"state: {fields.get('System.State', '')}",
-        f"title: {fields.get('System.Title', '')}",
-    ])
+    return "\n".join(
+        [
+            f"id: {data.get('id')}",
+            f"type: {fields.get('System.WorkItemType', '')}",
+            f"state: {fields.get('System.State', '')}",
+            f"title: {fields.get('System.Title', '')}",
+        ]
+    )
 
 
 def _render_youtrack_ticket(data: Any) -> str:
@@ -566,11 +557,7 @@ def _render_youtrack_ticket(data: Any) -> str:
                     part
                     for part in [
                         str(reaction.get("reaction") or "").strip(),
-                        (
-                            f"by {reaction.get('author_display')}"
-                            if str(reaction.get("author_display") or "").strip()
-                            else ""
-                        ),
+                        (f"by {reaction.get('author_display')}" if str(reaction.get("author_display") or "").strip() else ""),
                     ]
                     if part
                 )
@@ -615,12 +602,14 @@ def _render_board_table(data: Any) -> str:
     for row in rows:
         fields = row.get("fields", {}) if isinstance(row, dict) else {}
         lines.append(
-            _fmt_table_line([
-                str(row.get("id", "")),
-                str(row.get("type") or fields.get("System.WorkItemType", "")),
-                str(row.get("state") or fields.get("System.State", "")),
-                str(row.get("title") or fields.get("System.Title", "")),
-            ])
+            _fmt_table_line(
+                [
+                    str(row.get("id", "")),
+                    str(row.get("type") or fields.get("System.WorkItemType", "")),
+                    str(row.get("state") or fields.get("System.State", "")),
+                    str(row.get("title") or fields.get("System.Title", "")),
+                ]
+            )
         )
     if isinstance(data, dict):
         if "returned_count" in data:
@@ -646,13 +635,15 @@ def _render_story_table(data: Any) -> str:
         if not isinstance(row, dict):
             continue
         lines.append(
-            _fmt_table_line([
-                str(row.get("id", "")),
-                str(row.get("project") or row.get("project_name") or ""),
-                str(row.get("type", "")),
-                str(row.get("state", "")),
-                str(row.get("title", "")),
-            ])
+            _fmt_table_line(
+                [
+                    str(row.get("id", "")),
+                    str(row.get("project") or row.get("project_name") or ""),
+                    str(row.get("type", "")),
+                    str(row.get("state", "")),
+                    str(row.get("title", "")),
+                ]
+            )
         )
     if "returned_count" in data:
         lines.append(f"returned_count: {data['returned_count']}")
@@ -987,9 +978,7 @@ def _render_remote_grouped(command: str, payload: dict[str, Any]) -> str:
                 raw_results = remote_data.get("results", [])
                 if isinstance(raw_results, list):
                     result_lines = raw_results
-            output_lines.append(
-                f"[{remote_name}] {_code_search_summary_line(matches_count, len(result_lines), lower_bound=lower_bound)}"
-            )
+            output_lines.append(f"[{remote_name}] {_code_search_summary_line(matches_count, len(result_lines), lower_bound=lower_bound)}")
             output_lines.extend(str(entry_line) for entry_line in result_lines)
         else:
             output_lines.append(f"[{remote_name}]")

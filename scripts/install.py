@@ -4,6 +4,7 @@
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_URL = "https://github.com/faustodavid/smith.git"
@@ -29,9 +30,21 @@ def require_tool(name: str, install_hint: str) -> None:
 
 def sync_skill(source: Path, target: Path) -> None:
     """Copy skill directory to target."""
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(source, target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_root = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
+    staged = temp_root / "staged"
+    backup = temp_root / "backup"
+    try:
+        shutil.copytree(source, staged)
+        if target.exists():
+            target.replace(backup)
+        staged.replace(target)
+    except Exception:
+        if backup.exists() and not target.exists():
+            backup.replace(target)
+        raise
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
     print(f"  Synced skill to: {target}")
 
 
@@ -59,8 +72,10 @@ def main() -> None:
         run(["git", "-C", str(REPO_DIR), "pull", "--ff-only", "origin", "main"])
     else:
         print(f"==> Cloning smith to {REPO_DIR}")
-        if REPO_DIR.exists():
-            shutil.rmtree(REPO_DIR)
+        if REPO_DIR.exists() and any(REPO_DIR.iterdir()):
+            print(f"Error: refusing to replace non-git directory: {REPO_DIR}", file=sys.stderr)
+            print("Move or remove it before installing Smith.", file=sys.stderr)
+            sys.exit(1)
         run(["git", "clone", REPO_URL, str(REPO_DIR)])
 
     if not SKILL_SOURCE.exists():

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import logging
 import os
 import re
@@ -329,7 +331,8 @@ class GitHubCodeMixin:
     @staticmethod
     def _sanitize_cache_component(value: str) -> str:
         sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
-        return sanitized or "_"
+        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+        return f"{sanitized or '_'}__{digest}"
 
     @staticmethod
     def _cache_lock(path: str) -> threading.Lock:
@@ -367,6 +370,9 @@ class GitHubCodeMixin:
     def _github_grep_cache_root(self: Any) -> str:
         configured = (os.getenv("SMITH_GITHUB_GREP_CACHE_DIR") or "").strip()
         if configured:
+            resolved = Path(configured).expanduser().resolve()
+            if resolved in {Path("/"), Path.home().resolve(), Path.cwd().resolve()}:
+                return str(Path.home() / ".cache" / "smith" / "github-grep")
             return configured
         return str(Path.home() / ".cache" / "smith" / "github-grep")
 
@@ -401,6 +407,42 @@ class GitHubCodeMixin:
     def _mark_local_checkout_refreshed(self: Any, checkout_dir: str) -> None:
         marker = os.path.join(checkout_dir, ".smith_last_fetch")
         Path(marker).touch()
+
+    @staticmethod
+    def _local_checkout_branch_marker(checkout_dir: str) -> str:
+        return os.path.join(checkout_dir, ".smith_branch")
+
+    @staticmethod
+    def _local_checkout_owner_marker(checkout_dir: str) -> str:
+        return os.path.join(checkout_dir, ".smith_github_checkout")
+
+    def _mark_local_checkout_owned(self: Any, checkout_dir: str) -> None:
+        Path(self._local_checkout_owner_marker(checkout_dir)).write_text("smith github checkout\n", encoding="utf-8")
+
+    def _local_checkout_is_owned(self: Any, checkout_dir: str) -> bool:
+        return os.path.isfile(self._local_checkout_owner_marker(checkout_dir))
+
+    def _mark_local_checkout_branch(self: Any, checkout_dir: str, branch: str) -> None:
+        self._mark_local_checkout_owned(checkout_dir)
+        marker = self._local_checkout_branch_marker(checkout_dir)
+        metadata = {"branch": branch, "head": self._local_head_sha(checkout_dir)}
+        Path(marker).write_text(json.dumps(metadata, sort_keys=True), encoding="utf-8")
+
+    def _local_checkout_has_requested_branch(self: Any, checkout_dir: str, branch: str) -> bool:
+        marker = self._local_checkout_branch_marker(checkout_dir)
+        if not os.path.isfile(marker):
+            return False
+        raw = Path(marker).read_text(encoding="utf-8")
+        try:
+            metadata = json.loads(raw)
+        except ValueError:
+            return raw == branch
+        if not isinstance(metadata, dict) or metadata.get("branch") != branch:
+            return False
+        recorded_head = metadata.get("head")
+        if isinstance(recorded_head, str) and recorded_head:
+            return self._local_head_sha(checkout_dir) == recorded_head
+        return True
 
     @staticmethod
     def _compute_sparse_patterns(path: str | None, glob: str | None) -> list[str] | None:
@@ -447,21 +489,27 @@ class GitHubCodeMixin:
 
         with checkout_lock:
             try:
+                if os.path.isdir(git_dir) and not self._local_checkout_has_requested_branch(checkout_dir, branch):
+                    if not self._local_checkout_is_owned(checkout_dir):
+                        return None
+                    shutil.rmtree(checkout_dir)
+
                 if not os.path.isdir(git_dir):
                     if os.path.exists(checkout_dir):
+                        if not self._local_checkout_is_owned(checkout_dir):
+                            return None
                         shutil.rmtree(checkout_dir)
                     os.makedirs(os.path.dirname(checkout_dir), exist_ok=True)
 
                     clone_args: list[str] = ["git", "clone", "--filter=blob:none"]
                     if sparse_patterns is not None:
                         clone_args.append("--sparse")
-                    clone_args.extend(
-                        ["--depth", "1", "--branch", branch, remote_url, checkout_dir]
-                    )
+                    clone_args.extend(["--depth", "1", "--branch", branch, remote_url, checkout_dir])
 
                     self._git_subprocess(clone_args)
                     self._apply_sparse_patterns(checkout_dir, sparse_patterns)
                     self._mark_local_checkout_refreshed(checkout_dir)
+                    self._mark_local_checkout_branch(checkout_dir, branch)
                     return checkout_dir
 
                 if self._local_checkout_needs_refresh(checkout_dir):
@@ -470,6 +518,7 @@ class GitHubCodeMixin:
                     if remote_sha and local_sha and remote_sha == local_sha:
                         self._apply_sparse_patterns(checkout_dir, sparse_patterns)
                         self._mark_local_checkout_refreshed(checkout_dir)
+                        self._mark_local_checkout_branch(checkout_dir, branch)
                         return checkout_dir
 
                     fetch_args: list[str] = [
@@ -487,6 +536,7 @@ class GitHubCodeMixin:
                     self._git_subprocess(["git", "-C", checkout_dir, "checkout", "--force", "FETCH_HEAD"])
                     self._apply_sparse_patterns(checkout_dir, sparse_patterns)
                     self._mark_local_checkout_refreshed(checkout_dir)
+                    self._mark_local_checkout_branch(checkout_dir, branch)
                     return checkout_dir
 
                 self._apply_sparse_patterns(checkout_dir, sparse_patterns)
@@ -623,11 +673,7 @@ class GitHubCodeMixin:
             files = self._get_local_repository_files(checkout_dir=checkout_dir, path=path)
         else:
             files = self._get_repository_files(repo=repo, path=path, branch=resolved_branch)
-        matching = [
-            item
-            for item in files
-            if filename_filter.search(os.path.basename(str(item.get("path", ""))))
-        ]
+        matching = [item for item in files if filename_filter.search(os.path.basename(str(item.get("path", ""))))]
         if len(matching) > self._config.grep_max_files:
             return grep_too_many_files_result(len(matching), self._config.grep_max_files)
 

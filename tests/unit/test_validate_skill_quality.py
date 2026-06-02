@@ -23,6 +23,9 @@ def test_validate_skill_quality_classifier_examples_cover_trigger_contract() -> 
     assert validator.classify_trigger("Where is the webhook secret configured?") == "ambiguous"
     assert validator.classify_trigger("Create a work item for this regression.") == "negative"
     assert validator.classify_trigger("Create a GitHub issue for this bug") == "negative"
+    assert validator.classify_trigger("Update GitHub issue 42") == "negative"
+    assert validator.classify_trigger("Approve GitHub PR 42") == "negative"
+    assert validator.classify_trigger("Comment on GitLab merge request 7") == "negative"
 
 
 def test_evidence_path_contract_accepts_provider_repo_shapes() -> None:
@@ -32,6 +35,42 @@ def test_evidence_path_contract_accepts_provider_repo_shapes() -> None:
     assert validator._has_evidence_path_contract("GitLab answers cite group/repository:path evidence.")
     assert validator._has_evidence_path_contract("Single repo answers may cite repo:path evidence.")
     assert not validator._has_evidence_path_contract("No repository path contract is present.")
+
+
+def test_auth_troubleshooting_token_safety_rejects_secret_output_commands() -> None:
+    validator = _load_validator_module()
+
+    unsafe_text = """
+printenv GITHUB_TOKEN
+$ printenv GITHUB_TOKEN
+- echo $GITLAB_TOKEN
+echo $GITLAB_TOKEN
+echo "${AZURE_DEVOPS_PAT}"
+printf '%s\\n' "$YOUTRACK_TOKEN"
+printenv | grep GITHUB_TOKEN
+printenv
+env
+env | sort
+set
+"""
+
+    errors = validator._validate_auth_troubleshooting_token_safety(unsafe_text)
+
+    assert len(errors) == 11
+    assert all("must not print token values" in error for error in errors)
+
+
+def test_auth_troubleshooting_token_safety_allows_presence_only_checks() -> None:
+    validator = _load_validator_module()
+
+    safe_text = """
+test -n "${GITHUB_TOKEN:-}" && echo GITHUB_TOKEN=set || echo GITHUB_TOKEN=missing
+test -n "${GITLAB_TOKEN:-}" && echo GITLAB_TOKEN=set || echo GITLAB_TOKEN=missing
+test -n "${AZURE_DEVOPS_PAT:-}" && echo AZURE_DEVOPS_PAT=set || echo AZURE_DEVOPS_PAT=missing
+test -n "${YOUTRACK_TOKEN:-}" && echo YOUTRACK_TOKEN=set || echo YOUTRACK_TOKEN=missing
+"""
+
+    assert validator._validate_auth_troubleshooting_token_safety(safe_text) == []
 
 
 def test_fixture_resolution_prefers_script_repo_after_import_from_other_cwd(monkeypatch, tmp_path) -> None:

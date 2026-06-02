@@ -21,6 +21,19 @@ def _provider(config: Any | None = None) -> GitLabProvider:
     return GitLabProvider(config=config or make_runtime_config(), session=requests.Session())
 
 
+def _assert_gitlab_token_auth_env(call: dict[str, Any], expected_basic: str) -> None:
+    assert "env-token" not in call["args"]
+    assert expected_basic not in " ".join(call["args"])
+    env = call["env"]
+    assert env is not None
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "credential.interactive"
+    assert env["GIT_CONFIG_VALUE_0"] == "never"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraHeader"
+    assert env["GIT_CONFIG_VALUE_1"] == f"Authorization: Basic {expected_basic}"
+
+
 def test_gitlab_token_helpers_and_url_building(monkeypatch: Any) -> None:
     provider = _provider()
     monkeypatch.setenv("GITLAB_TOKEN", "env-token")
@@ -74,8 +87,7 @@ def test_gitlab_token_rejects_empty_cli_token(monkeypatch: Any) -> None:
         provider._get_token()
 
     assert provider._auth_error_message() == (
-        "GitLab authentication rejected with HTTP 401/403. "
-        "Set GITLAB_TOKEN or run `glab auth login` and retry."
+        "GitLab authentication rejected with HTTP 401/403. Set GITLAB_TOKEN or run `glab auth login` and retry."
     )
     assert provider._build_url("https://example.test/projects") == "https://example.test/projects"
 
@@ -209,6 +221,8 @@ def test_gitlab_local_checkout_clone_uses_token_auth_when_available(monkeypatch:
 
     def _fake_run(args: list[str], **kwargs: Any) -> Any:
         git_calls.append({"args": args, "env": kwargs.get("env")})
+        if "clone" in args:
+            os.makedirs(os.path.join(args[-1], ".git"), exist_ok=True)
         return SimpleNamespace(stdout="", stderr="", returncode=0)
 
     monkeypatch.setattr("smith.providers.gitlab_code.subprocess.run", _fake_run)
@@ -223,10 +237,6 @@ def test_gitlab_local_checkout_clone_uses_token_auth_when_available(monkeypatch:
                 "git",
                 "-c",
                 f"core.hooksPath={os.devnull}",
-                "-c",
-                "credential.interactive=never",
-                "-c",
-                f"http.extraHeader=Authorization: Basic {expected_basic}",
                 "clone",
                 "--filter=blob:none",
                 "--depth",
@@ -237,9 +247,35 @@ def test_gitlab_local_checkout_clone_uses_token_auth_when_available(monkeypatch:
                 "https://gitlab.com/gitlab-org/repo-a.git",
                 provider._local_checkout_path(repo=_FULL_REPO, branch="main"),
             ],
-            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            "env": git_calls[0]["env"],
         }
     ]
+    _assert_gitlab_token_auth_env(git_calls[0], expected_basic)
+
+
+def test_gitlab_local_checkout_does_not_delete_unowned_existing_path(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    checkout_dir = provider._local_checkout_path(repo=_FULL_REPO, branch="main")
+    existing = Path(checkout_dir) / "keep.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("do not delete", encoding="utf-8")
+    monkeypatch.setattr(provider, "_git_auth_subprocess", lambda *args, **kwargs: pytest.fail("unowned path should not be cloned over"))
+
+    assert provider._ensure_local_checkout(repo=_FULL_REPO, branch="main") is None
+    assert existing.read_text(encoding="utf-8") == "do not delete"
+
+
+def test_gitlab_local_checkout_does_not_reset_unowned_existing_git_checkout(monkeypatch: Any, tmp_path: Any) -> None:
+    provider = _provider()
+    monkeypatch.setenv("GITLAB_GREP_USE_LOCAL_CACHE", "true")
+    monkeypatch.setenv("SMITH_GITLAB_GREP_CACHE_DIR", str(tmp_path))
+    checkout_dir = provider._local_checkout_path(repo=_FULL_REPO, branch="main")
+    Path(checkout_dir, ".git").mkdir(parents=True)
+    monkeypatch.setattr(provider, "_reset_local_checkout", lambda *args, **kwargs: pytest.fail("unowned checkout must not be reset"))
+
+    assert provider._ensure_local_checkout(repo=_FULL_REPO, branch="main") is None
 
 
 def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch: Any, tmp_path: Any) -> None:
@@ -247,6 +283,7 @@ def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch:
     monkeypatch.setattr(provider, "_gitlab_grep_cache_root", lambda: str(tmp_path))
     checkout_dir = provider._local_checkout_path(repo=_FULL_REPO, branch="main")
     Path(checkout_dir, ".git").mkdir(parents=True)
+    provider._mark_local_checkout_owned(checkout_dir)
     git_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(provider, "_get_token", lambda force_refresh=False: "env-token")
     monkeypatch.setattr(provider, "_local_checkout_has_expected_origin", lambda *args, **kwargs: True)
@@ -273,10 +310,6 @@ def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch:
                 "git",
                 "-c",
                 f"core.hooksPath={os.devnull}",
-                "-c",
-                "credential.interactive=never",
-                "-c",
-                f"http.extraHeader=Authorization: Basic {expected_basic}",
                 "-C",
                 checkout_dir,
                 "fetch",
@@ -286,9 +319,10 @@ def test_gitlab_local_checkout_fetch_uses_token_auth_when_available(monkeypatch:
                 "origin",
                 "main",
             ],
-            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            "env": git_calls[0]["env"],
         }
     ]
+    _assert_gitlab_token_auth_env(git_calls[0], expected_basic)
 
 
 def test_gitlab_remote_head_sha_uses_token_auth_when_available(monkeypatch: Any) -> None:
@@ -312,19 +346,16 @@ def test_gitlab_remote_head_sha_uses_token_auth_when_available(monkeypatch: Any)
                 "git",
                 "-c",
                 f"core.hooksPath={os.devnull}",
-                "-c",
-                "credential.interactive=never",
-                "-c",
-                f"http.extraHeader=Authorization: Basic {expected_basic}",
                 "-C",
                 checkout_dir,
                 "ls-remote",
                 "origin",
                 "main",
             ],
-            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            "env": git_calls[0]["env"],
         }
     ]
+    _assert_gitlab_token_auth_env(git_calls[0], expected_basic)
 
 
 def test_gitlab_apply_sparse_patterns_uses_token_auth_when_available(monkeypatch: Any, tmp_path: Any) -> None:
@@ -350,10 +381,6 @@ def test_gitlab_apply_sparse_patterns_uses_token_auth_when_available(monkeypatch
                 "git",
                 "-c",
                 f"core.hooksPath={os.devnull}",
-                "-c",
-                "credential.interactive=never",
-                "-c",
-                f"http.extraHeader=Authorization: Basic {expected_basic}",
                 "-C",
                 str(checkout_dir),
                 "sparse-checkout",
@@ -362,9 +389,10 @@ def test_gitlab_apply_sparse_patterns_uses_token_auth_when_available(monkeypatch
                 "/*",
                 "**/*.yml",
             ],
-            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            "env": git_calls[0]["env"],
         }
     ]
+    _assert_gitlab_token_auth_env(git_calls[0], expected_basic)
 
 
 def test_gitlab_checkout_and_reset_use_token_auth_when_available(monkeypatch: Any) -> None:
@@ -390,10 +418,6 @@ def test_gitlab_checkout_and_reset_use_token_auth_when_available(monkeypatch: An
                 "git",
                 "-c",
                 f"core.hooksPath={os.devnull}",
-                "-c",
-                "credential.interactive=never",
-                "-c",
-                f"http.extraHeader=Authorization: Basic {expected_basic}",
                 "-C",
                 checkout_dir,
                 "checkout",
@@ -401,42 +425,36 @@ def test_gitlab_checkout_and_reset_use_token_auth_when_available(monkeypatch: An
                 "--detach",
                 "FETCH_HEAD",
             ],
-            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            "env": git_calls[0]["env"],
         },
         {
             "args": [
                 "git",
                 "-c",
                 f"core.hooksPath={os.devnull}",
-                "-c",
-                "credential.interactive=never",
-                "-c",
-                f"http.extraHeader=Authorization: Basic {expected_basic}",
                 "-C",
                 checkout_dir,
                 "reset",
                 "--hard",
                 "HEAD",
             ],
-            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            "env": git_calls[1]["env"],
         },
         {
             "args": [
                 "git",
                 "-c",
                 f"core.hooksPath={os.devnull}",
-                "-c",
-                "credential.interactive=never",
-                "-c",
-                f"http.extraHeader=Authorization: Basic {expected_basic}",
                 "-C",
                 checkout_dir,
                 "clean",
                 "-fd",
             ],
-            "env": {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            "env": git_calls[2]["env"],
         },
     ]
+    for call in git_calls:
+        _assert_gitlab_token_auth_env(call, expected_basic)
 
 
 def test_gitlab_grep_no_clone_skips_local_checkout(monkeypatch: Any) -> None:
@@ -608,6 +626,7 @@ def test_gitlab_ls_remote_precheck_skips_fetch_when_head_matches(monkeypatch: An
     monkeypatch.setattr(provider, "_gitlab_grep_cache_root", lambda: str(tmp_path))
     checkout_dir = provider._local_checkout_path(repo=_FULL_REPO, branch="main")
     Path(checkout_dir, ".git").mkdir(parents=True)
+    provider._mark_local_checkout_owned(checkout_dir)
     monkeypatch.setattr(provider, "_local_checkout_has_expected_origin", lambda *args, **kwargs: True)
     monkeypatch.setattr(provider, "_local_checkout_needs_refresh", lambda *args, **kwargs: True)
     monkeypatch.setattr(provider, "_remote_head_sha", lambda *args, **kwargs: "abc123")
@@ -631,30 +650,17 @@ def test_gitlab_ls_remote_precheck_skips_fetch_when_head_matches(monkeypatch: An
     assert mark_calls == [checkout_dir]
 
 
-def test_gitlab_ripgrep_content_reverse_flips_blocks_within_file_only(
-    monkeypatch: Any, tmp_path: Any
-) -> None:
+def test_gitlab_ripgrep_content_reverse_flips_blocks_within_file_only(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
 
     monkeypatch.setattr(
         "smith.providers.local_checkout.shutil.which",
         lambda name: "/usr/bin/rg" if name == "rg" else None,
     )
-    stub_output = (
-        f"{tmp_path}/b.py\n"
-        "1-x\n"
-        "2:hit\n"
-        "3-y\n"
-        "--\n"
-        "10-x\n"
-        "11:hit\n"
-        "12-y\n"
-        f"\n{tmp_path}/a.py\n"
-        "5:hit\n"
-    )
+    stub_output = f"{tmp_path}/b.py\n1-x\n2:hit\n3-y\n--\n10-x\n11:hit\n12-y\n\n{tmp_path}/a.py\n5:hit\n"
     monkeypatch.setattr(
-        "smith.providers.local_checkout.subprocess.run",
-        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout=stub_output, stderr=""),
+        "smith.providers.local_checkout._run_ripgrep_bounded",
+        lambda args, stdout_limit_chars: (0, stub_output, "", False),
     )
 
     result = provider._ripgrep_local_result(
@@ -677,9 +683,7 @@ def test_gitlab_ripgrep_content_reverse_flips_blocks_within_file_only(
     assert lines[-2:] == ["/a.py", "5:hit"]
 
 
-def test_gitlab_ripgrep_uses_sortr_when_reverse_is_requested(
-    monkeypatch: Any, tmp_path: Any
-) -> None:
+def test_gitlab_ripgrep_uses_sortr_when_reverse_is_requested(monkeypatch: Any, tmp_path: Any) -> None:
     provider = _provider()
     rg_calls: list[list[str]] = []
 
@@ -688,11 +692,12 @@ def test_gitlab_ripgrep_uses_sortr_when_reverse_is_requested(
         lambda name: "/usr/bin/rg" if name == "rg" else None,
     )
 
-    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+    def _fake_ripgrep(args: list[str], *, stdout_limit_chars: int) -> tuple[int, str, str, bool]:
+        del stdout_limit_chars
         rg_calls.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        return 0, "", "", False
 
-    monkeypatch.setattr("smith.providers.local_checkout.subprocess.run", _fake_run)
+    monkeypatch.setattr("smith.providers.local_checkout._run_ripgrep_bounded", _fake_ripgrep)
 
     provider._ripgrep_local_result(
         checkout_dir=str(tmp_path),
@@ -734,11 +739,12 @@ def test_gitlab_ripgrep_files_with_matches_uses_subprocess(monkeypatch: Any, tmp
         lambda name: "/usr/bin/rg" if name == "rg" else None,
     )
 
-    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+    def _fake_ripgrep(args: list[str], *, stdout_limit_chars: int) -> tuple[int, str, str, bool]:
+        del stdout_limit_chars
         rg_calls.append(args)
-        return SimpleNamespace(returncode=0, stdout=f"{tmp_path}/src/app.yml\n", stderr="")
+        return 0, f"{tmp_path}/src/app.yml\n", "", False
 
-    monkeypatch.setattr("smith.providers.local_checkout.subprocess.run", _fake_run)
+    monkeypatch.setattr("smith.providers.local_checkout._run_ripgrep_bounded", _fake_ripgrep)
 
     result = provider._ripgrep_local_result(
         checkout_dir=str(tmp_path),
@@ -794,12 +800,8 @@ def test_gitlab_ripgrep_parses_content_output_with_context(monkeypatch: Any, tmp
         lambda name: "/usr/bin/rg" if name == "rg" else None,
     )
     monkeypatch.setattr(
-        "smith.providers.local_checkout.subprocess.run",
-        lambda args, **kwargs: SimpleNamespace(
-            returncode=0,
-            stdout=f"{tmp_path}/src/app.py\n1-before\n2:trigger: x\n3-after\n",
-            stderr="",
-        ),
+        "smith.providers.local_checkout._run_ripgrep_bounded",
+        lambda args, stdout_limit_chars: (0, f"{tmp_path}/src/app.py\n1-before\n2:trigger: x\n3-after\n", "", False),
     )
 
     result = provider._ripgrep_local_result(

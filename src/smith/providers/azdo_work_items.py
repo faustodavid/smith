@@ -36,11 +36,7 @@ class AzdoWorkItemMixin:
             headers={"Content-Type": "application/json"},
         )
 
-        ids = [
-            int(item["id"])
-            for item in wiql_data.get("workItems", [])
-            if isinstance(item, dict) and item.get("id") is not None
-        ]
+        ids = [int(item["id"]) for item in wiql_data.get("workItems", []) if isinstance(item, dict) and item.get("id") is not None]
 
         total = len(ids)
         paged_ids = paginate_results(ids, skip=skip, take=take)
@@ -138,12 +134,7 @@ class AzdoWorkItemMixin:
             highlights: list[str] = []
             for match in item.get("matches") or item.get("hits") or []:
                 if isinstance(match, dict):
-                    value = (
-                        match.get("value")
-                        or match.get("snippet")
-                        or match.get("text")
-                        or match.get("highlights")
-                    )
+                    value = match.get("value") or match.get("snippet") or match.get("text") or match.get("highlights")
                     if isinstance(value, list):
                         highlights.extend(str(entry) for entry in value if entry)
                     elif value:
@@ -200,6 +191,7 @@ class AzdoWorkItemMixin:
 
         aggregated: list[dict[str, Any]] = []
         warnings: list[str] = []
+        project_has_more = False
         for project_entry in self.list_projects():
             project_name = project_entry.get("name")
             if not project_name:
@@ -216,17 +208,19 @@ class AzdoWorkItemMixin:
                     project=str(project_name),
                     wiql=wiql,
                     skip=0,
-                    take=max(1, take),
+                    take=max(1, max(0, skip) + max(1, take)),
                 )
             except Exception as exc:
                 warnings.append(f"{project_name}: {exc}")
                 continue
             aggregated.extend(result.get("results", []))
+            if result.get("has_more"):
+                project_has_more = True
 
-        aggregated = paginate_results(aggregated, skip=skip, take=take)
+        paged = paginate_results(aggregated, skip=skip, take=take)
         return {
-            "returned_count": len(aggregated),
-            "has_more": False,
-            "results": aggregated,
+            "returned_count": len(paged),
+            "has_more": len(aggregated) > max(0, skip) + len(paged) or project_has_more,
+            "results": paged,
             "warnings": warnings,
         }

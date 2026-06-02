@@ -124,12 +124,59 @@ def apply_sparse_patterns(
         if patterns is None:
             run_git(["git", "-C", checkout_dir, "sparse-checkout", "disable"])
         else:
-            run_git(
-                ["git", "-C", checkout_dir, "sparse-checkout", "set", "--no-cone", *patterns]
-            )
+            run_git(["git", "-C", checkout_dir, "sparse-checkout", "set", "--no-cone", *patterns])
         write_sparse_state(checkout_dir, desired_state)
     except Exception as exc:
-        logger.debug("Could not apply sparse-checkout %s to %s: %s", patterns, checkout_dir, exc)
+        raise SmithError(f"Could not apply sparse-checkout {patterns} to {checkout_dir}: {exc}") from exc
+
+
+def _run_ripgrep_bounded(args: list[str], *, stdout_limit_chars: int) -> tuple[int, str, str, bool]:
+    try:
+        process = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception as exc:
+        try:
+            result = subprocess.run(
+                args,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            raise SmithError(f"ripgrep failed to execute: {exc}") from exc
+        stdout = str(getattr(result, "stdout", "") or "")
+        truncated = len(stdout) > stdout_limit_chars
+        if truncated:
+            stdout = stdout[:stdout_limit_chars]
+        return int(getattr(result, "returncode", 2)), stdout, str(getattr(result, "stderr", "") or ""), truncated
+
+    stdout_parts: list[str] = []
+    stdout_chars = 0
+    truncated = False
+    assert process.stdout is not None
+    try:
+        for line in process.stdout:
+            stdout_chars += len(line)
+            if stdout_chars > stdout_limit_chars:
+                truncated = True
+                process.terminate()
+                break
+            stdout_parts.append(line)
+    finally:
+        process.stdout.close()
+
+    stderr = ""
+    if process.stderr is not None:
+        stderr = process.stderr.read()
+        process.stderr.close()
+    return_code = process.wait()
+    if truncated and return_code not in (0, 1):
+        return_code = 0
+    return return_code, "".join(stdout_parts), stderr, truncated
 
 
 def remote_head_sha(
@@ -229,6 +276,7 @@ def ripgrep_local_result(
         "--no-config",
         "--no-ignore",
         "--hidden",
+        "--with-filename",
         "--glob",
         "!.git",
     ]
@@ -249,24 +297,15 @@ def ripgrep_local_result(
 
     search_target = os.path.join(checkout_dir, prefix) if prefix else checkout_dir
 
-    try:
-        result = subprocess.run(
-            [*base_args, search_target],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except Exception as exc:
-        raise SmithError(f"ripgrep failed to execute for {checkout_dir}: {exc}") from exc
-
-    return_code = int(getattr(result, "returncode", 2))
+    return_code, stdout_text, stderr_text, stdout_truncated = _run_ripgrep_bounded(
+        [*base_args, search_target],
+        stdout_limit_chars=max(max_output_chars * 2, 65_536),
+    )
     if return_code not in (0, 1):
-        stderr = str(getattr(result, "stderr", "") or "").strip()
-        raise SmithError(
-            f"ripgrep exited with status {return_code} for {checkout_dir}: {stderr or 'unknown error'}"
-        )
+        stderr = stderr_text.strip()
+        raise SmithError(f"ripgrep exited with status {return_code} for {checkout_dir}: {stderr or 'unknown error'}")
 
-    stdout_text = str(getattr(result, "stdout", "") or "")
+    warnings = ["ripgrep output exceeded safety limit; results are truncated"] if stdout_truncated else []
 
     def _to_relative(raw: str) -> str | None:
         raw = raw.strip()
@@ -279,7 +318,9 @@ def ripgrep_local_result(
                 return None
         else:
             rel = raw
-        rel = rel.replace(os.sep, "/").lstrip("./")
+        rel = rel.replace(os.sep, "/")
+        if rel.startswith("./"):
+            rel = rel[2:]
         if not rel or rel.startswith("../") or is_internal_local_path(rel):
             return None
         if not filename_filter.search(os.path.basename(rel)):
@@ -303,7 +344,7 @@ def ripgrep_local_result(
         return build_grep_result(
             output_lines=matched_paths,
             matched_count=len(matched_paths),
-            warnings=[],
+            warnings=warnings,
             max_output_chars=max_output_chars,
             truncation_hint=truncation_hint,
         )
@@ -325,7 +366,7 @@ def ripgrep_local_result(
         return build_grep_result(
             output_lines=count_lines,
             matched_count=files_matched,
-            warnings=[],
+            warnings=warnings,
             max_output_chars=max_output_chars,
             truncation_hint=truncation_hint,
         )
@@ -377,9 +418,7 @@ def ripgrep_local_result(
 
     ordered_blocks: list[tuple[str, list[list[str]]]]
     if reverse:
-        ordered_blocks = [
-            (file_path, list(reversed(blocks))) for file_path, blocks in file_blocks
-        ]
+        ordered_blocks = [(file_path, list(reversed(blocks))) for file_path, blocks in file_blocks]
     else:
         ordered_blocks = file_blocks
 
@@ -394,7 +433,7 @@ def ripgrep_local_result(
     return build_grep_result(
         output_lines=output_lines,
         matched_count=files_matched,
-        warnings=[],
+        warnings=warnings,
         max_output_chars=max_output_chars,
         truncation_hint=truncation_hint,
     )
