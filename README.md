@@ -146,10 +146,31 @@ smith github-public code grep my-repo "TODO" --format json
 
 ### Prerequisites
 
-- **git**
-- **[uv](https://docs.astral.sh/uv/)**
+- **[Homebrew](https://brew.sh/)** for the recommended macOS / Linux install
+- **git** and **[uv](https://docs.astral.sh/uv/)** for the standalone installer
 
-### Install from GitHub
+### Install with Homebrew
+
+```bash
+brew install faustodavid/smith/smith
+```
+
+The Homebrew formula installs the `smith` CLI, installs `ripgrep` as a dependency, and mirrors the canonical skill into `~/.agents/skills/smith`. This command uses the public `faustodavid/homebrew-smith` tap.
+
+To mirror the skill to a different location, rerun post-install with `SMITH_SKILL_DIR`:
+
+```bash
+SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/smith/smith
+```
+
+### Install from a local clone
+
+```bash
+brew tap faustodavid/smith "$(pwd)"
+brew install faustodavid/smith/smith
+```
+
+### Install with the standalone script
 
 **macOS / Linux**:
 
@@ -163,7 +184,7 @@ curl -sSL https://raw.githubusercontent.com/faustodavid/smith/main/scripts/insta
 irm https://raw.githubusercontent.com/faustodavid/smith/main/scripts/install.py | python -
 ```
 
-### Install from a local clone
+### Install with the standalone script from a local clone
 
 ```bash
 python3 scripts/install.py
@@ -174,8 +195,10 @@ The installer keeps a managed Smith repo checkout at `~/.local/share/smith`, mir
 ### Update
 
 ```bash
-python3 ~/.local/share/smith/scripts/install.py
+brew upgrade faustodavid/smith/smith
 ```
+
+If you installed with the standalone script instead, rerun `python3 ~/.local/share/smith/scripts/install.py`.
 
 ### Verify
 
@@ -183,7 +206,7 @@ python3 ~/.local/share/smith/scripts/install.py
 smith --help
 ```
 
-The installer runs `uv tool update-shell` for you, but you may need to **restart your shell** (or open a new terminal) for PATH changes to take effect — especially on Windows, where `uv` writes the update to the user PATH in the registry.
+The standalone installer runs `uv tool update-shell` for you, but you may need to **restart your shell** (or open a new terminal) for PATH changes to take effect - especially on Windows, where `uv` writes the update to the user PATH in the registry.
 
 ---
 
@@ -336,7 +359,7 @@ Smith was built for AI agents from the ground up. `skills/smith/SKILL.md` is a s
 - **Failure recovery** — specific handlers for 401 / 403, 429, truncation, empty results, and wrong-repo misses.
 - **Answer contract** — evidence-first format with exact path citations and a `Sources` section.
 
-The installer mirrors the canonical skill into `~/.agents/skills/smith` and keeps the managed repo checkout at `~/.local/share/smith`. 
+The Homebrew formula and standalone installer both mirror the canonical skill into `~/.agents/skills/smith`. The standalone installer also keeps a managed repo checkout at `~/.local/share/smith`.
 
 ---
 
@@ -475,7 +498,7 @@ Provider MCPs expose a `get_file_contents`-style surface that downloads entire f
 
 ### Does Smith work with Claude Code, Cursor, Windsurf, GitHub Copilot, and Codex?
 
-Yes. Smith ships a structured skill document (`skills/smith/SKILL.md`) that any LLM-powered editor can load as a rule / instruction / skill. The installer mirrors the canonical skill into `~/.agents/skills/smith`. See [Use with your AI editor](#use-with-your-ai-editor) for per-editor hints.
+Yes. Smith ships a structured skill document (`skills/smith/SKILL.md`) that any LLM-powered editor can load as a rule / instruction / skill. The Homebrew formula and standalone installer mirror the canonical skill into `~/.agents/skills/smith`. See [Use with your AI editor](#use-with-your-ai-editor) for per-editor hints.
 
 ### Is Smith read-only? Can an agent accidentally push or comment?
 
