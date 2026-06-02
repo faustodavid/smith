@@ -9,7 +9,13 @@ from typing import Any
 from smith.client import SmithClient
 from smith.config import RemoteConfig, SmithConfig, _default_config_path, load_config, save_config
 from smith.formatting import dumps_json, make_envelope, render_text
-from smith.skill import SkillSyncResult, default_skill_target_dir, resolve_skill_source_dir, sync_skill
+from smith.skill import (
+    SkillSyncResult,
+    default_skill_target_dir,
+    resolve_skill_source_dir,
+    skill_target_points_to_source,
+    sync_skill,
+)
 
 EXIT_OK = 0
 EXIT_INVALID_ARGS = 2
@@ -362,10 +368,7 @@ def _skill_status_data(result: SkillSyncResult | None = None) -> dict[str, objec
     if target_exists:
         mode = "symlink" if target.is_symlink() else "directory"
         if source is not None:
-            try:
-                points_to_source = target.resolve() == source.resolve()
-            except OSError:
-                points_to_source = False
+            points_to_source = skill_target_points_to_source(target, source)
     data: dict[str, object] = {
         "target": str(target),
         "source": str(source) if source is not None else None,

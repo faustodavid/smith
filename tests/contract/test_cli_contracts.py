@@ -120,6 +120,19 @@ def _make_remote_config(
     )
 
 
+def _make_homebrew_opt_skill(tmp_path: Path) -> tuple[Path, Path]:
+    cellar_prefix = tmp_path / "Cellar" / "smith" / "1.0"
+    cellar_source = cellar_prefix / "share" / "smith" / "skills" / "smith"
+    cellar_source.mkdir(parents=True)
+    (cellar_source / "SKILL.md").write_text("---\nname: smith\n---\n", encoding="utf-8")
+
+    opt_dir = tmp_path / "opt"
+    opt_dir.mkdir()
+    (opt_dir / "smith").symlink_to(cellar_prefix, target_is_directory=True)
+    opt_source = opt_dir / "smith" / "share" / "smith" / "skills" / "smith"
+    return opt_source, cellar_source
+
+
 def test_csv_list_and_remote_helpers() -> None:
     args = _make_args(remote="github", remote_provider="github")
 
@@ -617,6 +630,29 @@ def test_handle_skill_sync_reports_current_link(monkeypatch: Any, tmp_path: Any,
     assert payload["data"]["current"] is True
     assert payload["data"]["mode"] == "symlink"
     assert payload["data"]["sync"] == result.to_dict()
+
+
+def test_handle_skill_status_reports_cellar_link_stale(
+    monkeypatch: Any,
+    tmp_path: Any,
+    capsys: Any,
+) -> None:
+    opt_source, cellar_source = _make_homebrew_opt_skill(tmp_path)
+    target = tmp_path / ".agents" / "skills" / "smith"
+    target.parent.mkdir(parents=True)
+    target.symlink_to(cellar_source, target_is_directory=True)
+    monkeypatch.setattr(handlers, "default_skill_target_dir", lambda: target)
+    monkeypatch.setattr(handlers, "resolve_skill_source_dir", lambda: opt_source)
+    args = _make_args(command_id="skill.status", output_format="json")
+
+    exit_code = handlers.handle_skill_status(None, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == handlers.EXIT_OK
+    assert payload["data"]["exists"] is True
+    assert payload["data"]["mode"] == "symlink"
+    assert payload["data"]["source"] == str(opt_source)
+    assert payload["data"]["current"] is False
 
 
 @pytest.mark.parametrize("exists", [False, True])

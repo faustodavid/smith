@@ -111,6 +111,16 @@ def _symlink_destination(target: Path) -> Path | None:
     return _absolute_path_without_resolving(target.parent / destination)
 
 
+def skill_target_points_to_source(target: Path, source: Path) -> bool:
+    source = _absolute_path_without_resolving(source)
+    try:
+        if target.is_symlink():
+            return _symlink_destination(target) == source
+        return target.exists() and target.resolve() == source.resolve()
+    except OSError:
+        return False
+
+
 def sync_skill(
     *,
     source_dir: Path | None = None,
@@ -134,26 +144,16 @@ def sync_skill(
     target_parent = target.parent
 
     if target.exists() or target.is_symlink():
-        try:
-            is_current = False
-            if target.is_symlink():
-                is_current = _symlink_destination(target) == source
-                mode = "symlink"
-            else:
-                is_current = target.resolve() == source.resolve()
-                mode = "directory"
-
-            if is_current:
-                return SkillSyncResult(
-                    ok=True,
-                    status="current",
-                    target=target,
-                    source=source,
-                    mode=mode,
-                    message=f"Smith skill already points to: {source}",
-                )
-        except OSError:
-            pass
+        if skill_target_points_to_source(target, source):
+            mode = "symlink" if target.is_symlink() else "directory"
+            return SkillSyncResult(
+                ok=True,
+                status="current",
+                target=target,
+                source=source,
+                mode=mode,
+                message=f"Smith skill already points to: {source}",
+            )
         _remove_existing_target(target)
 
     target_parent.mkdir(parents=True, exist_ok=True)
