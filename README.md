@@ -153,15 +153,10 @@ smith github-public code grep my-repo "TODO" --format json
 
 ```bash
 brew install faustodavid/tap/smith
+smith-install-skill
 ```
 
-That's it. Homebrew installs the `smith` CLI, installs `ripgrep`, and mirrors the canonical Smith skill into `~/.agents/skills/smith`.
-
-Optional: mirror the skill to a different location:
-
-```bash
-SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/tap/smith
-```
+Homebrew installs the `smith` CLI and `ripgrep`. `smith-install-skill` installs the canonical Smith skill into `~/.agents/skills/smith`.
 
 ### Install with the standalone script
 
@@ -189,15 +184,10 @@ The installer keeps a managed Smith repo checkout at `~/.local/share/smith`, mir
 
 ```bash
 brew upgrade faustodavid/tap/smith
+smith-install-skill
 ```
 
 If you installed with the standalone script instead, rerun `python3 ~/.local/share/smith/scripts/install.py`.
-
-### Verify
-
-```bash
-smith --help
-```
 
 The standalone installer runs `uv tool update-shell` for you, but you may need to **restart your shell** (or open a new terminal) for PATH changes to take effect - especially on Windows, where `uv` writes the update to the user PATH in the registry.
 
