@@ -155,22 +155,13 @@ smith github-public code grep my-repo "TODO" --format json
 brew install faustodavid/tap/smith
 ```
 
-The Homebrew formula installs the `smith` CLI, installs `ripgrep` as a dependency, and mirrors the canonical skill into `~/.agents/skills/smith`. Homebrew resolves the `faustodavid/tap` tap token to the public `faustodavid/homebrew-tap` repository.
+That's it. Homebrew installs the `smith` CLI, installs `ripgrep`, and mirrors the canonical Smith skill into `~/.agents/skills/smith`.
 
-To mirror the skill to a different location, rerun post-install with `SMITH_SKILL_DIR`:
+Optional: mirror the skill to a different location:
 
 ```bash
 SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/tap/smith
 ```
-
-### Test the formula from a local clone
-
-```bash
-brew tap faustodavid/tap "$(pwd)"
-brew install faustodavid/tap/smith
-```
-
-This reads the formula from your local checkout but still installs Smith from the tagged upstream release referenced by the formula.
 
 ### Install with the standalone script
 
