@@ -152,22 +152,22 @@ smith github-public code grep my-repo "TODO" --format json
 ### Install with Homebrew
 
 ```bash
-brew install faustodavid/smith/smith
+brew install faustodavid/tap/smith
 ```
 
-The Homebrew formula installs the `smith` CLI, installs `ripgrep` as a dependency, and mirrors the canonical skill into `~/.agents/skills/smith`. This command uses the public `faustodavid/homebrew-smith` tap.
+The Homebrew formula installs the `smith` CLI, installs `ripgrep` as a dependency, and mirrors the canonical skill into `~/.agents/skills/smith`. This command uses the public `faustodavid/homebrew-tap` tap.
 
 To mirror the skill to a different location, rerun post-install with `SMITH_SKILL_DIR`:
 
 ```bash
-SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/smith/smith
+SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/tap/smith
 ```
 
 ### Test the formula from a local clone
 
 ```bash
-brew tap faustodavid/smith "$(pwd)"
-brew install faustodavid/smith/smith
+brew tap faustodavid/tap "$(pwd)"
+brew install faustodavid/tap/smith
 ```
 
 This reads the formula from your local checkout but still installs Smith from the tagged upstream release referenced by the formula.
@@ -197,7 +197,7 @@ The installer keeps a managed Smith repo checkout at `~/.local/share/smith`, mir
 ### Update
 
 ```bash
-brew upgrade faustodavid/smith/smith
+brew upgrade faustodavid/tap/smith
 ```
 
 If you installed with the standalone script instead, rerun `python3 ~/.local/share/smith/scripts/install.py`.

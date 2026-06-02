@@ -154,7 +154,7 @@ class Smith < Formula
         #{skill_dir}
 
       To mirror the skill to another location, run:
-        SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/smith/smith
+        SMITH_SKILL_DIR=/path/to/skills/smith brew postinstall faustodavid/tap/smith
     EOS
   end
 
