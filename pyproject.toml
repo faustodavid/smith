@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smith"
-version = "0.1.1"
+version = "0.1.2"
 description = "Read-only Azure DevOps and GitHub investigation CLI"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -152,6 +152,36 @@ def test_main_rejects_tag_that_does_not_match_project_version(tmp_path: Path) ->
         )
 
 
+def test_main_check_release_tag_exits_without_formula(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    updater = _load_formula_module()
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nversion = "1.2.3"\n', encoding="utf-8")
+
+    assert updater.main(["--pyproject", str(pyproject), "--tag", "v1.2.3", "--check-release-tag"]) == 0
+
+    assert "v1.2.3 matches project.version 1.2.3" in capsys.readouterr().out
+
+
+def test_main_check_release_tag_rejects_mismatch(tmp_path: Path) -> None:
+    updater = _load_formula_module()
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nversion = "1.2.3"\n', encoding="utf-8")
+
+    with pytest.raises(updater.FormulaUpdateError, match="expected 'v1.2.3'"):
+        updater.main(["--pyproject", str(pyproject), "--tag", "v1.2.4", "--check-release-tag"])
+
+
+def test_main_requires_formula_unless_checking_release_tag(tmp_path: Path) -> None:
+    updater = _load_formula_module()
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nversion = "1.2.3"\n', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        updater.main(["--pyproject", str(pyproject), "--tag", "v1.2.3", "--revision", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"])
+
+    assert exc_info.value.code == 2
+
+
 def test_update_formula_rejects_unsafe_tag() -> None:
     updater = _load_formula_module()
 

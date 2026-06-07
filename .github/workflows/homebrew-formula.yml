@@ -76,16 +76,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Clone Homebrew tap
+      - name: Validate release version
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
-            echo "::error::HOMEBREW_TAP_TOKEN is required to update faustodavid/homebrew-tap."
-            exit 1
-          fi
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/faustodavid/homebrew-tap.git" homebrew-tap
+          python scripts/update_homebrew_formula.py \
+            --pyproject release-pyproject.toml \
+            --tag "${RELEASE_TAG}" \
+            --check-release-tag
+
+      - name: Clone Homebrew tap
+        run: git clone "https://github.com/faustodavid/homebrew-tap.git" homebrew-tap
 
       - name: Update tap formula pin
         id: formula
@@ -123,11 +125,17 @@ jobs:
         if: ${{ steps.formula.outputs.changed == 'true' }}
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           cd homebrew-tap
+          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is required to push formula updates to faustodavid/homebrew-tap."
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/faustodavid/homebrew-tap.git"
           git add Formula/smith.rb
           git commit -m "Update smith formula for ${RELEASE_TAG}"
           git push origin HEAD:main

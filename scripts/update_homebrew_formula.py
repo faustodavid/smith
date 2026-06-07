@@ -61,6 +61,12 @@ def expected_tag(version: str) -> str:
     return f"v{version}"
 
 
+def validate_tag_matches_version(tag: str, version: str) -> None:
+    project_tag = expected_tag(version)
+    if tag != project_tag:
+        raise FormulaUpdateError(f"tag {tag!r} does not match project.version {version!r}; expected {project_tag!r}")
+
+
 def resolve_tag_revision(tag: str, repo_root: Path = REPO_ROOT) -> str:
     try:
         result = subprocess.run(
@@ -161,24 +167,35 @@ def update_formula(path: Path, tag: str, revision: str, *, check: bool) -> bool:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Update a Homebrew formula to pin the current release tag and commit.")
-    parser.add_argument("--formula", type=Path, required=True, help="Formula path to update, usually homebrew-tap/Formula/smith.rb.")
+    parser.add_argument("--formula", type=Path, help="Formula path to update, usually homebrew-tap/Formula/smith.rb.")
     parser.add_argument("--pyproject", type=Path, default=DEFAULT_PYPROJECT, help="pyproject.toml path used for the default tag.")
     parser.add_argument("--version", help="Project version to convert to a v-prefixed tag. Defaults to pyproject.toml.")
     parser.add_argument("--tag", help="Release tag to pin. Defaults to v{project.version}.")
     parser.add_argument("--revision", help="Release commit SHA. Defaults to resolving the selected tag with git.")
     parser.add_argument("--check", action="store_true", help="Fail if the formula is not already up to date.")
+    parser.add_argument(
+        "--check-release-tag",
+        action="store_true",
+        help="Validate that the selected release tag matches project.version, then exit without reading a formula.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     version = args.version or load_project_version(args.pyproject)
     tag = args.tag or expected_tag(version)
     validate_tag(tag)
-    project_tag = expected_tag(version)
-    if tag != project_tag:
-        raise FormulaUpdateError(f"tag {tag!r} does not match project.version {version!r}; expected {project_tag!r}")
+    validate_tag_matches_version(tag, version)
+
+    if args.check_release_tag:
+        print(f"{tag} matches project.version {version}")
+        return 0
+
+    if args.formula is None:
+        parser.error("--formula is required unless --check-release-tag is set")
 
     revision = args.revision or resolve_tag_revision(tag)
     changed = update_formula(args.formula, tag, revision, check=args.check)
