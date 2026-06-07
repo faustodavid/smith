@@ -1,4 +1,4 @@
-name: Homebrew Tap Formula
+name: Homebrew Release Validation
 
 on:
   push:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 jobs:
-  update-tap-formula:
+  validate-release:
     runs-on: macos-latest
     steps:
       - name: Resolve release pin
@@ -86,60 +86,11 @@ jobs:
             --tag "${RELEASE_TAG}" \
             --check-release-tag
 
-      - name: Clone Homebrew tap
-        run: git clone "https://github.com/faustodavid/homebrew-tap.git" homebrew-tap
-
-      - name: Update tap formula pin
-        id: formula
+      - name: Report tap workflow handoff
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_REVISION: ${{ steps.metadata.outputs.revision }}
         run: |
           set -euo pipefail
-          python scripts/update_homebrew_formula.py \
-            --pyproject release-pyproject.toml \
-            --formula homebrew-tap/Formula/smith.rb \
-            --tag "${RELEASE_TAG}" \
-            --revision "${RELEASE_REVISION}"
-          if git -C homebrew-tap diff --quiet -- Formula/smith.rb; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Validate formula syntax
-        run: ruby -c homebrew-tap/Formula/smith.rb
-
-      - name: Validate formula with Homebrew
-        env:
-          HOMEBREW_NO_INSTALL_CLEANUP: "1"
-        run: |
-          set -euo pipefail
-          brew tap-new smith/ci
-          cp homebrew-tap/Formula/smith.rb "$(brew --repo smith/ci)/Formula/smith.rb"
-          brew audit --strict --formula smith/ci/smith
-          brew install --build-from-source smith/ci/smith
-          brew test smith/ci/smith
-
-      - name: Commit tap formula update
-        if: ${{ steps.formula.outputs.changed == 'true' }}
-        env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          set -euo pipefail
-          cd homebrew-tap
-          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
-            echo "::error::HOMEBREW_TAP_TOKEN is required to push formula updates to faustodavid/homebrew-tap."
-            exit 1
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/faustodavid/homebrew-tap.git"
-          git add Formula/smith.rb
-          git commit -m "Update smith formula for ${RELEASE_TAG}"
-          git push origin HEAD:main
-
-      - name: Report current formula
-        if: ${{ steps.formula.outputs.changed == 'false' }}
-        run: echo "Tap formula is already current for ${{ steps.release.outputs.tag }}."
+          echo "Release ${RELEASE_TAG}@${RELEASE_REVISION} is valid."
+          echo "Update faustodavid/homebrew-tap with its Update Smith Formula workflow."
