@@ -100,7 +100,7 @@ Stop and answer when:
 
 Full matrix in `references/failure-playbook.md`, credentials in `references/auth-troubleshooting.md`.
 
-- **401/403** — confirm remote in config, token env var set, run provider login, retry once.
+- **401/403** — confirm remote in config, check configured `token_env` when present, then implicit provider env or provider login/status where supported, retry once.
 - **429** — lower `--take`, narrow `--path`/`--glob`/regex; for GitHub grep, reduce `GITHUB_GREP_MAX_WORKERS`.
 - **Truncation** — narrow `--path`/`--glob`, page with `--from-line`/`--to-line`, reduce `--context-lines`.
 - **Empty results** — broaden query, drop strict filters, rerun grep on candidate repo.

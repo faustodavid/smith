@@ -5,8 +5,8 @@ Match the failure symptom to a block, apply one step, then retry once. Use `refe
 ## 401 or 403
 
 - Confirm the target remote exists in the active config (`smith config show <remote>`).
-- Confirm the token env var declared on the remote is set.
-- Azure DevOps: `az login`. GitHub: `gh auth login` or `export GITHUB_TOKEN`. GitLab: `glab auth login` or `export GITLAB_TOKEN`.
+- If the remote declares `token_env`, confirm that env var is set or has a secure-store token.
+- If no `token_env` is declared, check the provider runtime fallback: GitHub `GITHUB_TOKEN` or `gh auth login`, GitLab `GITLAB_TOKEN` or `glab auth login`, Azure DevOps `az login`, YouTrack `YOUTRACK_TOKEN`.
 
 ## 429
 
