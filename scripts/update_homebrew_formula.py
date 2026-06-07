@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,10 +18,35 @@ PIN_RE = re.compile(
 )
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TAG_RE = re.compile(r"^v[0-9A-Za-z][0-9A-Za-z._-]*$")
+CAVEATS_RE = re.compile(r"\n+\s+def caveats\n\s+<<~EOS\n.*?\n\s+EOS\n\s+end", re.DOTALL)
+CAVEATS_METHOD = """\
+  def caveats
+    <<~EOS
+      Smith is installed.
+
+      Start the guided setup:
+        smith config init
+
+      This creates your config, links the Smith agent skill, and helps add
+      GitHub, GitLab, Azure DevOps, and YouTrack remotes securely.
+    EOS
+  end
+""".rstrip()
 
 
 class FormulaUpdateError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class FormulaUpdate:
+    text: str
+    pin_changed: bool
+    caveats_changed: bool
+
+    @property
+    def changed(self) -> bool:
+        return self.pin_changed or self.caveats_changed
 
 
 def load_project_version(path: Path = DEFAULT_PYPROJECT) -> str:
@@ -71,7 +97,7 @@ def parse_formula_pin(text: str) -> tuple[str, str]:
     return match.group("tag"), match.group("revision")
 
 
-def update_formula_text(text: str, tag: str, revision: str) -> str:
+def update_formula_pin_text(text: str, tag: str, revision: str) -> str:
     validate_tag(tag)
     validate_revision(revision)
 
@@ -84,19 +110,53 @@ def update_formula_text(text: str, tag: str, revision: str) -> str:
     return updated
 
 
+def prepare_formula_update(text: str, tag: str, revision: str) -> FormulaUpdate:
+    pin_updated = update_formula_pin_text(text, tag, revision)
+    caveats_updated = ensure_formula_caveats(pin_updated)
+    return FormulaUpdate(
+        text=caveats_updated,
+        pin_changed=pin_updated != text,
+        caveats_changed=caveats_updated != pin_updated,
+    )
+
+
+def update_formula_text(text: str, tag: str, revision: str) -> str:
+    return prepare_formula_update(text, tag, revision).text
+
+
+def ensure_formula_caveats(text: str) -> str:
+    match = CAVEATS_RE.search(text)
+    if match:
+        return _join_with_caveats(text[: match.start()], text[match.end() :])
+
+    test_index = text.find("\n  test do\n")
+    if test_index != -1:
+        return _join_with_caveats(text[:test_index], text[test_index:])
+
+    final_end_index = text.rfind("\nend")
+    if final_end_index == -1:
+        raise FormulaUpdateError("could not find where to insert Homebrew caveats")
+    return _join_with_caveats(text[:final_end_index], text[final_end_index:])
+
+
+def _join_with_caveats(prefix: str, suffix: str) -> str:
+    return f"{prefix.rstrip()}\n\n{CAVEATS_METHOD}{suffix}"
+
+
 def update_formula(path: Path, tag: str, revision: str, *, check: bool) -> bool:
     text = path.read_text(encoding="utf-8")
-    updated = update_formula_text(text, tag, revision)
-    changed = updated != text
-    if check and changed:
+    update = prepare_formula_update(text, tag, revision)
+    if check and update.changed:
         current_tag, current_revision = parse_formula_pin(text)
-        raise FormulaUpdateError(
-            f"{path} pins {current_tag}@{current_revision}; expected {tag}@{revision}. "
-            "Run scripts/update_homebrew_formula.py --formula <path> to refresh it."
-        )
-    if changed:
-        path.write_text(updated, encoding="utf-8")
-    return changed
+        problems: list[str] = []
+        if update.pin_changed:
+            problems.append(f"pins {current_tag}@{current_revision}; expected {tag}@{revision}")
+        if update.caveats_changed:
+            problems.append("Homebrew caveats are missing or stale")
+        raise FormulaUpdateError(f"{path} {'; '.join(problems)}. Run scripts/update_homebrew_formula.py --formula <path> to refresh it.")
+    if update.changed:
+        path.write_text(update.text, encoding="utf-8")
+    return update.changed
 
 
 def build_parser() -> argparse.ArgumentParser:

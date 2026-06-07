@@ -28,6 +28,27 @@ class Smith < Formula
 end
 """
 
+FORMULA_WITH_CAVEATS = """# frozen_string_literal: true
+
+class Smith < Formula
+  url "https://github.com/faustodavid/smith.git",
+      tag:      "v0.1.0",
+      revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+  def caveats
+    <<~EOS
+      Smith is installed.
+
+      Start the guided setup:
+        smith config init
+
+      This creates your config, links the Smith agent skill, and helps add
+      GitHub, GitLab, Azure DevOps, and YouTrack remotes securely.
+    EOS
+  end
+end
+"""
+
 
 def test_update_formula_text_replaces_only_release_pin() -> None:
     updater = _load_formula_module()
@@ -37,6 +58,8 @@ def test_update_formula_text_replaces_only_release_pin() -> None:
     assert 'tag:      "v0.1.1"' in updated
     assert 'revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' in updated
     assert "https://github.com/faustodavid/smith.git" in updated
+    assert "Start the guided setup:" in updated
+    assert "smith config init" in updated
 
 
 def test_update_formula_check_fails_when_formula_is_stale(tmp_path: Path) -> None:
@@ -53,12 +76,43 @@ def test_update_formula_check_fails_when_formula_is_stale(tmp_path: Path) -> Non
 def test_update_formula_is_idempotent_when_current(tmp_path: Path) -> None:
     updater = _load_formula_module()
     formula = tmp_path / "smith.rb"
-    formula.write_text(FORMULA, encoding="utf-8")
+    formula.write_text(FORMULA_WITH_CAVEATS, encoding="utf-8")
 
     changed = updater.update_formula(formula, "v0.1.0", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", check=True)
 
     assert changed is False
-    assert formula.read_text(encoding="utf-8") == FORMULA
+    assert formula.read_text(encoding="utf-8") == FORMULA_WITH_CAVEATS
+
+
+def test_update_formula_text_inserts_caveats_before_test_block() -> None:
+    updater = _load_formula_module()
+    formula = """# frozen_string_literal: true
+
+class Smith < Formula
+  url "https://github.com/faustodavid/smith.git",
+      tag:      "v0.1.0",
+      revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+  test do
+    system "smith", "--help"
+  end
+end
+"""
+
+    updated = updater.update_formula_text(formula, "v0.1.1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+    assert updated.index("def caveats") < updated.index("test do")
+    assert "smith config init" in updated
+
+
+def test_update_formula_text_replaces_existing_caveats() -> None:
+    updater = _load_formula_module()
+    formula = FORMULA_WITH_CAVEATS.replace("smith config init", "old setup command")
+
+    updated = updater.update_formula_text(formula, "v0.1.1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+    assert "old setup command" not in updated
+    assert "smith config init" in updated
 
 
 def test_load_project_version_reads_pyproject(tmp_path: Path) -> None:
