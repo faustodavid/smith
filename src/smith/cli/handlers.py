@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from smith.client import SmithClient
@@ -258,6 +259,12 @@ def handle_config_show(client: SmithClient | None, args: argparse.Namespace) -> 
     )
 
 
+def _save_empty_config(path: Path) -> SmithConfig:
+    config = SmithConfig(remotes={}, defaults={})
+    save_config(config, config_path=path)
+    return config
+
+
 def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> int:
     del client
     path = _default_config_path()
@@ -278,58 +285,33 @@ def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> 
             print("The skill will stay current when Smith is upgraded.", file=stream)
         print(file=stream)
 
-    if args.output_format == "json":
-        config = SmithConfig(remotes={}, defaults={})
-        save_config(config, config_path=path)
+    manual_init = bool(getattr(args, "manual", False) or args.output_format == "json")
+    if manual_init:
+        config = _save_empty_config(path)
+        if args.output_format != "json":
+            print(f"Created empty config at {path}.")
+            print("Edit it manually or run `smith config edit` to add remotes.")
+            return EXIT_OK
         return _emit_success(
             args=args,
             command=args.command_id,
-            data={"path": str(path), "remotes_count": 0, "skill": skill_result.to_dict()},
+            data={"path": str(path), "remotes_count": len(config.remotes), "skill": skill_result.to_dict()},
             partial=False,
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    from smith.cli.onboarding import (
-        _print_manual_setup_instructions,
-        run_interactive_init,
+    from smith.cli.onboarding import run_interactive_init
+
+    config = run_interactive_init(config_path=path)
+    if args.output_format != "json":
+        return EXIT_OK
+    return _emit_success(
+        args=args,
+        command=args.command_id,
+        data={"path": str(path), "remotes_count": len(config.remotes), "skill": skill_result.to_dict()},
+        partial=False,
     )
-
-    print("Welcome to Smith!")
-    print()
-    print("How would you like to configure your remotes?")
-    print("  1) Interactive setup")
-    print("  2) Manual setup (edit config.yaml yourself)")
-
-    while True:
-        try:
-            raw = input("Choice [1]: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            raise SystemExit(1)
-        if not raw or raw == "1":
-            config = run_interactive_init(config_path=path)
-            if args.output_format != "json":
-                return EXIT_OK
-            return _emit_success(
-                args=args,
-                command=args.command_id,
-                data={"path": str(path), "remotes_count": len(config.remotes), "skill": skill_result.to_dict()},
-                partial=False,
-            )
-        if raw == "2":
-            config = SmithConfig(remotes={}, defaults={})
-            save_config(config, config_path=path)
-            _print_manual_setup_instructions(path)
-            if args.output_format != "json":
-                return EXIT_OK
-            return _emit_success(
-                args=args,
-                command=args.command_id,
-                data={"path": str(path), "remotes_count": 0, "skill": skill_result.to_dict()},
-                partial=False,
-            )
-        print("  Enter 1 or 2.")
 
 
 def handle_config_edit(client: SmithClient | None, args: argparse.Namespace) -> int:

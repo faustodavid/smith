@@ -83,6 +83,16 @@ def test_cache_clean_parser_defaults() -> None:
     assert args.requires_client is False
 
 
+def test_config_init_parser_accepts_manual_mode() -> None:
+    parser = _build_test_parser()
+    args = parser.parse_args(["config", "init", "--manual"])
+
+    assert args.command_id == "config.init"
+    assert args.manual is True
+    assert args.output_format == "text"
+    assert args.requires_client is False
+
+
 def test_cache_clean_parser_accepts_remote_override() -> None:
     parser = _build_test_parser()
     args = parser.parse_args(["cache", "clean", "--remote", "github"])
