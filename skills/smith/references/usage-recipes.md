@@ -10,7 +10,14 @@ smith config list
 smith config show <remote-name>
 ```
 
-If the config lives elsewhere, set `SMITH_CONFIG=/path/to/config.yaml`. Authenticate with the `token_env` declared on the remote (common: `GITHUB_TOKEN`, `GITLAB_TOKEN`, `AZURE_DEVOPS_PAT`). For Azure DevOps also run `az login`.
+If the config lives elsewhere, set `SMITH_CONFIG=/path/to/config.yaml`. Run
+`smith config init` or `smith config edit` for guided remote setup and secure
+token storage. `smith config show <remote-name>` shows persisted fields only.
+At runtime Smith checks a configured `token_env` env var and secure-store entry
+first, then implicit provider env vars where supported (`GITHUB_TOKEN`,
+`GITLAB_TOKEN`, `YOUTRACK_TOKEN`), then provider auth where supported:
+host-scoped `gh auth token` for GitHub, host-scoped `glab config get token` for
+GitLab, and Azure DefaultAzureCredential / `az login` for Azure DevOps.
 
 ## Discovery
 
