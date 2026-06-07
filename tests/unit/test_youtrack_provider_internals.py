@@ -43,6 +43,14 @@ def test_youtrack_token_requires_env(monkeypatch: Any) -> None:
         provider._get_token()
 
 
+def test_youtrack_token_can_use_secure_store(monkeypatch: Any) -> None:
+    monkeypatch.delenv("YOUTRACK_TOKEN", raising=False)
+    provider = _provider()
+    monkeypatch.setattr("smith.credentials.get_stored_token", lambda token_env: "stored-token")
+
+    assert provider._get_token() == "stored-token"
+
+
 def test_youtrack_token_requires_custom_env(monkeypatch: Any) -> None:
     monkeypatch.delenv("COMPANY_YOUTRACK_TOKEN", raising=False)
     provider = _provider(token_env="COMPANY_YOUTRACK_TOKEN")

@@ -80,6 +80,19 @@ def test_azdo_pat_token_env_uses_basic_auth_without_azure_credential(monkeypatch
     )
 
 
+def test_azdo_pat_token_can_use_secure_store(monkeypatch: Any) -> None:
+    class _FailingCredential:
+        def get_token(self, scope: str) -> Any:
+            raise RuntimeError("no az login")
+
+    monkeypatch.delenv("AZURE_DEVOPS_PAT", raising=False)
+    monkeypatch.setattr("smith.credentials.get_stored_token", lambda token_env: "stored-pat")
+    provider = _provider(credential=_FailingCredential(), token_env="AZURE_DEVOPS_PAT")
+
+    assert provider._get_token() == "stored-pat"
+    assert provider._authorization_header() == "Basic OnN0b3JlZC1wYXQ="
+
+
 def test_azdo_pat_token_env_uses_basic_auth_for_git(monkeypatch: Any) -> None:
     monkeypatch.setenv("AZURE_DEVOPS_PAT", "pat-token")
     provider = _provider(token_env="AZURE_DEVOPS_PAT")

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import base64
-import os
 from typing import Any
 
 import requests
 from azure.identity import DefaultAzureCredential
 
+from smith.auth import resolve_auth
 from smith.config import RuntimeConfig
+from smith.credentials import configured_token
 from smith.errors import SmithAuthError
 from smith.providers.azdo_builds import AzdoBuildMixin
 from smith.providers.azdo_code import AzdoCodeMixin
@@ -44,10 +45,9 @@ class AzdoProvider(
         self._access_token: str | None = None
 
     def _configured_pat(self) -> str | None:
-        if not self._token_env:
-            return None
-        token = os.getenv(self._token_env, "").strip()
-        return token or None
+        auth = resolve_auth("azdo", token_env=self._token_env)
+        token = configured_token(auth)
+        return token.token if token else None
 
     def _get_token(self, *, force_refresh: bool = False) -> str:
         pat = self._configured_pat()
@@ -59,7 +59,7 @@ class AzdoProvider(
         try:
             token = self._credential.get_token(ADO_SCOPE)
         except Exception as exc:
-            raise SmithAuthError("Failed to acquire Azure DevOps token using DefaultAzureCredential. Run `az login` and retry.") from exc
+            raise SmithAuthError(resolve_auth("azdo", token_env=self._token_env).missing_token_message) from exc
 
         self._access_token = token.token
         return self._access_token
@@ -72,9 +72,7 @@ class AzdoProvider(
         return f"Bearer {self._get_token(force_refresh=force_refresh)}"
 
     def _auth_error_message(self) -> str:
-        if self._token_env:
-            return f"Authentication rejected with HTTP 401/403. Set {self._token_env} to a valid Azure DevOps PAT and retry."
-        return "Authentication rejected with HTTP 401/403. Run `az login` and retry."
+        return resolve_auth("azdo", token_env=self._token_env).auth_rejected_message
 
     def _almsearch_url(self, suffix: str) -> str:
         return f"{self._almsearch_base_url}{suffix}"

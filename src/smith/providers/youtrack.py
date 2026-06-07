@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
-
 import requests
 
+from smith.auth import resolve_auth
 from smith.config import RuntimeConfig
-from smith.errors import SmithAuthError
+from smith.credentials import runtime_token
 from smith.providers.base import BaseProvider
 from smith.providers.youtrack_issues import YouTrackIssueMixin
 
@@ -35,24 +34,16 @@ class YouTrackProvider(
             return normalized[: -len("/api")]
         return normalized
 
-    def _resolved_token_env_var(self) -> str:
-        return self._token_env or "YOUTRACK_TOKEN"
-
     def _get_token(self, *, force_refresh: bool = False) -> str:
         if self._youtrack_token and not force_refresh:
             return self._youtrack_token
 
-        token_env_var = self._resolved_token_env_var()
-        env_token = os.getenv(token_env_var, "").strip()
-        if not env_token:
-            raise SmithAuthError(f"Failed to acquire YouTrack token. Set {token_env_var} and retry.")
-
-        self._youtrack_token = env_token
+        auth = resolve_auth("youtrack", token_env=self._token_env)
+        self._youtrack_token = runtime_token(auth)
         return self._youtrack_token
 
     def _auth_error_message(self) -> str:
-        token_env_var = self._resolved_token_env_var()
-        return f"YouTrack authentication rejected with HTTP 401/403. Set {token_env_var} and retry."
+        return resolve_auth("youtrack", token_env=self._token_env).auth_rejected_message
 
     def _build_url(self, path: str) -> str:
         if path.startswith("http"):
