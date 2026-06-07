@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 import yaml
 
+from smith.auth import normalize_optional_token_env
+
 AZDO_BASE_URL = "https://dev.azure.com"
 AZDO_SEARCH_BASE_URL = "https://almsearch.dev.azure.com"
 _GLAB_HOST_PATTERN = re.compile(r"^[A-Za-z0-9.-]+(?::\d+)?$")
@@ -301,6 +303,17 @@ def _validate_remote_dict(name: str, remote: dict[str, Any]) -> None:
         if not host:
             raise ValueError(f"Remote '{name}': youtrack remotes require 'host' field")
 
+    _normalize_remote_token_env(name, remote.get("token_env", ""))
+
+
+def _normalize_remote_token_env(name: str, value: Any) -> str | None:
+    try:
+        return normalize_optional_token_env(str(value or ""))
+    except ValueError as exc:
+        raise ValueError(
+            f"Remote '{name}': token_env must be an uppercase environment variable name like GITHUB_TOKEN, not a token value"
+        ) from exc
+
 
 def load_config(*, config_path: Path | None = None) -> SmithConfig:
     path = config_path or _default_config_path()
@@ -338,7 +351,7 @@ def load_config(*, config_path: Path | None = None) -> SmithConfig:
             elif provider == "azdo":
                 host = "dev.azure.com"
 
-        token_env = remote.get("token_env", "").strip() or None
+        token_env = _normalize_remote_token_env(str(name), remote.get("token_env", ""))
         enabled = bool(remote.get("enabled", True))
         api_url = _load_remote_api_url(provider=provider, remote=remote, host=host)
 
@@ -383,7 +396,7 @@ def save_config(config: SmithConfig, *, config_path: Path | None = None) -> None
                 remote_dict["host"] = remote.host
 
         if remote.token_env:
-            remote_dict["token_env"] = remote.token_env
+            remote_dict["token_env"] = _normalize_remote_token_env(name, remote.token_env)
 
         if _should_persist_api_url(remote):
             remote_dict["api_url"] = _normalize_config_api_url(remote.api_url)
@@ -394,6 +407,7 @@ def save_config(config: SmithConfig, *, config_path: Path | None = None) -> None
 
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(output, f, default_flow_style=False, sort_keys=True)
+    os.chmod(path, 0o600)
 
 
 def resolve_remote(config: SmithConfig, name: str) -> RemoteConfig | None:

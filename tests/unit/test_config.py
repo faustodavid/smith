@@ -741,6 +741,70 @@ def test_save_config_persists_gitlab_org_when_present(tmp_path: Path) -> None:
     assert reloaded.remotes["gitlab-infra"].org == "platform/subgroup"
 
 
+def test_load_config_rejects_invalid_token_env(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+remotes:
+  github:
+    provider: github
+    org: octo-org
+    token_env: ghp_secretvalue
+    enabled: true
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="token_env must be an uppercase environment variable name"):
+        load_config(config_path=config_path)
+
+
+def test_save_config_rejects_invalid_token_env(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+
+    with pytest.raises(ValueError, match="token_env must be an uppercase environment variable name"):
+        save_config(
+            SmithConfig(
+                remotes={
+                    "github": RemoteConfig(
+                        name="github",
+                        provider="github",
+                        org="octo-org",
+                        host="github.com",
+                        token_env="ghp_secretvalue",
+                        enabled=True,
+                        api_url="https://api.github.com",
+                    )
+                },
+                defaults={},
+            ),
+            config_path=config_path,
+        )
+
+
+def test_save_config_writes_private_file_permissions(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        SmithConfig(
+            remotes={
+                "github": RemoteConfig(
+                    name="github",
+                    provider="github",
+                    org="octo-org",
+                    host="github.com",
+                    token_env="GITHUB_TOKEN",
+                    enabled=True,
+                    api_url="https://api.github.com",
+                )
+            },
+            defaults={},
+        ),
+        config_path=config_path,
+    )
+
+    assert config_path.stat().st_mode & 0o777 == 0o600
+
+
 def test_load_config_derives_youtrack_api_url_from_host(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

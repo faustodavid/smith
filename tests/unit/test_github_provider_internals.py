@@ -24,7 +24,7 @@ def test_github_token_helpers_and_rate_limit_handling(monkeypatch: Any) -> None:
     provider = _provider()
     monkeypatch.setenv("GITHUB_TOKEN", "env-token")
     monkeypatch.setattr(
-        "smith.providers.github.subprocess.run",
+        "smith.credentials.subprocess.run",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("subprocess should not be called")),
     )
 
@@ -48,14 +48,14 @@ def test_github_token_falls_back_to_gh_cli_and_reports_auth_failures(monkeypatch
         calls.append(args)
         return SimpleNamespace(stdout="cli-token\n")
 
-    monkeypatch.setattr("smith.providers.github.subprocess.run", _fake_run)
+    monkeypatch.setattr("smith.credentials.subprocess.run", _fake_run)
 
     assert provider._get_token() == "cli-token"
     assert provider._get_token() == "cli-token"
     assert calls == [["gh", "auth", "token"]]
 
     monkeypatch.setattr(
-        "smith.providers.github.subprocess.run",
+        "smith.credentials.subprocess.run",
         lambda *args, **kwargs: (_ for _ in ()).throw(OSError("missing gh")),
     )
     failing_provider = _provider()
@@ -64,11 +64,55 @@ def test_github_token_falls_back_to_gh_cli_and_reports_auth_failures(monkeypatch
         failing_provider._get_token()
 
 
+def test_github_token_can_use_secure_store(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    provider = _provider()
+    monkeypatch.setattr("smith.credentials.get_stored_token", lambda token_env: "stored-token")
+    monkeypatch.setattr(
+        "smith.credentials.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("subprocess should not be called")),
+    )
+
+    assert provider._get_token() == "stored-token"
+
+
+def test_github_enterprise_uses_host_scoped_cli_and_ignores_generic_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "github-dot-com-token")
+    provider = _provider(make_runtime_config(github_api_url="https://ghe.example.test/api/v3"))
+    calls: list[list[str]] = []
+
+    def _fake_run(args: list[str], **kwargs: Any) -> Any:
+        calls.append(args)
+        return SimpleNamespace(stdout="enterprise-token\n")
+
+    monkeypatch.setattr("smith.credentials.subprocess.run", _fake_run)
+
+    assert provider._get_token() == "enterprise-token"
+    assert calls == [["gh", "auth", "token", "--hostname", "ghe.example.test"]]
+
+
+def test_github_enterprise_explicit_token_env_is_allowed(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "github-dot-com-token")
+    monkeypatch.setenv("GHE_TOKEN", "enterprise-env-token")
+    provider = GitHubProvider(
+        config=make_runtime_config(github_api_url="https://ghe.example.test/api/v3"),
+        session=requests.Session(),
+        github_api_url="https://ghe.example.test/api/v3",
+        token_env="GHE_TOKEN",
+    )
+    monkeypatch.setattr(
+        "smith.credentials.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("subprocess should not be called")),
+    )
+
+    assert provider._get_token() == "enterprise-env-token"
+
+
 def test_github_token_rejects_empty_cli_token_and_exposes_auth_helpers(monkeypatch: Any) -> None:
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     provider = _provider()
     monkeypatch.setattr(
-        "smith.providers.github.subprocess.run",
+        "smith.credentials.subprocess.run",
         lambda *args, **kwargs: SimpleNamespace(stdout="\n"),
     )
 

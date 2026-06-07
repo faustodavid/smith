@@ -38,7 +38,7 @@ def test_gitlab_token_helpers_and_url_building(monkeypatch: Any) -> None:
     provider = _provider()
     monkeypatch.setenv("GITLAB_TOKEN", "env-token")
     monkeypatch.setattr(
-        "smith.providers.gitlab.subprocess.run",
+        "smith.credentials.subprocess.run",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("subprocess should not be called")),
     )
 
@@ -59,14 +59,14 @@ def test_gitlab_token_falls_back_to_glab_config_and_reports_auth_failures(monkey
         calls.append(args)
         return SimpleNamespace(stdout="cli-token\n")
 
-    monkeypatch.setattr("smith.providers.gitlab.subprocess.run", _fake_run)
+    monkeypatch.setattr("smith.credentials.subprocess.run", _fake_run)
 
     assert provider._get_token() == "cli-token"
     assert provider._get_token() == "cli-token"
     assert calls == [["glab", "config", "get", "token", "--host", "gitlab.com"]]
 
     monkeypatch.setattr(
-        "smith.providers.gitlab.subprocess.run",
+        "smith.credentials.subprocess.run",
         lambda *args, **kwargs: (_ for _ in ()).throw(OSError("missing glab")),
     )
     failing_provider = _provider()
@@ -75,11 +75,23 @@ def test_gitlab_token_falls_back_to_glab_config_and_reports_auth_failures(monkey
         failing_provider._get_token()
 
 
+def test_gitlab_token_can_use_secure_store(monkeypatch: Any) -> None:
+    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+    provider = _provider()
+    monkeypatch.setattr("smith.credentials.get_stored_token", lambda token_env: "stored-token")
+    monkeypatch.setattr(
+        "smith.credentials.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("subprocess should not be called")),
+    )
+
+    assert provider._get_token() == "stored-token"
+
+
 def test_gitlab_token_rejects_empty_cli_token(monkeypatch: Any) -> None:
     monkeypatch.delenv("GITLAB_TOKEN", raising=False)
     provider = _provider()
     monkeypatch.setattr(
-        "smith.providers.gitlab.subprocess.run",
+        "smith.credentials.subprocess.run",
         lambda *args, **kwargs: SimpleNamespace(stdout="\n"),
     )
 
@@ -101,7 +113,7 @@ def test_gitlab_token_uses_host_specific_glab_config_lookup(monkeypatch: Any) ->
         calls.append(args)
         return SimpleNamespace(stdout="cli-token\n")
 
-    monkeypatch.setattr("smith.providers.gitlab.subprocess.run", _fake_run)
+    monkeypatch.setattr("smith.credentials.subprocess.run", _fake_run)
 
     assert provider._gitlab_host() == "gitlab.example.test"
     assert provider._get_token() == "cli-token"

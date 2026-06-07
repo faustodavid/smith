@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
-import subprocess
 import threading
 import time
 from typing import Any
@@ -10,8 +8,10 @@ from urllib.parse import quote
 
 import requests
 
+from smith.auth import resolve_auth
 from smith.config import RuntimeConfig
-from smith.errors import SmithApiError, SmithAuthError
+from smith.credentials import runtime_token
+from smith.errors import SmithApiError
 from smith.http import parse_rate_limit_reset_seconds, parse_retry_after_seconds
 from smith.providers.base import BaseProvider
 from smith.providers.github_builds import GitHubBuildMixin
@@ -56,31 +56,12 @@ class GitHubProvider(
         if self._github_token and not force_refresh:
             return self._github_token
 
-        token_env_var = self._token_env or "GITHUB_TOKEN"
-        env_token = os.getenv(token_env_var, "").strip()
-        if env_token:
-            self._github_token = env_token
-            return self._github_token
-
-        try:
-            result = subprocess.run(
-                ["gh", "auth", "token"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except Exception as exc:
-            raise SmithAuthError("Failed to acquire GitHub token. Set GITHUB_TOKEN or run `gh auth login`.") from exc
-
-        token = result.stdout.strip()
-        if not token:
-            raise SmithAuthError("GitHub token is empty. Set GITHUB_TOKEN or run `gh auth login`.")
-
-        self._github_token = token
+        auth = resolve_auth("github", token_env=self._token_env, api_url=self.github_api_url)
+        self._github_token = runtime_token(auth)
         return self._github_token
 
     def _auth_error_message(self) -> str:
-        return "GitHub authentication rejected with HTTP 401/403. Set GITHUB_TOKEN or run `gh auth login` and retry."
+        return resolve_auth("github", token_env=self._token_env, api_url=self.github_api_url).auth_rejected_message
 
     def _default_accept_header(self) -> str:
         return "application/vnd.github+json"

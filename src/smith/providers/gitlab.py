@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import os
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 import requests
 
+from smith.auth import gitlab_host, resolve_auth
 from smith.config import RuntimeConfig
-from smith.errors import SmithApiError, SmithAuthError
+from smith.credentials import runtime_token
+from smith.errors import SmithApiError
 from smith.providers.base import BaseProvider
 from smith.providers.gitlab_builds import GitLabBuildMixin
 from smith.providers.gitlab_code import GitLabCodeMixin
@@ -47,60 +47,18 @@ class GitLabProvider(
         self._project_key_to_path_cache: dict[str, str] = {}
 
     def _gitlab_host(self) -> str:
-        parsed = urlparse(self.gitlab_api_url if "://" in self.gitlab_api_url else f"https://{self.gitlab_api_url}")
-        return (parsed.netloc or parsed.path or "").strip().strip("/")
-
-    @staticmethod
-    def _is_likely_token(token: str) -> bool:
-        return bool(token) and all(not char.isspace() for char in token)
+        return gitlab_host(self.gitlab_api_url)
 
     def _get_token(self, *, force_refresh: bool = False) -> str:
         if self._gitlab_token and not force_refresh:
             return self._gitlab_token
 
-        token_env_var = self._token_env or "GITLAB_TOKEN"
-        env_token = os.getenv(token_env_var, "").strip()
-        if env_token:
-            self._gitlab_token = env_token
-            return self._gitlab_token
-
-        host = self._gitlab_host()
-        token_commands = [["glab", "config", "get", "token", "--host", host]] if host else [["glab", "config", "get", "token"]]
-        last_error: Exception | None = None
-        saw_command_success = False
-        token = ""
-        for command in token_commands:
-            try:
-                result = subprocess.run(
-                    command,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            except Exception as exc:
-                last_error = exc
-                continue
-            saw_command_success = True
-            token = result.stdout.strip()
-            if self._is_likely_token(token):
-                break
-            token = ""
-
-        if not token:
-            message = "Failed to acquire GitLab token. Set GITLAB_TOKEN or run `glab auth login`."
-            if host:
-                message = f"Failed to acquire GitLab token for {host}. Set GITLAB_TOKEN or run `glab auth login --hostname {host}`."
-            if saw_command_success:
-                message = "GitLab token is empty. Set GITLAB_TOKEN or run `glab auth login`."
-                if host:
-                    message = f"GitLab token is empty for {host}. Set GITLAB_TOKEN or run `glab auth login --hostname {host}`."
-            raise SmithAuthError(message) from last_error
-
-        self._gitlab_token = token
+        auth = resolve_auth("gitlab", token_env=self._token_env, api_url=self.gitlab_api_url)
+        self._gitlab_token = runtime_token(auth)
         return self._gitlab_token
 
     def _auth_error_message(self) -> str:
-        return "GitLab authentication rejected with HTTP 401/403. Set GITLAB_TOKEN or run `glab auth login` and retry."
+        return resolve_auth("gitlab", token_env=self._token_env, api_url=self.gitlab_api_url).auth_rejected_message
 
     def _timeout(self) -> int:
         return self._config.gitlab_timeout_seconds
