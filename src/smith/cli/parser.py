@@ -287,6 +287,11 @@ def _add_config_group(root_subparsers: Any) -> None:
     )
 
     config_init = _add_parser(config_sub, "init", help_text="Initialize config file")
+    config_init.add_argument(
+        "--manual",
+        action="store_true",
+        help="Create an empty config for manual editing instead of starting onboarding",
+    )
     _add_output_format(config_init)
     _set_handler(
         config_init,

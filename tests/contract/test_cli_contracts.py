@@ -604,6 +604,30 @@ def test_handle_config_init_creates_empty_config_file(monkeypatch: Any, tmp_path
     assert handlers.load_config(config_path=path) == SmithConfig(remotes={}, defaults={})
 
 
+def test_handle_config_init_manual_text_creates_empty_config_file(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
+    path = tmp_path / "smith-config.yaml"
+    skill_target = tmp_path / "skills" / "smith"
+    skill_source = tmp_path / "source" / "skills" / "smith"
+    skill_result = SkillSyncResult(
+        ok=True,
+        status="linked",
+        target=skill_target,
+        source=skill_source,
+        mode="symlink",
+        message=f"Smith skill linked to: {skill_target}",
+    )
+    monkeypatch.setattr(handlers, "_default_config_path", lambda: path)
+    monkeypatch.setattr(handlers, "sync_skill", lambda: skill_result)
+    args = _make_args(command_id="config.init", output_format="text", manual=True)
+
+    exit_code = handlers.handle_config_init(None, args)
+    output = capsys.readouterr().out
+
+    assert exit_code == handlers.EXIT_OK
+    assert f"Created empty config at {path}." in output
+    assert handlers.load_config(config_path=path) == SmithConfig(remotes={}, defaults={})
+
+
 def test_handle_config_init_rejects_existing_config_file(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
     path = tmp_path / "smith-config.yaml"
     path.write_text("remotes: {}\ndefaults: {}\n", encoding="utf-8")
