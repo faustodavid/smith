@@ -14,6 +14,7 @@ from smith.cli.handlers import (
 )
 from smith.cli.parser import build_parser
 from smith.errors import SmithApiError, SmithAuthError
+from smith.skill import ensure_skill_fresh
 
 _SMITH_CLI_HANDLER_ATTR = "_smith_cli_handler"
 
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_INVALID_ARGS
 
     command = getattr(args, "command_id", "unknown")
+    ensure_skill_fresh(command)
 
     try:
         validate_args_for_remote(args)

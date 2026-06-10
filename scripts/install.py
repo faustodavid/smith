@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Cross-platform installer for Smith. Works on macOS and Windows."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -28,8 +29,37 @@ def require_tool(name: str, install_hint: str) -> None:
         sys.exit(1)
 
 
+def find_smith_executable() -> str | None:
+    """Locate the smith CLI, including fresh installs where uv's bin dir is not on PATH yet."""
+    found = shutil.which("smith")
+    if found:
+        return found
+    try:
+        result = subprocess.run(["uv", "tool", "dir", "--bin"], capture_output=True, text=True)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    name = "smith.exe" if sys.platform == "win32" else "smith"
+    candidate = Path(result.stdout.strip()) / name
+    if candidate.exists():
+        return str(candidate)
+    return None
+
+
+def sync_skill_via_cli(source: Path) -> bool:
+    """Sync the skill with the installed CLI so all install paths share one implementation."""
+    smith_bin = find_smith_executable()
+    if not smith_bin:
+        return False
+    env = dict(os.environ)
+    env["SMITH_SKILL_SOURCE_DIR"] = str(source)
+    result = subprocess.run([smith_bin, "skill", "sync"], env=env)
+    return result.returncode == 0
+
+
 def sync_skill(source: Path, target: Path) -> None:
-    """Copy skill directory to target."""
+    """Copy skill directory to target. Fallback for when the smith CLI is not on PATH."""
     target.parent.mkdir(parents=True, exist_ok=True)
     temp_root = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
     staged = temp_root / "staged"
@@ -82,14 +112,16 @@ def main() -> None:
         print(f"Error: skill directory not found after install: {SKILL_SOURCE}", file=sys.stderr)
         sys.exit(1)
 
-    print("==> Syncing skill")
-    sync_skill(SKILL_SOURCE, TARGET_SKILL_DIR)
-
     print("==> Installing smith CLI globally with uv")
     run(["uv", "tool", "install", "-e", str(REPO_DIR), "--force"])
 
     print("==> Ensuring smith is on PATH")
     run(["uv", "tool", "update-shell"])
+
+    print("==> Syncing skill")
+    if not sync_skill_via_cli(SKILL_SOURCE):
+        target = Path(os.environ.get("SMITH_SKILL_DIR") or TARGET_SKILL_DIR).expanduser()
+        sync_skill(SKILL_SOURCE, target)
 
     print()
     print("Smith installed successfully!")

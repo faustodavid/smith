@@ -73,8 +73,9 @@ irm https://raw.githubusercontent.com/faustodavid/smith/main/scripts/install.py 
 ```
 
 `smith config init` syncs the Smith agent skill to `~/.agents/skills/smith`.
-The standalone installer does this during install too. Refresh the skill later
-with:
+The standalone installer does this during install too. The skill stays current
+on its own after upgrades (set `SMITH_SKILL_CHECK=0` to opt out); to refresh it
+manually run:
 
 ```bash
 smith skill sync

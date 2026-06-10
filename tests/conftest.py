@@ -46,6 +46,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                 item.add_marker(skip_integration)
 
 
+@pytest.fixture(autouse=True)
+def _disable_skill_freshness_check(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    """Keep CLI invocations hermetic: never touch the developer's real skill install."""
+    if request.node.get_closest_marker("integration"):
+        return
+    monkeypatch.setenv("SMITH_SKILL_CHECK", "0")
+
+
 @pytest.fixture
 def runtime_config():
     return make_runtime_config()
