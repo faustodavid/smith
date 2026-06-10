@@ -283,6 +283,8 @@ def handle_config_init(client: SmithClient | None, args: argparse.Namespace) -> 
         print(skill_result.message, file=stream)
         if skill_result.ok and skill_result.mode == "symlink":
             print("The skill will stay current when Smith is upgraded.", file=stream)
+        elif skill_result.ok and skill_result.mode == "copy":
+            print("Smith will refresh this copy automatically after upgrades.", file=stream)
         print(file=stream)
 
     manual_init = bool(getattr(args, "manual", False) or args.output_format == "json")

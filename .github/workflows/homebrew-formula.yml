@@ -86,11 +86,21 @@ jobs:
             --tag "${RELEASE_TAG}" \
             --check-release-tag
 
-      - name: Report tap workflow handoff
+      - name: Trigger tap formula update
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_REVISION: ${{ steps.metadata.outputs.revision }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           echo "Release ${RELEASE_TAG}@${RELEASE_REVISION} is valid."
-          echo "Update faustodavid/homebrew-tap with its Update Smith Formula workflow."
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "HOMEBREW_TAP_DISPATCH_TOKEN is not configured."
+            echo "Update faustodavid/homebrew-tap manually with its Update Smith Formula workflow."
+            exit 0
+          fi
+          gh workflow run update-smith-formula.yml \
+            --repo faustodavid/homebrew-tap \
+            -f tag="${RELEASE_TAG}" \
+            -f revision="${RELEASE_REVISION}"
+          echo "Dispatched faustodavid/homebrew-tap Update Smith Formula workflow for ${RELEASE_TAG}."

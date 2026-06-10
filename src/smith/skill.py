@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import filecmp
+import json
 import os
 import shutil
 import sys
+import tempfile
+import time
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 DEFAULT_SKILL_TARGET = Path.home() / ".agents" / "skills" / "smith"
 _SKILL_RELATIVE_PATH = Path("share") / "smith" / "skills" / "smith"
+SKILL_MARKER_NAME = ".smith-skill-meta.json"
+_FRESHNESS_STAMP_NAME = "skill-freshness-stamp"
+_FRESHNESS_INTERVAL_SECONDS = 24 * 60 * 60
+_FRESHNESS_EXEMPT_COMMANDS = {"skill.sync", "skill.status", "config.init"}
+_STALE_SKILL_HINT = "run 'smith skill sync' to refresh."
 
 
 @dataclass(frozen=True)
@@ -69,11 +78,9 @@ def _homebrew_skill_sources() -> list[Path]:
         if prefix is not None and prefix not in prefixes:
             prefixes.append(prefix)
 
-    candidates: list[Path] = []
-    for prefix in prefixes:
-        candidates.append(prefix / "opt" / "smith" / _SKILL_RELATIVE_PATH)
-        candidates.append(prefix / "Cellar" / "smith" / "HEAD" / _SKILL_RELATIVE_PATH)
-    return candidates
+    # The opt/smith symlink always points at the active install (including
+    # HEAD installs), so it is the only candidate that survives upgrades.
+    return [prefix / "opt" / "smith" / _SKILL_RELATIVE_PATH for prefix in prefixes]
 
 
 def _repo_skill_source() -> Path:
@@ -91,13 +98,6 @@ def resolve_skill_source_dir() -> Path | None:
     return None
 
 
-def _remove_existing_target(target: Path) -> None:
-    if target.is_symlink() or target.is_file():
-        target.unlink()
-    elif target.exists():
-        shutil.rmtree(target)
-
-
 def _absolute_path_without_resolving(path: Path) -> Path:
     return Path(os.path.abspath(path.expanduser()))
 
@@ -112,12 +112,37 @@ def _symlink_destination(target: Path) -> Path | None:
     return _absolute_path_without_resolving(target.parent / destination)
 
 
+def _installed_version() -> str | None:
+    try:
+        return version("smith")
+    except PackageNotFoundError:
+        return None
+
+
+def _write_sync_marker(target: Path, source: Path) -> None:
+    marker = {
+        "source": str(source),
+        "version": _installed_version(),
+        "synced_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    (target / SKILL_MARKER_NAME).write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+
+
+def _read_sync_marker(target: Path) -> dict[str, object] | None:
+    try:
+        data = json.loads((target / SKILL_MARKER_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _directory_contents_match(target: Path, source: Path) -> bool:
     if not target.is_dir() or not source.is_dir():
         return False
 
-    target_entries = {path.relative_to(target) for path in target.rglob("*")}
-    source_entries = {path.relative_to(source) for path in source.rglob("*")}
+    marker = Path(SKILL_MARKER_NAME)
+    target_entries = {path.relative_to(target) for path in target.rglob("*")} - {marker}
+    source_entries = {path.relative_to(source) for path in source.rglob("*")} - {marker}
     if target_entries != source_entries:
         return False
 
@@ -187,25 +212,19 @@ def sync_skill(
                 mode=mode,
                 message=f"Smith skill already points to: {source}",
             )
-        _remove_existing_target(target)
 
     target_parent.mkdir(parents=True, exist_ok=True)
 
-    if prefer_symlink:
-        try:
-            target.symlink_to(source, target_is_directory=True)
-            return SkillSyncResult(
-                ok=True,
-                status="linked",
-                target=target,
-                source=source,
-                mode="symlink",
-                message=f"Smith skill linked to: {target}",
-            )
-        except OSError:
-            pass
-
-    shutil.copytree(source, target)
+    mode = _stage_and_swap(source, target, prefer_symlink=prefer_symlink)
+    if mode == "symlink":
+        return SkillSyncResult(
+            ok=True,
+            status="linked",
+            target=target,
+            source=source,
+            mode="symlink",
+            message=f"Smith skill linked to: {target}",
+        )
     return SkillSyncResult(
         ok=True,
         status="copied",
@@ -214,3 +233,117 @@ def sync_skill(
         mode="copy",
         message=f"Smith skill copied to: {target}",
     )
+
+
+def _stage_and_swap(source: Path, target: Path, *, prefer_symlink: bool) -> str:
+    """Build the new skill next to the target, then swap it in. The previous
+    install is only displaced once the replacement is complete, and is restored
+    if the swap fails."""
+    temp_root = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
+    staged = temp_root / "staged"
+    backup = temp_root / "backup"
+    mode: str | None = None
+    try:
+        if prefer_symlink:
+            try:
+                staged.symlink_to(source, target_is_directory=True)
+                mode = "symlink"
+            except OSError:
+                pass
+        if mode is None:
+            shutil.copytree(source, staged)
+            _write_sync_marker(staged, source)
+            mode = "copy"
+        if target.exists() or target.is_symlink():
+            target.replace(backup)
+        staged.replace(target)
+    except Exception:
+        if not (target.exists() or target.is_symlink()) and (backup.exists() or backup.is_symlink()):
+            backup.replace(target)
+        raise
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
+    return mode
+
+
+def _freshness_stamp_path() -> Path:
+    cache_root = _path_from_env("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return cache_root / "smith" / _FRESHNESS_STAMP_NAME
+
+
+def _freshness_check_due(stamp: Path) -> bool:
+    try:
+        age = time.time() - stamp.stat().st_mtime
+    except OSError:
+        return True
+    return age >= _FRESHNESS_INTERVAL_SECONDS or age < 0
+
+
+def _refresh_or_hint(target: Path, source: Path | None) -> None:
+    result = None
+    if source is not None:
+        try:
+            result = sync_skill(source_dir=source, target_dir=target)
+        except Exception:
+            result = None
+    if result is not None and result.ok:
+        print(f"smith: refreshed agent skill at {target}", file=sys.stderr)
+    else:
+        print(f"smith: agent skill at {target} may be out of date; {_STALE_SKILL_HINT}", file=sys.stderr)
+
+
+def ensure_skill_fresh(command_id: str | None = None) -> None:
+    """Refresh a stale skill install at most once a day. Must never break the CLI."""
+    try:
+        _ensure_skill_fresh(command_id)
+    except Exception:  # pragma: no cover - defensive guard around CLI startup
+        pass
+
+
+def _ensure_skill_fresh(command_id: str | None) -> None:
+    if os.getenv("SMITH_SKILL_CHECK", "").strip() == "0":
+        return
+    if command_id in _FRESHNESS_EXEMPT_COMMANDS:
+        return
+
+    target = default_skill_target_dir()
+    # Only refresh installs that already exist; installing the skill is an
+    # explicit choice made via `smith skill sync` or `smith config init`.
+    if not target.exists() and not target.is_symlink():
+        return
+
+    stamp = _freshness_stamp_path()
+    if not _freshness_check_due(stamp):
+        return
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.touch()
+
+    if target.is_symlink():
+        # A working symlink is left alone even when it does not point at the
+        # resolvable source: developers deliberately link to a repo checkout,
+        # and Homebrew links track upgrades via the opt path on their own.
+        if target.exists():
+            return
+        _refresh_or_hint(target, resolve_skill_source_dir())
+        return
+
+    marker = _read_sync_marker(target)
+    source = resolve_skill_source_dir()
+    if source is None and marker is not None:
+        recorded = Path(str(marker.get("source") or "")).expanduser()
+        if str(recorded) != "." and recorded.exists():
+            source = recorded
+
+    if source is not None:
+        if skill_target_points_to_source(target, source):
+            return
+        if marker is None:
+            # Without the sync marker the directory is not known to be
+            # smith-managed; never delete content smith did not write.
+            print(f"smith: agent skill at {target} may be out of date; {_STALE_SKILL_HINT}", file=sys.stderr)
+            return
+        _refresh_or_hint(target, source)
+        return
+
+    if marker is not None and marker.get("version") not in (None, _installed_version()):
+        print(f"smith: agent skill at {target} may be out of date; {_STALE_SKILL_HINT}", file=sys.stderr)

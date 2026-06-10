@@ -70,6 +70,34 @@ def test_sync_skill_preserves_existing_target_when_copy_fails(monkeypatch: Any, 
     assert existing.read_text(encoding="utf-8") == "existing"
 
 
+def test_sync_skill_via_cli_returns_false_when_smith_missing(monkeypatch: Any, tmp_path: Path) -> None:
+    install = _load_install_module()
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+
+    assert install.sync_skill_via_cli(tmp_path / "skills" / "smith") is False
+
+
+def test_sync_skill_via_cli_runs_skill_sync_with_source_env(monkeypatch: Any, tmp_path: Path) -> None:
+    install = _load_install_module()
+    source = tmp_path / "skills" / "smith"
+    calls: list[tuple[list[str], dict[str, str]]] = []
+
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/local/bin/smith")
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> _Result:
+        calls.append((cmd, kwargs["env"]))
+        return _Result()
+
+    monkeypatch.setattr(install.subprocess, "run", _fake_run)
+
+    assert install.sync_skill_via_cli(source) is True
+    assert calls == [(["/usr/local/bin/smith", "skill", "sync"], calls[0][1])]
+    assert calls[0][1]["SMITH_SKILL_SOURCE_DIR"] == str(source)
+
+
 def test_install_refuses_existing_non_git_directory(monkeypatch: Any, tmp_path: Path, capsys: Any) -> None:
     install = _load_install_module()
     repo_dir = tmp_path / "smith"
