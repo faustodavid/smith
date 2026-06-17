@@ -34,7 +34,7 @@ dev = [
   "types-requests==2.33.0.20260327"
 ]
 bench = [
-  "aiohttp>=3.14.0",
+  "aiohttp>=3.14.1",
   "httpx>=0.28.1",
   "mcp>=1.26.0",
   "openai-agents>=0.13.2",
