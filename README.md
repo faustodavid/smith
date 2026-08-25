@@ -1,3 +1,5 @@
+
+
 <div align="center">
 
 # Smith
@@ -59,6 +61,8 @@ brew install faustodavid/tap/smith
 
 <details>
 <summary>Other install options (standalone installer, Windows)</summary>
+
+The installer requires `uv`, `git`, and `rg` (ripgrep).
 
 Standalone installer:
 
