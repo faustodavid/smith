@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from smith.benchmark.constants import BENCHMARK_GITHUB_ORG_DISPLAY
 from smith.benchmark.smith_cli import InProcessSmithCliRunner, execute_smith_cli_command
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="smith-benchmark",
     instructions=f"Expose a single read-only Smith CLI tool scoped to the {BENCHMARK_GITHUB_ORG_DISPLAY} GitHub organization.",
     log_level="ERROR",
@@ -17,7 +18,10 @@ _RUNNER = InProcessSmithCliRunner()
 def smith_cli(command: str) -> str:
     """Run a read-only Smith command against GitHub repositories in the OpenAI org."""
 
-    return execute_smith_cli_command(command, runner=_RUNNER)
+    try:
+        return execute_smith_cli_command(command, runner=_RUNNER)
+    except (ValueError, RuntimeError) as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def main() -> None:
