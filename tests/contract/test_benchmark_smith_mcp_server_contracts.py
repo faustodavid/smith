@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
+import pytest
+from mcp import Client, ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from mcp.types import TextContent
 from tests.support import GitHubApiStubServer, StubRequest, StubResponse
 
 from smith.benchmark import smith_mcp_server
@@ -21,6 +28,51 @@ def _benchmark_env(*, base_url: str) -> dict[str, str]:
         "GITHUB_TIMEOUT_SECONDS": "5",
         "GITHUB_RATE_LIMIT_MAX_SLEEP_SECONDS": "10",
     }
+
+
+@pytest.mark.asyncio
+async def test_benchmark_smith_mcp_server_stdio_contract() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "smith.benchmark.smith_mcp_server"],
+        cwd=repo_root,
+        env={"PYTHONPATH": str(repo_root / "src"), "SMITH_CONFIG": "", "SMITH_SKILL_CHECK": "0"},
+    )
+    async with asyncio.timeout(30), stdio_client(parameters) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            initialized = await session.initialize()
+            assert initialized.server_info.name == "smith-benchmark"
+
+            tools = (await session.list_tools()).tools
+            assert [tool.name for tool in tools] == ["smith_cli"]
+            assert tools[0].input_schema["required"] == ["command"]
+            assert tools[0].input_schema["properties"]["command"]["type"] == "string"
+
+            result = await session.call_tool("smith_cli", {"command": "code search --help"})
+            assert not result.is_error
+            assert any(isinstance(item, TextContent) and "usage:" in item.text for item in result.content)
+
+            blocked = await session.call_tool("smith_cli", {"command": "config list"})
+            assert blocked.is_error
+            assert any(isinstance(item, TextContent) and "only allows" in item.text for item in blocked.content)
+
+            invalid = await session.call_tool("smith_cli", {})
+            assert invalid.is_error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
+async def test_benchmark_smith_mcp_server_preserves_expected_errors(monkeypatch, error_type) -> None:
+    def fail_command(command: str, *, runner) -> str:
+        raise error_type("Smith command failed")
+
+    monkeypatch.setattr(smith_mcp_server, "execute_smith_cli_command", fail_command)
+    async with asyncio.timeout(10), Client(smith_mcp_server.mcp, raise_exceptions=True) as client:
+        result = await client.call_tool("smith_cli", {"command": "code search needle"})
+
+    assert result.is_error
+    assert any(isinstance(item, TextContent) and "Smith command failed" in item.text for item in result.content)
 
 
 def test_benchmark_smith_mcp_server_shares_backpressure_across_concurrent_calls(

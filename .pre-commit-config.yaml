@@ -1,16 +1,17 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.8
+    rev: v0.16.5
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
+  - repo: local
     hooks:
       - id: mypy
+        name: mypy
+        entry: uv run --locked --all-extras mypy
+        language: system
+        types: [python]
         args: [--config-file=pyproject.toml, src]
         pass_filenames: false
-        additional_dependencies:
-          - types-requests==2.33.0.20260327
