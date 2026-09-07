@@ -253,12 +253,10 @@ class InProcessSmithCliRunner:
         *,
         env: dict[str, str] | None = None,
     ) -> str:
-        run_env = self._build_run_env(env=env)
-        tokens = validate_smith_cli_command(command, env=run_env)
-        cache_key = (tuple(tokens), tuple(sorted((env or {}).items())), run_env.get("SMITH_CONFIG", ""))
-        if cache_key in self._success_cache:
-            return self._success_cache[cache_key]
         with self._lock:
+            run_env = self._build_run_env(env=env)
+            tokens = validate_smith_cli_command(command, env=run_env)
+            cache_key = (tuple(tokens), tuple(sorted((env or {}).items())), run_env.get("SMITH_CONFIG", ""))
             cached = self._success_cache.get(cache_key)
             if cached is not None:
                 return cached
